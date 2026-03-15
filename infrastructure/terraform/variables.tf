@@ -9,13 +9,11 @@ variable "ccp_host" {
 variable "ccp_safe" {
   description = "PAM Safe containing the Proxmox API token object."
   type        = string
-  default     = "HLB-Hypervisor-Root"
 }
 
 variable "ccp_object" {
   description = "PAM account object name for the Proxmox API token."
   type        = string
-  default     = "proxmox-api-token"
 }
 
 # ---------------------------------------------------------------------------
@@ -50,7 +48,6 @@ variable "template_vm_id" {
 variable "network_bridge" {
   description = "Proxmox Linux bridge for VM NICs (e.g. vmbr0)."
   type        = string
-  default     = "vmbr0"
 }
 
 variable "network_vlan" {
@@ -81,7 +78,6 @@ variable "dns_servers" {
 variable "search_domain" {
   description = "DNS search domain for VMs."
   type        = string
-  default     = "home.arpa"
 }
 
 # ---------------------------------------------------------------------------
