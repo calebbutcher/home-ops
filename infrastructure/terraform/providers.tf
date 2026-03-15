@@ -62,9 +62,9 @@ data "http" "ccp_proxmox" {
 }
 
 locals {
-  _ccp             = jsondecode(data.http.ccp_proxmox.response_body)
-  proxmox_token_id = local._ccp.UserName    # e.g. "terraform@pve!home-ops"
-  proxmox_token_secret = local._ccp.Content # the raw secret
+  _ccp                 = jsondecode(data.http.ccp_proxmox.response_body)
+  proxmox_token_id     = trimspace(local._ccp.UserName)  # e.g. "terraform@pve!home-ops"
+  proxmox_token_secret = trimspace(local._ccp.Content)   # strip any trailing whitespace/newline
 }
 
 provider "proxmox" {
