@@ -1,0 +1,130 @@
+# =============================================================================
+# home-ops — root .gitignore
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Secrets & credentials — never commit these
+# -----------------------------------------------------------------------------
+*.age
+*.key
+*.pem
+*.p12
+*.pfx
+secrets.yaml
+secrets.yml
+secrets.json
+secrets.env
+*.secret
+.env
+.env.*
+!.env.example
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+
+# SOPS — encrypted files are fine (*.sops.*), but never the plaintext versions
+*.dec.yaml
+*.dec.yml
+*.dec.json
+*.decrypted.*
+
+# Age private key (default location if accidentally copied into repo)
+.config/
+keys.txt
+
+# SSH private keys
+id_rsa
+id_ed25519
+id_ecdsa
+id_dsa
+
+# -----------------------------------------------------------------------------
+# Terraform
+# -----------------------------------------------------------------------------
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.auto.tfvars
+!terraform.tfvars
+
+# -----------------------------------------------------------------------------
+# Kubernetes / Flux
+# -----------------------------------------------------------------------------
+# Local cluster output files
+*.kubeconfig
+kubeconfig
+
+# Helm chart dependencies fetched locally
+charts/
+
+# Flux bootstrap secrets (generated locally, stored in cluster)
+flux-system/gotk-components.yaml
+
+# -----------------------------------------------------------------------------
+# Ansible (future)
+# -----------------------------------------------------------------------------
+*.retry
+inventory/hosts.generated
+.vault_pass
+vault_pass.txt
+
+# -----------------------------------------------------------------------------
+# OS
+# -----------------------------------------------------------------------------
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# -----------------------------------------------------------------------------
+# Editors & IDEs
+# -----------------------------------------------------------------------------
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*.swn
+*.bak
+*.orig
+.cache/
+
+# -----------------------------------------------------------------------------
+# Temporary / build artifacts
+# -----------------------------------------------------------------------------
+tmp/
+temp/
+*.tmp
+*.log
+*.out
+dist/
+build/
+
+# Cloud image files (downloaded by create-ubuntu-template.sh)
+*.img
+*.qcow2
+*.vmdk
+*.iso
