@@ -9,3 +9,8 @@ creation_rules:
   - path_regex: kubernetes/.*\.sops\.yaml$
     age: >-
       age1wcyzl9vjwakzxtxzw2qupn5332q7kpe8j4zyz434dcx2frqwd58qeutllz
+
+  # Test files like source.env
+  - path_regex: .*(\.sops)?\.(yaml|yml|json|env)$
+    age: >-
+      age1wcyzl9vjwakzxtxzw2qupn5332q7kpe8j4zyz434dcx2frqwd58qeutllz
