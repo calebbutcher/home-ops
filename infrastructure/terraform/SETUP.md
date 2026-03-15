@@ -14,7 +14,7 @@ Before running Terraform, ensure your workstation can reach:
 
 - **CyberArk CCP**: `https://cyb-ccp-01.int.nerdbox.dev` (HTTPS/443)
 - **Proxmox API**: `https://pve-r630-01.infra.nerdbox.dev:8006` (HTTPS/8006)
-- **k8s subnet**: `10.10.20.0/24` (SSH/22 for post-apply validation)
+- **k8s subnet**: `10.2.169.0/24` (SSH/22 for post-apply validation)
 
 ---
 
@@ -80,26 +80,18 @@ Copy the token secret — it is only shown once.
 
 In CyberArk PAM: **Applications → Add Application**
 
-- App ID: your chosen name (e.g. `home-ops-terraform`)
+- App ID: `home-ops-terraform`
 - Add authentication method (e.g. machine certificate or allowed machine list for your workstation IP)
 
 ### 2. Create the Account Object
 
-In the safe `HLB-Hypervisor-Root`, create an account:
+In the safe `ProxmoxAPI`, create an account:
 
 | Field | Value |
 |-------|-------|
 | Username | `terraform@pve!home-ops` |
 | Password (Content) | `<token secret from step above>` |
 | Object name | `proxmox-api-token` |
-
-### 3. Update providers.tf
-
-Replace `PLACEHOLDER-APP-ID` on line 47 of `providers.tf` with your App ID:
-
-```hcl
-url = "https://${var.ccp_host}/AIMWebService/api/Accounts?AppID=home-ops-terraform&Safe=..."
-```
 
 ---
 
@@ -113,9 +105,9 @@ These values were set based on best-guess defaults. Confirm each before applying
 | `storage_pool` | `local-lvm` | Proxmox UI → Datacenter → Storage |
 | `template_vm_id` | `9000` | Proxmox UI → VM list; the cloud-init template VM ID |
 | `network_bridge` | `vmbr0` | Proxmox UI → node → Network |
-| `network_vlan` | `20` | VLAN tag for the `10.10.20.0/24` subnet |
-| `gateway` | `10.10.20.1` | pfSense/router IP on VLAN 20 |
-| `dns_servers` | `["10.10.20.1"]` | DNS resolver for VMs (pfSense or internal resolver) |
+| `network_vlan` | `169` | VLAN tag for the `10.2.169.0/24` subnet |
+| `gateway` | `10.2.169.1` | pfSense/router IP on VLAN 169 |
+| `dns_servers` | `["10.1.30.250", "10.1.30.251"]` | Internal DNS resolvers |
 
 ---
 

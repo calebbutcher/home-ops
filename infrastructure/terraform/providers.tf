@@ -46,7 +46,7 @@ terraform {
 # Replace PLACEHOLDER-APP-ID with your CCP App ID after creating it in PAM.
 # ---------------------------------------------------------------------------
 data "http" "ccp_proxmox" {
-  url = "https://${var.ccp_host}/AIMWebService/api/Accounts?AppID=PLACEHOLDER-APP-ID&Safe=${var.ccp_safe}&Object=${var.ccp_object}"
+  url = "https://${var.ccp_host}/AIMWebService/api/Accounts?AppID=home-ops-terraform&Safe=${var.ccp_safe}&Object=${var.ccp_object}"
 
   request_headers = {
     Accept = "application/json"
