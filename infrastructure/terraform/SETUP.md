@@ -129,8 +129,9 @@ terraform validate
 # 4. Preview changes — requires CCP reachable and App ID set
 terraform plan
 
-# 5. Apply
-terraform apply
+# 5. Apply — use parallelism=2 to avoid concurrent datastore lock contention
+#    (Proxmox serialises full-clone disk ops; all 6 VMs at once causes timeouts)
+terraform apply -parallelism=2
 ```
 
 ## After Apply
