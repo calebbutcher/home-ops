@@ -34,16 +34,16 @@ ssh_public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDTaxQXMUKHBBGSixCm1L9ljg
 # Kubernetes — control plane (3 nodes for HA etcd)
 # ---------------------------------------------------------------------------
 control_plane_nodes = {
-  "k8s-cp-01" = { ip = "10.2.169.11", vcpus = 2, memory_mb = 4096, disk_gb = 40 }
-  "k8s-cp-02" = { ip = "10.2.169.12", vcpus = 2, memory_mb = 4096, disk_gb = 40 }
-  "k8s-cp-03" = { ip = "10.2.169.13", vcpus = 2, memory_mb = 4096, disk_gb = 40 }
+  "k3s-ctl-01" = { ip = "10.2.169.11", vcpus = 2, memory_mb = 4096, disk_gb = 40 }
+  "k3s-ctl-02" = { ip = "10.2.169.12", vcpus = 2, memory_mb = 4096, disk_gb = 40 }
+  "k3s-ctl-03" = { ip = "10.2.169.13", vcpus = 2, memory_mb = 4096, disk_gb = 40 }
 }
 
 # ---------------------------------------------------------------------------
 # Kubernetes — workers
 # ---------------------------------------------------------------------------
 worker_nodes = {
-  "k8s-wk-01" = { ip = "10.2.169.21", vcpus = 4, memory_mb = 8192, disk_gb = 80 }
-  "k8s-wk-02" = { ip = "10.2.169.22", vcpus = 4, memory_mb = 8192, disk_gb = 80 }
-  "k8s-wk-03" = { ip = "10.2.169.23", vcpus = 4, memory_mb = 8192, disk_gb = 80 }
+  "k3s-wrk-01" = { ip = "10.2.169.21", vcpus = 4, memory_mb = 8192, disk_gb = 80 }
+  "k3s-wrk-02" = { ip = "10.2.169.22", vcpus = 4, memory_mb = 8192, disk_gb = 80 }
+  "k3s-wrk-03" = { ip = "10.2.169.23", vcpus = 4, memory_mb = 8192, disk_gb = 80 }
 }
