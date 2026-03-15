@@ -18,7 +18,6 @@ resource "proxmox_virtual_environment_vm" "control_plane" {
   protection = false
 
   on_boot = true
-  started = true
 
   cpu {
     cores   = each.value.vcpus
@@ -50,11 +49,12 @@ resource "proxmox_virtual_environment_vm" "control_plane" {
     type = var.vm_os_type
   }
 
-  # Agent must be installed in the template; started=true ensures the VM
-  # boots after cloning so the agent can respond and confirm creation.
+  # Agent must be installed in the template. timeout caps the poll so
+  # Terraform does not hang indefinitely if the agent is slow to respond.
   agent {
     enabled = true
     trim    = true
+    timeout = 90
   }
 
   # cloud-init
@@ -103,7 +103,6 @@ resource "proxmox_virtual_environment_vm" "worker" {
 
   protection = false
   on_boot    = true
-  started    = true
 
   cpu {
     cores   = each.value.vcpus
@@ -138,6 +137,7 @@ resource "proxmox_virtual_environment_vm" "worker" {
   agent {
     enabled = true
     trim    = true
+    timeout = 90
   }
 
   initialization {
@@ -169,4 +169,47 @@ resource "proxmox_virtual_environment_vm" "worker" {
       clone,
     ]
   }
+}
+
+# ---------------------------------------------------------------------------
+# Explicit VM start — work around bpg/proxmox not reliably issuing qm start
+# during full clone when started=true is set on the resource.
+# ---------------------------------------------------------------------------
+resource "null_resource" "start_control_plane" {
+  for_each = var.control_plane_nodes
+
+  triggers = {
+    vm_id = proxmox_virtual_environment_vm.control_plane[each.key].id
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      curl -sf -k -X POST \
+        -H "Authorization: PVEAPIToken=${local.proxmox_token_id}=${local.proxmox_token_secret}" \
+        "https://${var.proxmox_host}:8006/api2/json/nodes/${var.proxmox_node}/qemu/${self.triggers.vm_id}/status/start" || true
+    EOT
+  }
+
+  depends_on = [proxmox_virtual_environment_vm.control_plane]
+}
+
+resource "null_resource" "start_worker" {
+  for_each = var.worker_nodes
+
+  triggers = {
+    vm_id = proxmox_virtual_environment_vm.worker[each.key].id
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      curl -sf -k -X POST \
+        -H "Authorization: PVEAPIToken=${local.proxmox_token_id}=${local.proxmox_token_secret}" \
+        "https://${var.proxmox_host}:8006/api2/json/nodes/${var.proxmox_node}/qemu/${self.triggers.vm_id}/status/start" || true
+    EOT
+  }
+
+  depends_on = [
+    proxmox_virtual_environment_vm.worker,
+    null_resource.start_control_plane,
+  ]
 }
