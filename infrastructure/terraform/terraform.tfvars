@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 ccp_host   = "cyb-ccp-01.int.nerdbox.dev" # VERIFY: CCP appliance hostname/IP
 ccp_safe   = "ProxmoxAPI"          # Must match the safe created in PAM
-ccp_object = "proxmox-api-token"   # Must match the account object name in PAM
+ccp_object = "terraformprovisioner"   # Must match the account object name in PAM
 
 # ---------------------------------------------------------------------------
 # Proxmox
@@ -13,7 +13,7 @@ proxmox_tls_insecure = true                            # Set false once you have
 proxmox_node         = "pve-r630-01"                  # VERIFY: output of `pvesh get /nodes | grep node`
 storage_pool         = "local-lvm"      # VERIFY: pool shown in Proxmox → Datacenter → Storage
 template_vm_id       = 9000             # VERIFY: VM ID of your cloud-init template
-network_bridge       = "vmbr0"          # VERIFY: bridge used for your lab VLAN
+network_bridge       = "vmbr1"          # VERIFY: bridge used for your lab VLAN
 network_vlan         = 169              # VERIFY: VLAN tag for the k8s subnet; null = untagged
 
 # ---------------------------------------------------------------------------
