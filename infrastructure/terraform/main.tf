@@ -54,7 +54,7 @@ resource "proxmox_virtual_environment_vm" "control_plane" {
   agent {
     enabled = true
     trim    = true
-    timeout = 90
+    timeout = "90s"
   }
 
   # cloud-init
@@ -137,7 +137,7 @@ resource "proxmox_virtual_environment_vm" "worker" {
   agent {
     enabled = true
     trim    = true
-    timeout = 90
+    timeout = "90s"
   }
 
   initialization {
