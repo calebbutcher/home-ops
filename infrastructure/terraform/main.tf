@@ -18,6 +18,7 @@ resource "proxmox_virtual_environment_vm" "control_plane" {
   protection = false
 
   on_boot = true
+  started = true
 
   cpu {
     cores   = each.value.vcpus
@@ -49,7 +50,8 @@ resource "proxmox_virtual_environment_vm" "control_plane" {
     type = var.vm_os_type
   }
 
-  # Agent must be installed in the template
+  # Agent must be installed in the template; started=true ensures the VM
+  # boots after cloning so the agent can respond and confirm creation.
   agent {
     enabled = true
     trim    = true
@@ -101,6 +103,7 @@ resource "proxmox_virtual_environment_vm" "worker" {
 
   protection = false
   on_boot    = true
+  started    = true
 
   cpu {
     cores   = each.value.vcpus
