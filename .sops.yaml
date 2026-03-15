@@ -3,9 +3,9 @@ creation_rules:
   # Encrypt all .sops.yaml and secrets files with Age
   - path_regex: .*.sops\.(yaml|yml|json|env)$
     age: >-
-      PLACEHOLDER-AGE-PUBLIC-KEY
+      age1wcyzl9vjwakzxtxzw2qupn5332q7kpe8j4zyz434dcx2frqwd58qeutllz
 
   # Kubernetes secrets managed by Flux
   - path_regex: kubernetes/.*\.sops\.yaml$
     age: >-
-      PLACEHOLDER-AGE-PUBLIC-KEY
+      age1wcyzl9vjwakzxtxzw2qupn5332q7kpe8j4zyz434dcx2frqwd58qeutllz
