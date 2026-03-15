@@ -75,13 +75,6 @@ resource "proxmox_virtual_environment_vm" "control_plane" {
     }
   }
 
-  timeouts {
-    create = "15m"
-    read   = "5m"
-    update = "10m"
-    delete = "5m"
-  }
-
   lifecycle {
     ignore_changes = [
       # Prevent drift from in-place cloud-init changes after first apply
@@ -166,13 +159,6 @@ resource "proxmox_virtual_environment_vm" "worker" {
   # Wait for all control-plane VMs before starting workers to reduce
   # concurrent datastore lock contention during full clones.
   depends_on = [proxmox_virtual_environment_vm.control_plane]
-
-  timeouts {
-    create = "15m"
-    read   = "5m"
-    update = "10m"
-    delete = "5m"
-  }
 
   lifecycle {
     ignore_changes = [
