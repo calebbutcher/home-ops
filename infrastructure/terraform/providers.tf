@@ -1,3 +1,23 @@
+# ---------------------------------------------------------------------------
+# State backend: local (default) — state is stored in terraform.tfstate on
+# your workstation and is not committed to git.
+#
+# To migrate to remote state later (recommended for team/multi-machine setups),
+# add a backend block here, e.g.:
+#
+#   backend "s3" {
+#     bucket                      = "terraform-state"
+#     key                         = "home-ops/kubernetes/terraform.tfstate"
+#     region                      = "us-east-1"
+#     endpoint                    = "https://minio.infra.nerdbox.dev"
+#     skip_credentials_validation = true
+#     skip_metadata_api_check     = true
+#     skip_region_validation      = true
+#     force_path_style            = true
+#   }
+#
+# Then run: terraform init -migrate-state
+# ---------------------------------------------------------------------------
 terraform {
   required_version = ">= 1.6.0"
 
