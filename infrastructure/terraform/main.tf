@@ -18,6 +18,7 @@ resource "proxmox_virtual_environment_vm" "control_plane" {
   protection = false
 
   on_boot = true
+  started  = true
 
   cpu {
     cores   = each.value.vcpus
@@ -49,10 +50,11 @@ resource "proxmox_virtual_environment_vm" "control_plane" {
     type = var.vm_os_type
   }
 
-  # Agent must be installed in the template. timeout caps the poll so
-  # Terraform does not hang indefinitely if the agent is slow to respond.
+  # Disable agent polling — bpg/proxmox ~> 0.66 does not reliably honour the
+  # timeout, causing Terraform to hang forever waiting for a guest agent
+  # response. Static IPs are assigned via cloud-init so agent is not needed.
   agent {
-    enabled = true
+    enabled = false
     trim    = true
     timeout = "90s"
   }
@@ -103,6 +105,7 @@ resource "proxmox_virtual_environment_vm" "worker" {
 
   protection = false
   on_boot    = true
+  started    = true
 
   cpu {
     cores   = each.value.vcpus
@@ -134,8 +137,9 @@ resource "proxmox_virtual_environment_vm" "worker" {
     type = var.vm_os_type
   }
 
+  # Disable agent polling — same fix as control_plane nodes.
   agent {
-    enabled = true
+    enabled = false
     trim    = true
     timeout = "90s"
   }
