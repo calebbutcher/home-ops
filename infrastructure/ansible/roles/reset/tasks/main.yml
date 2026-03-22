@@ -1,0 +1,66 @@
+---
+- name: Disable k3s service
+  ansible.builtin.systemd:
+    name: k3s
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Disable k3s-node service
+  ansible.builtin.systemd:
+    name: k3s-node
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Run k3s-killall script (if present)
+  ansible.builtin.command: /usr/local/bin/k3s-killall.sh
+  failed_when: false
+  changed_when: true
+
+- name: Run k3s-uninstall script (servers)
+  ansible.builtin.command: /usr/local/bin/k3s-uninstall.sh
+  failed_when: false
+  changed_when: true
+
+- name: Run k3s-agent-uninstall script (workers)
+  ansible.builtin.command: /usr/local/bin/k3s-agent-uninstall.sh
+  failed_when: false
+  changed_when: true
+
+- name: Remove k3s data directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/rancher/k3s
+    - /var/lib/rancher/k3s
+    - /var/lib/kubelet
+    - /tmp/k3s
+
+- name: Remove k3s systemd unit files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ systemd_dir }}/k3s.service"
+    - "{{ systemd_dir }}/k3s-node.service"
+    - "{{ systemd_dir }}/k3s-init.service"
+
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Remove kubeconfig
+  ansible.builtin.file:
+    path: ~{{ ansible_user }}/.kube
+    state: absent
+
+- name: Remove symlinks
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  failed_when: false
+  loop:
+    - /usr/local/bin/kubectl
+    - /usr/local/bin/crictl

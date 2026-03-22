@@ -1,0 +1,28 @@
+---
+# k3s kubectl alias
+k3s_server_location: /usr/local/bin/k3s
+
+# master group name
+group_name_master: master
+
+# kube-vip version
+kube_vip_tag_version: v0.8.7
+
+# metallb versions
+metal_lb_speaker_tag_version: v0.14.8
+metal_lb_controller_tag_version: v0.14.8
+
+# max retries for node-join wait
+retry_count: 20
+
+# systemd unit directory
+systemd_dir: /etc/systemd/system
+
+# server init args — first master uses --cluster-init, others join via the first master's IP
+server_init_args: >-
+  {% if groups[group_name_master][0] == inventory_hostname %}
+  --cluster-init
+  {% else %}
+  --server https://{{ hostvars[groups[group_name_master][0]]['ansible_host'] | default(groups[group_name_master][0]) }}:6443
+  {% endif %}
+  {{ extra_server_args | default('') }}

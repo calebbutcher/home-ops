@@ -1,0 +1,88 @@
+---
+k3s_version: v1.31.4+k3s1
+# user that has ssh access to the nodes
+ansible_user: ops
+systemd_dir: /etc/systemd/system
+
+# set your timezone
+system_timezone: America/Chicago
+
+# interface used for node IP detection and CNI
+flannel_iface: ens18
+
+# uncomment to use cilium cni instead of flannel
+# ensure v4.19.57, v5.1.16, v5.2.0 or more recent kernel
+cilium_iface: "ens18"
+cilium_mode: native  # native when nodes on same subnet
+cilium_tag: v1.16.6
+cilium_hubble: true  # enable hubble observability relay and ui
+
+# cluster pod cidr pool (used with cilium)
+cluster_cidr: 10.52.0.0/16
+
+# cilium bgp disabled — using MetalLB for service LBs
+cilium_bgp: false
+
+# enable kube-vip ARP broadcasts (control plane VIP only)
+kube_vip_arp: true
+kube_vip_bgp: false
+
+# apiserver_endpoint is the virtual IP configured on each master for HA
+apiserver_endpoint: 10.2.169.10
+
+# k3s_token is required so masters can talk together securely
+# this token should be alphanumeric only
+# IMPORTANT: change this before running, or use ansible-vault to encrypt
+k3s_token: "CHANGEME_REPLACE_WITH_SECURE_TOKEN"
+
+# node IP is derived from the cilium_iface (ens18) address
+k3s_node_ip: "{{ ansible_facts[(cilium_iface | default(calico_iface | default(flannel_iface)))]['ipv4']['address'] }}"
+
+# taint masters if worker nodes are present
+k3s_master_taint: "{{ true if groups['node'] | default([]) | length >= 1 else false }}"
+
+# extra args applied to both servers and agents
+extra_args: >-
+  --node-ip={{ k3s_node_ip }}
+
+# server args: flannel disabled (cilium handles networking), no kube-proxy, tls-san for VIP
+extra_server_args: >-
+  {{ extra_args }}
+  {{ '--node-taint node-role.kubernetes.io/master=true:NoSchedule' if k3s_master_taint else '' }}
+  --flannel-backend=none
+  --disable-network-policy
+  --cluster-cidr={{ cluster_cidr | default('10.52.0.0/16') }}
+  --disable-kube-proxy
+  --tls-san {{ apiserver_endpoint }}
+  --disable servicelb
+  --disable traefik
+
+extra_agent_args: >-
+  {{ extra_args }}
+
+# kube-vip version (handles API server VIP only — MetalLB handles service LBs)
+kube_vip_tag_version: v0.8.7
+
+# NOTE: kube_vip_lb_ip_range is intentionally NOT set.
+# This ensures kube-vip only manages the control plane VIP.
+# MetalLB (below) handles all LoadBalancer service IPs.
+# Setting both causes an IP assignment conflict with Cilium.
+
+# metallb type: native or frr
+metal_lb_type: native
+
+# metallb mode: layer2 or bgp
+metal_lb_mode: layer2
+
+# metallb versions
+metal_lb_speaker_tag_version: v0.14.8
+metal_lb_controller_tag_version: v0.14.8
+
+# metallb IP range for LoadBalancer services (within VLAN 169 subnet)
+metal_lb_ip_range: 10.2.169.100-10.2.169.200
+
+# proxmox lxc — disabled, we use full VMs
+proxmox_lxc_configure: false
+
+# custom container registry mirror — disabled
+custom_registries: false

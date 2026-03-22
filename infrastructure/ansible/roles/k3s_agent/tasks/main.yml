@@ -1,0 +1,15 @@
+---
+- name: Copy k3s agent service file
+  ansible.builtin.template:
+    src: k3s-node.service.j2
+    dest: "{{ systemd_dir }}/k3s-node.service"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Enable and start k3s-node
+  ansible.builtin.systemd:
+    name: k3s-node
+    daemon_reload: true
+    state: restarted
+    enabled: true

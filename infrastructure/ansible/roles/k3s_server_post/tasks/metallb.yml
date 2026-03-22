@@ -1,0 +1,47 @@
+---
+- name: Create /tmp/k3s directory
+  ansible.builtin.file:
+    path: /tmp/k3s
+    state: directory
+    mode: "0755"
+
+- name: Apply MetalLB manifest
+  ansible.builtin.command: >-
+    k3s kubectl apply -f
+    https://raw.githubusercontent.com/metallb/metallb/{{ metal_lb_controller_tag_version }}/config/manifests/metallb-{{ metal_lb_type }}.yaml
+  changed_when: true
+
+- name: Wait for MetalLB controller to be ready
+  ansible.builtin.command: >-
+    k3s kubectl rollout status deployment/controller -n metallb-system --timeout=300s
+  changed_when: false
+  retries: 5
+  delay: 10
+
+- name: Wait for MetalLB webhook to be ready
+  ansible.builtin.command: >-
+    k3s kubectl wait --namespace metallb-system
+    --for=condition=ready pod
+    --selector=component=controller
+    --timeout=300s
+  changed_when: false
+
+- name: Template MetalLB IPAddressPool
+  ansible.builtin.template:
+    src: metallb-ipaddresspool.yaml.j2
+    dest: /tmp/k3s/metallb-ipaddresspool.yaml
+    mode: "0644"
+
+- name: Template MetalLB L2Advertisement
+  ansible.builtin.template:
+    src: metallb-l2advertisement.yaml.j2
+    dest: /tmp/k3s/metallb-l2advertisement.yaml
+    mode: "0644"
+
+- name: Apply MetalLB IPAddressPool
+  ansible.builtin.command: k3s kubectl apply -f /tmp/k3s/metallb-ipaddresspool.yaml
+  changed_when: true
+
+- name: Apply MetalLB L2Advertisement
+  ansible.builtin.command: k3s kubectl apply -f /tmp/k3s/metallb-l2advertisement.yaml
+  changed_when: true
