@@ -1,0 +1,52 @@
+# Copy this file to terraform.tfvars and fill in your real values.
+# terraform.tfvars is gitignored — never commit it.
+
+# ---------------------------------------------------------------------------
+# CyberArk CCP
+# ---------------------------------------------------------------------------
+ccp_host   = "cyb-ccp-01.int.example.com" # your CCP appliance hostname/IP
+ccp_safe   = "ProxmoxAPI"                  # safe name created in PAM
+ccp_object = "terraformprovisioner"        # account object name in PAM
+
+# ---------------------------------------------------------------------------
+# Proxmox
+# ---------------------------------------------------------------------------
+proxmox_host         = "pve-node-01.infra.example.com" # your Proxmox node FQDN or IP
+proxmox_tls_insecure = true                             # set false once you have a valid cert
+proxmox_node         = "pve-node-01"                   # output of: pvesh get /nodes | grep node
+storage_pool         = "local-lvm"      # Proxmox → Datacenter → Storage
+template_vm_id       = 9000             # VM ID of your cloud-init template
+network_bridge       = "vmbr1"          # bridge used for your lab VLAN
+network_vlan         = 100              # VLAN tag for the k8s subnet; null = untagged
+
+# ---------------------------------------------------------------------------
+# Networking
+# ---------------------------------------------------------------------------
+gateway       = "192.168.100.1"              # router/firewall IP on this VLAN
+subnet_prefix = 24
+dns_servers   = ["192.168.1.53", "192.168.1.54"] # your internal DNS resolvers
+search_domain = "example.com"
+
+# ---------------------------------------------------------------------------
+# VM defaults
+# ---------------------------------------------------------------------------
+vm_username    = "ops"
+ssh_public_key = "ssh-ed25519 AAAA... your-key-comment"
+
+# ---------------------------------------------------------------------------
+# Kubernetes — control plane (3 nodes for HA etcd)
+# ---------------------------------------------------------------------------
+control_plane_nodes = {
+  "k3s-ctl-01" = { ip = "192.168.100.11", vcpus = 2, memory_mb = 4096, disk_gb = 40 }
+  "k3s-ctl-02" = { ip = "192.168.100.12", vcpus = 2, memory_mb = 4096, disk_gb = 40 }
+  "k3s-ctl-03" = { ip = "192.168.100.13", vcpus = 2, memory_mb = 4096, disk_gb = 40 }
+}
+
+# ---------------------------------------------------------------------------
+# Kubernetes — workers
+# ---------------------------------------------------------------------------
+worker_nodes = {
+  "k3s-wrk-01" = { ip = "192.168.100.21", vcpus = 4, memory_mb = 8192, disk_gb = 80 }
+  "k3s-wrk-02" = { ip = "192.168.100.22", vcpus = 4, memory_mb = 8192, disk_gb = 80 }
+  "k3s-wrk-03" = { ip = "192.168.100.23", vcpus = 4, memory_mb = 8192, disk_gb = 80 }
+}

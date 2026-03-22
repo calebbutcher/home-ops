@@ -53,7 +53,8 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 *.auto.tfvars
-!terraform.tfvars
+terraform.tfvars
+!terraform.tfvars.example
 
 # -----------------------------------------------------------------------------
 # Kubernetes / Flux
@@ -69,12 +70,16 @@ charts/
 flux-system/gotk-components.yaml
 
 # -----------------------------------------------------------------------------
-# Ansible (future)
+# Ansible
 # -----------------------------------------------------------------------------
 *.retry
 inventory/hosts.generated
 .vault_pass
 vault_pass.txt
+# Local secrets — gitignored, create from secrets.yml.example
+infrastructure/ansible/inventory/my-cluster/group_vars/all/secrets.yml
+# kubeconfig fetched by site.yml
+infrastructure/ansible/kubeconfig
 
 # -----------------------------------------------------------------------------
 # OS

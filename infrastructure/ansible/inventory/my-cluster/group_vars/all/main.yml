@@ -10,8 +10,7 @@ system_timezone: America/Chicago
 # interface used for node IP detection and CNI
 flannel_iface: ens18
 
-# uncomment to use cilium cni instead of flannel
-# ensure v4.19.57, v5.1.16, v5.2.0 or more recent kernel
+# cilium cni — ensure v4.19.57, v5.1.16, v5.2.0 or more recent kernel
 cilium_iface: "ens18"
 cilium_mode: native  # native when nodes on same subnet
 cilium_tag: v1.16.6
@@ -27,13 +26,22 @@ cilium_bgp: false
 kube_vip_arp: true
 kube_vip_bgp: false
 
-# apiserver_endpoint is the virtual IP configured on each master for HA
-apiserver_endpoint: 10.2.169.10
+# kube-vip version (handles API server VIP only — MetalLB handles service LBs)
+kube_vip_tag_version: v0.8.7
 
-# k3s_token is required so masters can talk together securely
-# this token should be alphanumeric only
-# IMPORTANT: change this before running, or use ansible-vault to encrypt
-k3s_token: "CHANGEME_REPLACE_WITH_SECURE_TOKEN"
+# NOTE: kube_vip_lb_ip_range is intentionally NOT set.
+# This ensures kube-vip only manages the control plane VIP.
+# MetalLB (below) handles all LoadBalancer service IPs.
+
+# metallb type: native or frr
+metal_lb_type: native
+
+# metallb mode: layer2 or bgp
+metal_lb_mode: layer2
+
+# metallb versions
+metal_lb_speaker_tag_version: v0.14.8
+metal_lb_controller_tag_version: v0.14.8
 
 # node IP is derived from the cilium_iface (ens18) address
 k3s_node_ip: "{{ ansible_facts[(cilium_iface | default(calico_iface | default(flannel_iface)))]['ipv4']['address'] }}"
@@ -59,27 +67,6 @@ extra_server_args: >-
 
 extra_agent_args: >-
   {{ extra_args }}
-
-# kube-vip version (handles API server VIP only — MetalLB handles service LBs)
-kube_vip_tag_version: v0.8.7
-
-# NOTE: kube_vip_lb_ip_range is intentionally NOT set.
-# This ensures kube-vip only manages the control plane VIP.
-# MetalLB (below) handles all LoadBalancer service IPs.
-# Setting both causes an IP assignment conflict with Cilium.
-
-# metallb type: native or frr
-metal_lb_type: native
-
-# metallb mode: layer2 or bgp
-metal_lb_mode: layer2
-
-# metallb versions
-metal_lb_speaker_tag_version: v0.14.8
-metal_lb_controller_tag_version: v0.14.8
-
-# metallb IP range for LoadBalancer services (within VLAN 169 subnet)
-metal_lb_ip_range: 10.2.169.100-10.2.169.200
 
 # proxmox lxc — disabled, we use full VMs
 proxmox_lxc_configure: false
