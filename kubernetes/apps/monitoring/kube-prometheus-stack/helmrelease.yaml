@@ -1,0 +1,156 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: kube-prometheus-stack
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      version: ">=65.0.0 <66.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: flux-system
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # -------------------------------------------------------------------------
+    # k3s compatibility — these components are embedded in k3s and either
+    # don't expose standard metrics ports or are replaced by Cilium
+    # -------------------------------------------------------------------------
+    kubeProxy:
+      enabled: false  # replaced by Cilium (disable-kube-proxy: true in our k3s config)
+
+    kubeControllerManager:
+      enabled: false  # embedded in k3s server process, not standalone
+
+    kubeScheduler:
+      enabled: false  # embedded in k3s server process, not standalone
+
+    kubeEtcd:
+      enabled: false  # k3s uses embedded etcd with non-standard cert paths
+
+    # -------------------------------------------------------------------------
+    # Prometheus
+    # -------------------------------------------------------------------------
+    prometheus:
+      service:
+        type: ClusterIP
+      prometheusSpec:
+        retention: 14d
+        retentionSize: "10GB"
+
+        # Allow Prometheus to scrape ServiceMonitors and PodMonitors from ALL
+        # namespaces — not just those created by this chart. Critical for
+        # picking up cert-manager, Cilium, and future app monitors.
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
+        ruleSelectorNilUsesHelmValues: false
+        probeSelectorNilUsesHelmValues: false
+
+        # No persistent storage for now — metrics live in memory/emptyDir.
+        # Add a PVC here when you want durable metric history across restarts.
+        storageSpec: {}
+
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 250m
+          limits:
+            memory: 2Gi
+            cpu: 1000m
+
+    # -------------------------------------------------------------------------
+    # Grafana
+    # -------------------------------------------------------------------------
+    grafana:
+      # Expose via MetalLB LoadBalancer so you can reach it directly
+      # without kubectl port-forward
+      service:
+        type: LoadBalancer
+
+      # Default credentials — change this or use a SOPS-encrypted secret
+      adminPassword: "admin"
+
+      persistence:
+        enabled: false  # dashboards are config-managed; metrics live in Prometheus
+
+      # Automatically provision Prometheus as a datasource
+      additionalDataSources: []
+
+      # Sidecar discovers ConfigMaps labelled grafana_dashboard: "1"
+      # and auto-imports them as dashboards
+      sidecar:
+        dashboards:
+          enabled: true
+          label: grafana_dashboard
+          labelValue: "1"
+          searchNamespace: ALL
+
+      resources:
+        requests:
+          memory: 128Mi
+          cpu: 100m
+        limits:
+          memory: 512Mi
+          cpu: 500m
+
+    # -------------------------------------------------------------------------
+    # Alertmanager
+    # -------------------------------------------------------------------------
+    alertmanager:
+      service:
+        type: ClusterIP
+      alertmanagerSpec:
+        storage: {}  # no persistence for now
+        resources:
+          requests:
+            memory: 64Mi
+            cpu: 50m
+          limits:
+            memory: 256Mi
+            cpu: 200m
+
+    # -------------------------------------------------------------------------
+    # Node exporter — runs on every node, collects CPU/memory/disk/network
+    # -------------------------------------------------------------------------
+    prometheus-node-exporter:
+      resources:
+        requests:
+          memory: 32Mi
+          cpu: 50m
+        limits:
+          memory: 128Mi
+          cpu: 200m
+
+    # -------------------------------------------------------------------------
+    # kube-state-metrics — emits metrics about Kubernetes object state
+    # (pod restarts, deployment replicas, resource requests/limits, etc.)
+    # -------------------------------------------------------------------------
+    kube-state-metrics:
+      resources:
+        requests:
+          memory: 64Mi
+          cpu: 50m
+        limits:
+          memory: 256Mi
+          cpu: 200m
+
+    # -------------------------------------------------------------------------
+    # Kubelet and CoreDNS — DO work in k3s
+    # -------------------------------------------------------------------------
+    kubelet:
+      enabled: true
+
+    coreDns:
+      enabled: true
