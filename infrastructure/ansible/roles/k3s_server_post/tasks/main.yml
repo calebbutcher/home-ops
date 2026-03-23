@@ -1,0 +1,20 @@
+---
+- name: Deploy Cilium CNI
+  ansible.builtin.include_tasks: cilium.yml
+  when:
+    - cilium_iface is defined
+    - ansible_hostname == hostvars[groups[group_name_master | default('master')][0]]['ansible_hostname']
+  tags: cilium
+
+- name: Deploy MetalLB
+  ansible.builtin.include_tasks: metallb.yml
+  when:
+    - kube_vip_lb_ip_range is not defined
+    - cilium_bgp is not defined or not cilium_bgp
+    - ansible_hostname == hostvars[groups[group_name_master | default('master')][0]]['ansible_hostname']
+  tags: metallb
+
+- name: Cleanup /tmp/k3s
+  ansible.builtin.file:
+    path: /tmp/k3s
+    state: absent
