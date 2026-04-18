@@ -1,5 +1,5 @@
 ---
-apiVersion: helm.toolkit.fluxcd.io/v2beta2
+apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: kube-prometheus-stack
@@ -79,8 +79,9 @@ spec:
       service:
         type: LoadBalancer
 
-      # Default credentials — change this or use a SOPS-encrypted secret
-      adminPassword: "admin"
+      admin:
+        existingSecret: grafana-admin-secret
+        passwordKey: admin-password
 
       persistence:
         enabled: false  # dashboards are config-managed; metrics live in Prometheus
