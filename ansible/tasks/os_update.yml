@@ -1,0 +1,64 @@
+---
+# Shared OS update + reboot-detection tasks.
+# Supports Debian (Ubuntu) and RedHat (Rocky Linux) family hosts.
+#
+# Variables (pass via --extra-vars or play vars):
+#   reboot (bool, default false) — reboot host if a reboot is signalled as required
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_os_family == "Debian"
+
+- name: Upgrade all packages (apt)
+  ansible.builtin.apt:
+    upgrade: dist
+    autoremove: true
+    autoclean: true
+  when: ansible_os_family == "Debian"
+
+- name: Upgrade all packages (dnf)
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+    update_cache: true
+  when: ansible_os_family == "RedHat"
+
+- name: Check reboot-required flag (Debian)
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: _reboot_flag
+  when: ansible_os_family == "Debian"
+
+- name: Check needs-restarting (RedHat)
+  ansible.builtin.command: needs-restarting -r
+  register: _needs_restarting
+  changed_when: false
+  failed_when: false
+  when: ansible_os_family == "RedHat"
+
+- name: Set reboot_needed fact
+  ansible.builtin.set_fact:
+    reboot_needed: >-
+      {{
+        (_reboot_flag.stat.exists | default(false))
+        if ansible_os_family == "Debian"
+        else (_needs_restarting.rc | default(0)) == 1
+      }}
+
+- name: Report reboot status
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} — {{ 'REBOOT REQUIRED' if reboot_needed else 'no reboot needed' }}
+
+- name: Reboot if required and reboot=true
+  ansible.builtin.reboot:
+    reboot_command: "{{ custom_reboot_command | default(omit) }}"
+    msg: "Rebooting after OS updates"
+    pre_reboot_delay: 5
+    post_reboot_delay: 30
+    reboot_timeout: 300
+  when:
+    - reboot | default(false) | bool
+    - reboot_needed | bool

@@ -1,0 +1,40 @@
+---
+# Rolling OS update playbook — Ubuntu (apt) and Rocky Linux (dnf)
+#
+# Usage:
+#   ansible-playbook update.yml                          # update only, no reboots
+#   ansible-playbook update.yml -e reboot=true           # update + reboot where needed
+#   ansible-playbook update.yml --limit master           # control plane only
+#   ansible-playbook update.yml --limit node             # workers only
+#   ansible-playbook update.yml --limit standalone_vms   # standalone VMs only
+#   ansible-playbook update.yml -e serial=2              # override rolling batch size
+
+- name: Update k3s control plane nodes
+  hosts: master
+  serial: "{{ serial | default(1) }}"
+  become: true
+  gather_facts: true
+  environment: "{{ proxy_env | default({}) }}"
+  tasks:
+    - name: Run OS update tasks
+      ansible.builtin.import_tasks: tasks/os_update.yml
+
+- name: Update k3s worker nodes
+  hosts: node
+  serial: "{{ serial | default(1) }}"
+  become: true
+  gather_facts: true
+  environment: "{{ proxy_env | default({}) }}"
+  tasks:
+    - name: Run OS update tasks
+      ansible.builtin.import_tasks: tasks/os_update.yml
+
+- name: Update standalone VMs
+  hosts: standalone_vms
+  serial: "{{ serial | default(1) }}"
+  become: true
+  gather_facts: true
+  environment: "{{ proxy_env | default({}) }}"
+  tasks:
+    - name: Run OS update tasks
+      ansible.builtin.import_tasks: tasks/os_update.yml

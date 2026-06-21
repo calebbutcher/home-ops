@@ -133,3 +133,5 @@ build/
 *.qcow2
 *.vmdk
 *.iso
+
+hosts.ini
