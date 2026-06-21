@@ -11,10 +11,10 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - grafana.home.nerdbox.dev
+        - grafana.int.nerdbox.dev
       secretName: grafana-tls
   rules:
-    - host: grafana.home.nerdbox.dev
+    - host: grafana.int.nerdbox.dev
       http:
         paths:
           - path: /
