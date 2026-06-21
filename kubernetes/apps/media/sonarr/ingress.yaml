@@ -21,6 +21,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: sonarr-app
+                name: sonarr
                 port:
                   number: 8989

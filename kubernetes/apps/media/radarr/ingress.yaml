@@ -21,6 +21,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: radarr-app
+                name: radarr
                 port:
                   number: 7878
