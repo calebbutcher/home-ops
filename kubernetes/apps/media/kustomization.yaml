@@ -6,6 +6,8 @@ resources:
   - helmrepository.yaml
   - nfs-pv.yaml
   - nfs-pvc.yaml
+  - downloads-pv.yaml
+  - downloads-pvc.yaml
   - sonarr/helmrelease.yaml
   - sonarr/pvc.yaml
   - sonarr/ingress.yaml
