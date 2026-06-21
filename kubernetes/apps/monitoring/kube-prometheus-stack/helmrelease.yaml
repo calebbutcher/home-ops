@@ -74,10 +74,8 @@ spec:
     # Grafana
     # -------------------------------------------------------------------------
     grafana:
-      # Expose via MetalLB LoadBalancer so you can reach it directly
-      # without kubectl port-forward
       service:
-        type: LoadBalancer
+        type: ClusterIP
 
       admin:
         existingSecret: grafana-admin-secret

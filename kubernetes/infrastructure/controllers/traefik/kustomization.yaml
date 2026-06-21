@@ -4,6 +4,4 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - helmrepository.yaml
-  - grafana-admin.sops.yaml
-  - grafana-ingress.yaml
-  - kube-prometheus-stack/helmrelease.yaml
+  - helmrelease.yaml

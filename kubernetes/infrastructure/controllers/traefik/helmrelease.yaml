@@ -1,0 +1,58 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: traefik
+  namespace: traefik
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: traefik
+      version: ">=32.0.0 <33.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: traefik
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    service:
+      type: LoadBalancer
+
+    ports:
+      web:
+        port: 80
+        redirectTo:
+          port: websecure
+      websecure:
+        port: 443
+
+    # cert-manager handles all certificates — built-in ACME disabled
+    certificatesResolvers: {}
+
+    providers:
+      kubernetesCRD:
+        allowCrossNamespacedIngresses: true
+      kubernetesIngress:
+        publishedService:
+          enabled: true
+
+    metrics:
+      prometheus:
+        entryPoint: metrics
+        serviceMonitor:
+          enabled: true
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+      limits:
+        cpu: 300m
+        memory: 128Mi
