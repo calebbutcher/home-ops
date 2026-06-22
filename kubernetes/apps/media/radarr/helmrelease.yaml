@@ -58,4 +58,5 @@ spec:
       downloads:
         existingClaim: downloads-nfs
         globalMounts:
-          - path: /downloads
+          - path: /data
+            subPath: delugevpn/data
