@@ -17,3 +17,6 @@ resources:
   - prowlarr/helmrelease.yaml
   - prowlarr/pvc.yaml
   - prowlarr/ingress.yaml
+  - seerr/helmrelease.yaml
+  - seerr/pvc.yaml
+  - seerr/ingress.yaml
