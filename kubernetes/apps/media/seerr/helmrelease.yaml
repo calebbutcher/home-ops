@@ -48,4 +48,4 @@ spec:
       config:
         existingClaim: seerr-config
         globalMounts:
-          - path: /config
+          - path: /app/config
