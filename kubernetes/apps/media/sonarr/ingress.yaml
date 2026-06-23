@@ -11,10 +11,21 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - sonarr-staging.int.nerdbox.dev
+        - sonarr.int.nerdbox.dev
+        - sonarr.nerdbox.dev
       secretName: sonarr-tls
   rules:
-    - host: sonarr-staging.int.nerdbox.dev
+    - host: sonarr.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sonarr
+                port:
+                  number: 8989
+    - host: sonarr.nerdbox.dev
       http:
         paths:
           - path: /

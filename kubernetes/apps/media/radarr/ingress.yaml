@@ -11,10 +11,21 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - radarr-staging.int.nerdbox.dev
+        - radarr.int.nerdbox.dev
+        - radarr.nerdbox.dev
       secretName: radarr-tls
   rules:
-    - host: radarr-staging.int.nerdbox.dev
+    - host: radarr.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: radarr
+                port:
+                  number: 7878
+    - host: radarr.nerdbox.dev
       http:
         paths:
           - path: /
