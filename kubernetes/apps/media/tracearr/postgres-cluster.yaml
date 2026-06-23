@@ -1,0 +1,27 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: tracearr-postgres
+  namespace: media
+spec:
+  instances: 1
+  imageName: ghcr.io/clevyr/cloudnativepg-timescale:17-ts2
+  storage:
+    size: 10Gi
+    storageClass: local-path
+  postgresql:
+    shared_preload_libraries:
+      - timescaledb
+  bootstrap:
+    initdb:
+      database: tracearr
+      owner: tracearr
+      postInitApplicationSQL:
+        - CREATE EXTENSION IF NOT EXISTS timescaledb;
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
