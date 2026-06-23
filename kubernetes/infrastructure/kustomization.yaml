@@ -7,4 +7,5 @@ resources:
   - controllers/snapshot-controller
   - controllers/volsync
   - controllers/cloudnative-pg
+  - controllers/cnpg-barman-plugin
   - configs
