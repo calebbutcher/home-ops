@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: app-template
-      version: ">=3.0.0 <4.0.0"
+      version: "3.7.3"
       sourceRef:
         kind: HelmRepository
         name: bjw-s
@@ -28,7 +28,9 @@ spec:
           app:
             image:
               repository: seerr/seerr
-              tag: latest
+              # seerr only publishes a moving `latest` tag (no semver releases),
+              # so it is pinned by immutable digest; Renovate bumps the digest via PR.
+              tag: latest@sha256:c92d2dc117f62185e7bcb88cd56efd374ea79210eaf433275449e8d5988eb5a8
             env:
               TZ: "UTC"
             resources:

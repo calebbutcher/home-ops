@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: app-template
-      version: ">=3.0.0 <4.0.0"
+      version: "3.7.3"
       sourceRef:
         kind: HelmRepository
         name: bjw-s
@@ -28,7 +28,7 @@ spec:
           app:
             image:
               repository: lscr.io/linuxserver/prowlarr
-              tag: latest
+              tag: 2.4.0.5397-ls150
             env:
               PUID: "1000"
               PGID: "1000"

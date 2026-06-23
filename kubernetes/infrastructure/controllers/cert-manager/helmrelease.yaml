@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: cert-manager
-      version: "v1.16.x"
+      version: "v1.16.5"
       sourceRef:
         kind: HelmRepository
         name: cert-manager

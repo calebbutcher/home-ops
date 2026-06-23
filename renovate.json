@@ -1,0 +1,40 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":enablePreCommit",
+    "helpers:pinGitHubActionDigestsToSemver"
+  ],
+  "timezone": "America/Chicago",
+  "schedule": ["before 6am on monday"],
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Renovate Dependency Dashboard",
+  "labels": ["renovate"],
+  "rebaseWhen": "conflicted",
+  "pinDigests": true,
+  "flux": {
+    "managerFilePatterns": ["/(^|/)kubernetes/.+\\.ya?ml$/"]
+  },
+  "helm-values": {
+    "managerFilePatterns": ["/(^|/)kubernetes/.+\\.ya?ml$/"]
+  },
+  "packageRules": [
+    {
+      "description": "Never auto-merge anything — every update is reviewed and merged by hand",
+      "matchManagers": ["flux", "helm-values", "helmv3", "github-actions"],
+      "automerge": false
+    },
+    {
+      "description": "Separate PRs for major vs minor/patch so breaking changes stand out",
+      "matchUpdateTypes": ["major"],
+      "labels": ["renovate", "type/major"]
+    },
+    {
+      "description": "Group app-template (bjw-s) chart bumps across the media apps",
+      "matchPackageNames": ["app-template"],
+      "groupName": "app-template (bjw-s)"
+    }
+  ]
+}
