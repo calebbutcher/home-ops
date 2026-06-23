@@ -6,4 +6,5 @@ resources:
   - controllers/traefik
   - controllers/snapshot-controller
   - controllers/volsync
+  - controllers/cloudnative-pg
   - configs
