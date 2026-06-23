@@ -80,6 +80,46 @@ k3s server \
 Then restart k3s on that node and rejoin the other servers. See the k3s docs on
 cluster reset for the multi-server rejoin sequence.
 
+> **Token caveat:** a snapshot can only be restored with the **server token that
+> was in effect when it was taken**. Snapshots predating a token rotation need
+> the old token; keep retired tokens in the password manager until their
+> snapshots age out.
+
+## Rotate the k3s cluster token
+
+The cluster token encrypts etcd bootstrap data and authorises node joins. Rotate
+it if it leaks (e.g. was committed in plaintext). **Do not** just change
+`k3s_token` and re-run the playbook — the server role re-invokes `k3s-init`,
+which is unsafe on a live cluster. Use k3s's built-in rotation and roll it
+node-by-node:
+
+1. **Save both tokens** (old + new) to the password manager. Existing snapshots
+   need the old one.
+2. On one server: `sudo k3s token rotate --token <old> --new-token <new>`.
+   This re-encrypts the bootstrap data; nodes keep running on the old key until
+   restarted.
+3. **Servers** read their token from `/var/lib/rancher/k3s/server/token` (the
+   persistent `k3s.service` has no `--token`). For each server, one at a time,
+   write the new token to config and restart:
+   ```bash
+   sudo tee /etc/rancher/k3s/config.yaml >/dev/null <<EOF
+   token: "<new>"
+   EOF
+   sudo systemctl restart k3s
+   ```
+   Verify `EtcdIsVoter=True` + `Ready=True` before moving on
+   (`kubectl get node <name> -o jsonpath='{.status.conditions[*].type}'`).
+   Do the rotate node last.
+4. **Agents** have `--token` hardcoded in `/etc/systemd/system/k3s-node.service`
+   (the agent unit is `k3s-node`, not `k3s`). Get the authoritative new token
+   from a server (`sudo cat /var/lib/rancher/k3s/server/node-token`), then on
+   each worker edit that `--token` value (keep the trailing backslash),
+   `systemctl daemon-reload && systemctl restart k3s-node`.
+5. Take a fresh snapshot keyed to the new token:
+   `sudo k3s etcd-snapshot save --name post-token-rotation`.
+6. Update `k3s_token` in the Ansible inventory (ansible-vaulted) so future
+   playbook runs use the new token; never commit it in plaintext.
+
 ## Full disaster recovery (rebuild from scratch)
 
 1. **Restore the age key** to `~/.config/sops/age/keys.txt` from the password
