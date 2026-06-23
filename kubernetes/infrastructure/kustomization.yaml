@@ -4,4 +4,5 @@ kind: Kustomization
 resources:
   - controllers/cert-manager
   - controllers/traefik
+  - controllers/volsync
   - configs
