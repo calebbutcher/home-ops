@@ -61,6 +61,30 @@ RustFS (S3-compatible object storage) runs on the TrueNAS at
 3. Wait for the mover job to complete (`kubectl get replicationdestination -n media`).
 4. Remove the `ReplicationDestination`, scale the app back up, resume the HR.
 
+## etcd snapshots: where they go
+
+k3s auto-snapshots etcd twice daily on each control node. Snapshots are written
+locally (`/var/lib/rancher/k3s/server/db/snapshots/`) **and** uploaded to RustFS
+(`s3://etcd-snapshots`).
+
+The offsite config currently lives in `/etc/rancher/k3s/config.yaml` on each
+control node (root-only, holds the RustFS keys), applied directly + `systemctl
+restart k3s` — not via Ansible, because re-running the server play re-invokes
+`k3s-init` (unsafe on a live cluster). The Ansible `etcd_s3_enabled` toggle in
+`group_vars/all.yml` stays `false` until the RustFS creds are ansible-vaulted;
+once vaulted, flip it to `true` so Ansible is the source of truth again. The
+relevant config.yaml keys:
+
+```yaml
+etcd-s3: true
+etcd-s3-endpoint: "10.2.40.10:30292"
+etcd-s3-bucket: "etcd-snapshots"
+etcd-s3-access-key: "<key>"
+etcd-s3-secret-key: "<secret>"
+etcd-s3-insecure: true            # http endpoint
+etcd-snapshot-retention: 14
+```
+
 ## Restore: etcd (cluster-level disaster)
 
 On a control node, with the cluster stopped:
