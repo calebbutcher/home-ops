@@ -1,0 +1,22 @@
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: tracearr-postgres-store
+  namespace: media
+spec:
+  retentionPolicy: "14d"
+  configuration:
+    destinationPath: s3://postgres-backups/
+    endpointURL: http://10.2.40.10:30292
+    s3Credentials:
+      accessKeyId:
+        name: cnpg-rustfs-creds
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: cnpg-rustfs-creds
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip

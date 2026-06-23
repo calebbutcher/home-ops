@@ -21,7 +21,10 @@ resources:
   - seerr/pvc.yaml
   - seerr/ingress.yaml
   - tracearr/secret.sops.yaml
+  - tracearr/backup-secret.sops.yaml
+  - tracearr/postgres-objectstore.yaml
   - tracearr/postgres-cluster.yaml
+  - tracearr/postgres-scheduledbackup.yaml
   - tracearr/pvc.yaml
   - tracearr/helmrelease.yaml
   - tracearr/ingress.yaml
