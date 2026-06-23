@@ -11,6 +11,7 @@
   "schedule": ["before 6am on monday"],
   "dependencyDashboard": true,
   "dependencyDashboardTitle": "Renovate Dependency Dashboard",
+  "ignorePaths": ["ansible/**", "infrastructure/**"],
   "labels": ["renovate"],
   "rebaseWhen": "conflicted",
   "pinDigests": true,
