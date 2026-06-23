@@ -51,7 +51,7 @@ apiserver_endpoint: 10.2.169.10
 
 # k3s_token is required  masters can talk together securely
 # this token should be alpha numeric only
-k3s_token: some-SUPER-DEDEUPER-secret-password
+# Defined (age-encrypted) in group_vars/all/secrets.sops.yaml
 
 # The IP on which the node is reachable in the cluster.
 # Here, a sensible default is provided, you can still override
@@ -68,11 +68,12 @@ extra_args: >-
 
 # --- etcd snapshot offsite copy (RustFS / S3-compatible object storage) ---
 # Ships k3s etcd snapshots to object storage in addition to the local copy on
-# each control node. Opt-in: flip etcd_s3_enabled to true and supply the
-# credentials out-of-band (ansible-vault or --extra-vars) as
-# vault_s3_access_key / vault_s3_secret_key — never commit them in plaintext.
-# Applying requires re-running the k3s_server play (restarts the control plane).
-etcd_s3_enabled: false
+# each control node. Credentials (vault_s3_access_key / vault_s3_secret_key)
+# are age-encrypted in group_vars/all/secrets.sops.yaml.
+# NOTE: the live cluster is already configured via /etc/rancher/k3s/config.yaml
+# on each control node. Re-running the k3s_server play to apply these flags
+# restarts the control plane (re-invokes k3s-init) — do that deliberately.
+etcd_s3_enabled: true
 etcd_s3_endpoint: "10.2.40.10:30292"
 etcd_s3_bucket: etcd-snapshots
 etcd_snapshot_retention: 14
