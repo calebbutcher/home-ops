@@ -9,13 +9,13 @@ recover it.
 | State | Mechanism | Destination |
 | --- | --- | --- |
 | Desired state (manifests, HelmReleases) | Git | GitHub |
-| App config PVCs (`*-config` in `media`) | VolSync (restic) | MinIO `volsync` bucket on NAS |
-| etcd (cluster runtime state) | k3s `--etcd-s3` snapshots | MinIO `etcd-snapshots` bucket + local on each control node |
+| App config PVCs (`*-config` in `media`) | VolSync (restic) | RustFS `volsync` bucket on NAS |
+| etcd (cluster runtime state) | k3s `--etcd-s3` snapshots | RustFS `etcd-snapshots` bucket + local on each control node |
 | Media / downloads | NAS-level (out of scope here) | NAS `mainPool` |
 | SOPS age key | **Manual / offline** | Password manager + offline copy |
 
-MinIO runs on the TrueNAS (`10.2.40.10`), intentionally independent of the
-cluster it protects.
+RustFS (S3-compatible object storage) runs on the TrueNAS at
+`10.2.40.10:30292`, intentionally independent of the cluster it protects.
 
 ## Critical secrets (the things that make recovery possible)
 
@@ -24,10 +24,10 @@ cluster it protects.
    Without it, every `*.sops.yaml` in Git is permanently undecryptable.
    **Store it in the password manager and keep one offline copy.**
 2. **Restic repository password(s)** — in the VolSync secret
-   (`kubernetes/apps/media/backup/minio-secret.sops.yaml`). Without it the
-   restic repos cannot be opened even with MinIO access. Store in the password
+   (`kubernetes/apps/media/backup/s3-secret.sops.yaml`). Without it the restic
+   repos cannot be opened even with RustFS access. Store in the password
    manager.
-3. **MinIO access/secret keys** — used by both VolSync and k3s etcd-s3.
+3. **RustFS access/secret keys** — used by both VolSync and k3s etcd-s3.
 4. **`k3s_token`** — must live in the ansible-vaulted secrets file, never
    committed in plaintext.
 
@@ -70,7 +70,7 @@ k3s server \
   --cluster-reset \
   --cluster-reset-restore-path=<snapshot> \
   --etcd-s3 \
-  --etcd-s3-endpoint=10.2.40.10:9000 \
+  --etcd-s3-endpoint=10.2.40.10:30292 \
   --etcd-s3-bucket=etcd-snapshots \
   --etcd-s3-access-key=<key> \
   --etcd-s3-secret-key=<secret> \
@@ -85,11 +85,11 @@ cluster reset for the multi-server rejoin sequence.
 1. **Restore the age key** to `~/.config/sops/age/keys.txt` from the password
    manager.
 2. Re-provision nodes and install k3s via the Ansible playbook
-   (`ansible/`). Restore etcd from the MinIO snapshot if preserving cluster
+   (`ansible/`). Restore etcd from the RustFS snapshot if preserving cluster
    identity, or start fresh.
 3. **`flux bootstrap`** against this Git repo — Flux reconciles all
    infrastructure and apps, decrypting secrets with the restored age key.
-4. VolSync ReplicationSources come up; restore each `*-config` PVC from MinIO
+4. VolSync ReplicationSources come up; restore each `*-config` PVC from RustFS
    via the per-app `ReplicationDestination` procedure above before/while the
    apps start.
 
@@ -97,6 +97,6 @@ cluster reset for the multi-server rejoin sequence.
 
 - `kubectl get replicationsource -n media` → `LAST SYNC` recent for all four.
 - `kubectl get etcdsnapshotfiles.k3s.cattle.io` → entries with `s3://` locations.
-- Objects present in MinIO `volsync` and `etcd-snapshots` buckets.
+- Objects present in RustFS `volsync` and `etcd-snapshots` buckets.
 - Periodically run a restore drill (restore `seerr-config` into a scratch PVC
   and confirm `db/db.sqlite3` + `settings.json` are intact).

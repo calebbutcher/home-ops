@@ -66,6 +66,17 @@ extra_args: >-
   {{ '--flannel-iface=' + flannel_iface if calico_iface is not defined and cilium_iface is not defined else '' }}
   --node-ip={{ k3s_node_ip }}
 
+# --- etcd snapshot offsite copy (RustFS / S3-compatible object storage) ---
+# Ships k3s etcd snapshots to object storage in addition to the local copy on
+# each control node. Opt-in: flip etcd_s3_enabled to true and supply the
+# credentials out-of-band (ansible-vault or --extra-vars) as
+# vault_s3_access_key / vault_s3_secret_key — never commit them in plaintext.
+# Applying requires re-running the k3s_server play (restarts the control plane).
+etcd_s3_enabled: false
+etcd_s3_endpoint: "10.2.40.10:30292"
+etcd_s3_bucket: etcd-snapshots
+etcd_snapshot_retention: 14
+
 # change these to your liking, the only required are: --disable servicelb, --tls-san {{ apiserver_endpoint }}
 # the contents of the if block is also required if using calico or cilium
 extra_server_args: >-
@@ -79,6 +90,15 @@ extra_server_args: >-
   --tls-san {{ apiserver_endpoint }}
   --disable servicelb
   --disable traefik
+  {% if etcd_s3_enabled %}
+  --etcd-s3
+  --etcd-s3-endpoint {{ etcd_s3_endpoint }}
+  --etcd-s3-bucket {{ etcd_s3_bucket }}
+  --etcd-s3-access-key {{ vault_s3_access_key }}
+  --etcd-s3-secret-key {{ vault_s3_secret_key }}
+  --etcd-s3-insecure
+  --etcd-snapshot-retention {{ etcd_snapshot_retention }}
+  {% endif %}
 
 extra_agent_args: >-
   {{ extra_args }}
