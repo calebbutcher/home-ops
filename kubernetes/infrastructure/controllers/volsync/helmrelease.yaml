@@ -6,6 +6,9 @@ metadata:
   namespace: volsync-system
 spec:
   interval: 30m
+  dependsOn:
+    - name: snapshot-controller
+      namespace: snapshot-controller
   chart:
     spec:
       chart: volsync
