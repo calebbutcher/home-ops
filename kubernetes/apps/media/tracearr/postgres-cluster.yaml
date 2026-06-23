@@ -18,7 +18,10 @@ spec:
       database: tracearr
       owner: tracearr
       postInitApplicationSQL:
-        - CREATE EXTENSION IF NOT EXISTS timescaledb;
+        # The clevyr 17-ts2 image's control file defaults to a timescaledb
+        # version whose install script is not shipped, so pin to the highest
+        # version actually present in the image.
+        - CREATE EXTENSION IF NOT EXISTS timescaledb VERSION '2.19.3';
   resources:
     requests:
       cpu: 100m
