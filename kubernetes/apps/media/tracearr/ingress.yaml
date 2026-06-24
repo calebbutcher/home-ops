@@ -22,7 +22,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: tracearr
+                name: tracearr-app
                 port:
                   number: 3000
     - host: tracearr.nerdbox.dev
@@ -32,6 +32,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: tracearr
+                name: tracearr-app
                 port:
                   number: 3000
