@@ -11,10 +11,10 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - prowlarr-staging.int.nerdbox.dev
+        - prowlarr.int.nerdbox.dev
       secretName: prowlarr-tls
   rules:
-    - host: prowlarr-staging.int.nerdbox.dev
+    - host: prowlarr.int.nerdbox.dev
       http:
         paths:
           - path: /
