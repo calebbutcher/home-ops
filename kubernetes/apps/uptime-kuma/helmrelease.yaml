@@ -1,0 +1,60 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: uptime-kuma
+  namespace: uptime-kuma
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: ">=3.0.0 <4.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      uptime-kuma:
+        containers:
+          app:
+            image:
+              repository: louislam/uptime-kuma
+              tag: "2.4.0"
+            env:
+              TZ: UTC
+              UPTIME_KUMA_DB_TYPE: mariadb
+              UPTIME_KUMA_DB_HOSTNAME: uptime-kuma-mariadb
+              UPTIME_KUMA_DB_PORT: "3306"
+              UPTIME_KUMA_DB_NAME: uptimekuma
+              UPTIME_KUMA_DB_USERNAME: uptimekuma
+              UPTIME_KUMA_DB_PASSWORD:
+                valueFrom:
+                  secretKeyRef:
+                    name: uptime-kuma-mariadb
+                    key: app-password
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                memory: 512Mi
+    service:
+      app:
+        controller: uptime-kuma
+        ports:
+          http:
+            port: 3001
+    persistence:
+      data:
+        existingClaim: uptime-kuma-data
+        globalMounts:
+          - path: /app/data
