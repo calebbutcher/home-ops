@@ -5,3 +5,4 @@ resources:
   - monitoring
   - media
   - tools
+  - uptime-kuma

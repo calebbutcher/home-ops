@@ -1,0 +1,40 @@
+---
+apiVersion: k8s.mariadb.com/v1alpha1
+kind: Backup
+metadata:
+  name: uptime-kuma-mariadb
+  namespace: uptime-kuma
+spec:
+  mariaDbRef:
+    name: uptime-kuma-mariadb
+  schedule:
+    cron: "0 2 * * *"
+    suspend: false
+  timeZone: "UTC"
+  maxRetention: 336h # 14 days
+  compression: gzip
+  storage:
+    s3:
+      bucket: mariadb-backups
+      prefix: uptime-kuma
+      endpoint: 10.2.40.10:30292
+      region: us-east-1
+      accessKeyIdSecretKeyRef:
+        name: mariadb-rustfs-creds
+        key: access-key-id
+      secretAccessKeySecretKeyRef:
+        name: mariadb-rustfs-creds
+        key: secret-access-key
+      tls:
+        enabled: false
+  stagingStorage:
+    persistentVolumeClaim:
+      storageClassName: local-path
+      resources:
+        requests:
+          storage: 2Gi
+      accessModes:
+        - ReadWriteOnce
+  args:
+    - --single-transaction
+    - --verbose
