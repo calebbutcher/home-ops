@@ -1,0 +1,33 @@
+---
+apiVersion: k8s.mariadb.com/v1alpha1
+kind: MariaDB
+metadata:
+  name: uptime-kuma-mariadb
+  namespace: uptime-kuma
+spec:
+  image: mariadb:11.4
+  rootPasswordSecretKeyRef:
+    name: uptime-kuma-mariadb
+    key: root-password
+  username: uptimekuma
+  passwordSecretKeyRef:
+    name: uptime-kuma-mariadb
+    key: app-password
+  database: uptimekuma
+  port: 3306
+  storage:
+    size: 2Gi
+    storageClassName: local-path
+  tls:
+    enabled: false
+  myCnf: |
+    [mariadb]
+    default_storage_engine=InnoDB
+    innodb_buffer_pool_size=256M
+    max_allowed_packet=256M
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
