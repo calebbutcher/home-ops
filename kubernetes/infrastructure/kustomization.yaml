@@ -8,4 +8,5 @@ resources:
   - controllers/volsync
   - controllers/cloudnative-pg
   - controllers/cnpg-barman-plugin
+  - controllers/mariadb-operator
   - configs
