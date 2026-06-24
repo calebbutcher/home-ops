@@ -11,6 +11,7 @@ recover it.
 | Desired state (manifests, HelmReleases) | Git | GitHub |
 | App config PVCs (`*-config` in `media`) | VolSync (restic) | RustFS `volsync` bucket on NAS |
 | etcd (cluster runtime state) | k3s `--etcd-s3` snapshots | RustFS `etcd-snapshots` bucket + local on each control node |
+| Postgres (CNPG clusters) | barman-cloud plugin (base backup + WAL archive, PITR) | RustFS `postgres-backups` bucket |
 | Media / downloads | NAS-level (out of scope here) | NAS `mainPool` |
 | SOPS age key | **Manual / offline** | Password manager + offline copy |
 
@@ -103,6 +104,35 @@ k3s server \
 
 Then restart k3s on that node and rejoin the other servers. See the k3s docs on
 cluster reset for the multi-server rejoin sequence.
+
+## Restore: CNPG Postgres (point-in-time)
+
+Postgres runs under the **CloudNativePG** operator (`cnpg-system`), one cluster
+per app (e.g. `tracearr-postgres` in `media`). Backups go to RustFS
+`s3://postgres-backups/` via the **barman-cloud plugin** (base backups +
+continuous WAL archiving = PITR). The `ObjectStore`, plugin wiring, and a daily
+`ScheduledBackup` live alongside each app (e.g. `kubernetes/apps/media/tracearr/`).
+
+To restore, bootstrap a **new** Cluster that recovers from the ObjectStore — do
+not restore in place. Outline:
+
+```yaml
+spec:
+  bootstrap:
+    recovery:
+      source: tracearr-postgres
+      # recoveryTarget:           # optional PITR target
+      #   targetTime: "2026-06-24 00:00:00+00"
+  externalClusters:
+    - name: tracearr-postgres
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: tracearr-postgres-store
+```
+
+Then repoint the app at the new cluster's `-rw` service / `-app` secret. See the
+CloudNativePG recovery docs for the full bootstrap-from-objectstore flow.
 
 > **Token caveat:** a snapshot can only be restored with the **server token that
 > was in effect when it was taken**. Snapshots predating a token rotation need
