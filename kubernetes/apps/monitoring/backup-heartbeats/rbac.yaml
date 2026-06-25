@@ -1,0 +1,33 @@
+---
+# Read-only across namespaces + cluster-scoped (etcdsnapshotfile is cluster-scoped), so a
+# ClusterRole/ClusterRoleBinding rather than per-namespace Roles.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: backup-heartbeat-reader
+rules:
+  - apiGroups: ["volsync.backube"]
+    resources: ["replicationsources"]
+    verbs: ["get", "list"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["backups"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list"]
+  - apiGroups: ["k3s.cattle.io"]
+    resources: ["etcdsnapshotfiles"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: backup-heartbeat-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: backup-heartbeat-reader
+subjects:
+  - kind: ServiceAccount
+    name: backup-heartbeat
+    namespace: monitoring
