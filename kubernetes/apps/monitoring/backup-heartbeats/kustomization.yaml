@@ -1,8 +1,10 @@
 ---
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# Applies to the generated ConfigMap too (cluster-scoped RBAC is skipped automatically).
-namespace: monitoring
+# NOTE: do NOT set a top-level `namespace:` here — the namespace transformer rewrites
+# metadata.namespace on every resource, including the SOPS-encrypted secret, which corrupts
+# its MAC and makes Flux's decryptor fail. Other resources hardcode their namespace; the
+# generated ConfigMap gets one via the generator's own `namespace` field below.
 resources:
   - serviceaccount.yaml
   - rbac.yaml
@@ -11,6 +13,7 @@ resources:
 
 configMapGenerator:
   - name: backup-heartbeat-script
+    namespace: monitoring
     files:
       - check.sh
 
