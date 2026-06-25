@@ -12,6 +12,7 @@ recover it.
 | App config PVCs (`*-config` in `media`) | VolSync (restic) | RustFS `volsync` bucket on NAS |
 | etcd (cluster runtime state) | k3s `--etcd-s3` snapshots | RustFS `etcd-snapshots` bucket + local on each control node |
 | Postgres (CNPG clusters) | barman-cloud plugin (base backup + WAL archive, PITR) | RustFS `postgres-backups` bucket |
+| MariaDB (mariadb-operator) | native `Backup` CR (nightly `mariadb-dump` → S3) | RustFS `mariadb-backups` bucket |
 | Media / downloads | NAS-level (out of scope here) | NAS `mainPool` |
 | SOPS age key | **Manual / offline** | Password manager + offline copy |
 
@@ -139,6 +140,84 @@ CloudNativePG recovery docs for the full bootstrap-from-objectstore flow.
 > the old token; keep retired tokens in the password manager until their
 > snapshots age out.
 
+## Restore: MariaDB (mariadb-operator)
+
+MariaDB runs under the **mariadb-operator** (`mariadb-system`), one instance per
+app — currently just `uptime-kuma-mariadb` in the `uptime-kuma` namespace. A
+scheduled `Backup` CR (`kubernetes/apps/uptime-kuma/backup.yaml`) runs
+`mariadb-dump` nightly (`0 2 * * *` UTC, gzip, 14-day retention) and ships the
+dump to RustFS `s3://mariadb-backups/uptime-kuma/`. The S3 credentials are the
+`mariadb-rustfs-creds` secret (keys `access-key-id` / `secret-access-key`).
+
+Unlike CNPG, this is logical dump/restore, **not** PITR — you recover to the most
+recent (or a chosen) nightly dump, not to an arbitrary point in time. The
+operator restores **into the live `MariaDB` instance**; it does not create one,
+and the target database is overwritten, so quiesce the app first.
+
+1. Scale the app to 0 so nothing writes during the restore (Uptime Kuma is a
+   single Deployment):
+
+   ```bash
+   kubectl scale deploy/uptime-kuma -n uptime-kuma --replicas=0
+   ```
+
+2. Apply a `Restore` CR in the `uptime-kuma` namespace pointing at the same S3
+   location. `targetRecoveryTime` is optional — the operator picks the newest
+   backup at or before it; omit it to get the latest dump:
+
+   ```yaml
+   apiVersion: k8s.mariadb.com/v1alpha1
+   kind: Restore
+   metadata:
+     name: uptime-kuma-mariadb-restore
+     namespace: uptime-kuma
+   spec:
+     mariaDbRef:
+       name: uptime-kuma-mariadb
+     # targetRecoveryTime: "2026-06-24T02:00:00Z"   # optional
+     s3:
+       bucket: mariadb-backups
+       prefix: uptime-kuma
+       endpoint: 10.2.40.10:30292
+       region: us-east-1
+       accessKeyIdSecretKeyRef:
+         name: mariadb-rustfs-creds
+         key: access-key-id
+       secretAccessKeySecretKeyRef:
+         name: mariadb-rustfs-creds
+         key: secret-access-key
+       tls:
+         enabled: false
+     stagingStorage:
+       persistentVolumeClaim:
+         storageClassName: local-path
+         resources:
+           requests:
+             storage: 2Gi
+         accessModes:
+           - ReadWriteOnce
+   ```
+
+3. Watch the restore job to completion:
+
+   ```bash
+   kubectl get restore -n uptime-kuma -w
+   kubectl logs -n uptime-kuma job/uptime-kuma-mariadb-restore
+   ```
+
+4. Scale the app back up and confirm it reconnects:
+
+   ```bash
+   kubectl scale deploy/uptime-kuma -n uptime-kuma --replicas=1
+   ```
+
+5. Delete the `Restore` object once it has completed — it is one-shot (leaving it
+   is harmless, but tidy to remove).
+
+**Full-rebuild order:** the `MariaDB` instance must exist and be `Ready` before
+the `Restore` runs. On a from-scratch recovery, let Flux bring up
+`uptime-kuma-mariadb` first, then apply the `Restore`, then let the app start.
+
 ## Rotate the k3s cluster token
 
 The cluster token encrypts etcd bootstrap data and authorises node joins. Rotate
@@ -191,6 +270,8 @@ node-by-node:
 
 - `kubectl get replicationsource -n media` → `LAST SYNC` recent for all four.
 - `kubectl get etcdsnapshotfiles.k3s.cattle.io` → entries with `s3://` locations.
+- `kubectl get cronjob uptime-kuma-mariadb -n uptime-kuma` → recent
+  `LAST SCHEDULE`; objects present in RustFS `mariadb-backups/uptime-kuma/`.
 - Objects present in RustFS `volsync` and `etcd-snapshots` buckets.
 - Periodically run a restore drill (restore `seerr-config` into a scratch PVC
   and confirm `db/db.sqlite3` + `settings.json` are intact).
