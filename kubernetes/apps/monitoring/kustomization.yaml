@@ -7,4 +7,3 @@ resources:
   - grafana-admin.sops.yaml
   - grafana-ingress.yaml
   - kube-prometheus-stack/helmrelease.yaml
-  - backup-heartbeats
