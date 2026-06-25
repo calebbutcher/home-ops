@@ -1,0 +1,71 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-heartbeat
+  namespace: monitoring
+spec:
+  schedule: "@hourly"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: backup-heartbeat
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: check
+              image: alpine/k8s:1.31.1
+              command: ["/bin/sh", "/scripts/check.sh"]
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: KUMA_URL
+                  value: http://uptime-kuma.uptime-kuma:3001
+                - name: MAX_AGE_DEFAULT
+                  value: "93600" # 26h
+                - name: MAX_AGE_ETCD
+                  value: "50400" # 14h
+                - name: TOKEN_SONARR
+                  valueFrom: { secretKeyRef: { name: backup-heartbeat-tokens, key: sonarr } }
+                - name: TOKEN_RADARR
+                  valueFrom: { secretKeyRef: { name: backup-heartbeat-tokens, key: radarr } }
+                - name: TOKEN_PROWLARR
+                  valueFrom: { secretKeyRef: { name: backup-heartbeat-tokens, key: prowlarr } }
+                - name: TOKEN_SEERR
+                  valueFrom: { secretKeyRef: { name: backup-heartbeat-tokens, key: seerr } }
+                - name: TOKEN_TRACEARR
+                  valueFrom: { secretKeyRef: { name: backup-heartbeat-tokens, key: tracearr } }
+                - name: TOKEN_UPTIME_KUMA
+                  valueFrom: { secretKeyRef: { name: backup-heartbeat-tokens, key: uptime-kuma } }
+                - name: TOKEN_ETCD
+                  valueFrom: { secretKeyRef: { name: backup-heartbeat-tokens, key: etcd } }
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: scripts
+              configMap:
+                name: backup-heartbeat-script
+            - name: tmp
+              emptyDir: {}
