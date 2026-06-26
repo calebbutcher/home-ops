@@ -23,6 +23,9 @@ resources:
   - maintainerr/pvc.yaml
   - maintainerr/helmrelease.yaml
   - maintainerr/ingress.yaml
+  - tautulli/pvc.yaml
+  - tautulli/helmrelease.yaml
+  - tautulli/ingress.yaml
   - tracearr/secret.sops.yaml
   - tracearr/backup-secret.sops.yaml
   - tracearr/postgres-objectstore.yaml
@@ -38,3 +41,5 @@ resources:
   - backup/seerr-replicationsource.yaml
   - backup/maintainerr-secret.sops.yaml
   - backup/maintainerr-replicationsource.yaml
+  - backup/tautulli-secret.sops.yaml
+  - backup/tautulli-replicationsource.yaml
