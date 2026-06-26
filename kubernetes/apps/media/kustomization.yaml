@@ -20,6 +20,9 @@ resources:
   - seerr/helmrelease.yaml
   - seerr/pvc.yaml
   - seerr/ingress.yaml
+  - maintainerr/pvc.yaml
+  - maintainerr/helmrelease.yaml
+  - maintainerr/ingress.yaml
   - tracearr/secret.sops.yaml
   - tracearr/backup-secret.sops.yaml
   - tracearr/postgres-objectstore.yaml
@@ -33,3 +36,5 @@ resources:
   - backup/radarr-replicationsource.yaml
   - backup/prowlarr-replicationsource.yaml
   - backup/seerr-replicationsource.yaml
+  - backup/maintainerr-secret.sops.yaml
+  - backup/maintainerr-replicationsource.yaml
