@@ -11,7 +11,8 @@ recover it.
 | Desired state (manifests, HelmReleases) | Git | GitHub |
 | App config PVCs (`*-config` in `media` + `home-assistant`) | VolSync (restic) | RustFS `volsync` bucket on NAS |
 | etcd (cluster runtime state) | k3s `--etcd-s3` snapshots | RustFS `etcd-snapshots` bucket + local on each control node |
-| Postgres (CNPG clusters) | barman-cloud plugin (base backup + WAL archive, PITR) | RustFS `postgres-backups` bucket |
+| Postgres (CNPG clusters, e.g. `tracearr-postgres`, `authentik-postgres`) | barman-cloud plugin (base backup + WAL archive, PITR) | RustFS `postgres-backups` bucket |
+| Authentik signing key (`AUTHENTIK_SECRET_KEY`) | Git (SOPS) | `kubernetes/apps/authentik/secret.sops.yaml` |
 | MariaDB (mariadb-operator) | native `Backup` CR (nightly `mariadb-dump` → S3) | RustFS `mariadb-backups` bucket |
 | Media / downloads | NAS-level (out of scope here) | NAS `mainPool` |
 | SOPS age key | **Manual / offline** | Password manager + offline copy |
@@ -176,6 +177,28 @@ CloudNativePG recovery docs for the full bootstrap-from-objectstore flow.
 > the old token; keep retired tokens in the password manager until their
 > snapshots age out.
 
+## Restore: Authentik
+
+Authentik's source of truth is its **CNPG Postgres** cluster (`authentik-postgres`
+in the `authentik` namespace) — restore it exactly like any other CNPG cluster
+(see [Restore: CNPG Postgres](#restore-cnpg-postgres-point-in-time)): bootstrap a
+**new** Cluster that recovers from the `authentik-postgres-store` ObjectStore, then
+let the HelmRelease repoint at the new `-rw` service (it reads the DB password from
+the regenerated `authentik-postgres-app` secret automatically).
+
+Two authentik-specific points:
+
+- **The `AUTHENTIK_SECRET_KEY` must match the era of the database you restore.** It
+  signs sessions and tokens; with a different key a restored DB still loads, but
+  every session and signed link is invalidated (users must re-login). The key lives
+  in Git (`kubernetes/apps/authentik/secret.sops.yaml`), so it is recovered with the
+  repo + age key — just don't rotate it independently of a restore.
+- Redis holds no durable state (cache / Celery broker only) and is **not** backed
+  up; it rebuilds itself on restart.
+
+> Migrating a fresh Authentik install **from an existing deployment** is a separate
+> one-time procedure — see [authentik-migration.md](authentik-migration.md).
+
 ## Restore: MariaDB (mariadb-operator)
 
 MariaDB runs under the **mariadb-operator** (`mariadb-system`), one instance per
@@ -306,6 +329,9 @@ node-by-node:
 
 - `kubectl get replicationsource -A` → `LAST SYNC` recent for every source (the
   `*-config` sources in `media` plus `home-assistant-config` in `home-assistant`).
+- `kubectl get scheduledbackup -A` → recent for every CNPG cluster
+  (`tracearr-postgres`, `authentik-postgres`); objects under RustFS
+  `postgres-backups/<cluster>/`.
 - `kubectl get etcdsnapshotfiles.k3s.cattle.io` → entries with `s3://` locations.
 - `kubectl get cronjob uptime-kuma-mariadb -n uptime-kuma` → recent
   `LAST SCHEDULE`; objects present in RustFS `mariadb-backups/uptime-kuma/`.

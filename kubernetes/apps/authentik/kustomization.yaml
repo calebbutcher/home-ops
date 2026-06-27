@@ -1,0 +1,29 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# NOTE: no top-level transformers (namespace/commonLabels) — they would rewrite
+# the .sops.yaml secrets' metadata and corrupt the SOPS MAC. Every manifest sets
+# its own namespace explicitly.
+resources:
+  - namespace.yaml
+  - helmrepository.yaml
+  - secret.sops.yaml
+  - cnpg-rustfs-creds.sops.yaml
+  - postgres-objectstore.yaml
+  - postgres-cluster.yaml
+  - postgres-scheduledbackup.yaml
+  - pvc.yaml
+  - redis.yaml
+  - helmrelease.yaml
+  - ingress.yaml
+  - middleware.yaml
+# Blueprints stay as standalone, reviewable YAML files; this generator wraps them
+# into the ConfigMap the HelmRelease mounts (blueprints.configMaps). The generator
+# only reads blueprints/*.yaml — it does not touch the .sops.yaml files above.
+configMapGenerator:
+  - name: authentik-blueprints
+    namespace: authentik
+    options:
+      disableNameSuffixHash: true
+    files:
+      - blueprints/grafana-oauth2.yaml

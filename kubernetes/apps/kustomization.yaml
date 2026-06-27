@@ -7,3 +7,4 @@ resources:
   - tools
   - uptime-kuma
   - home-assistant
+  - authentik

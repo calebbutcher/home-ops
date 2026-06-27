@@ -1,0 +1,97 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: authentik
+  namespace: authentik
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: authentik
+      version: "2026.5.3"
+      sourceRef:
+        kind: HelmRepository
+        name: authentik
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # Use the cluster's CloudNativePG + our own Redis instead of the chart's
+    # bundled Bitnami subcharts.
+    postgresql:
+      enabled: false
+    redis:
+      enabled: false
+
+    authentik:
+      # Non-secret connection facts. secret_key + DB password are injected via
+      # global.env below (env overrides the chart's config-secret envFrom).
+      log_level: info
+      error_reporting:
+        enabled: false
+      postgresql:
+        host: authentik-postgres-rw      # CNPG read-write service
+        port: 5432
+        name: authentik
+        user: authentik
+
+    # Applied to BOTH server and worker. Kubernetes gives `env` precedence over
+    # the chart's `envFrom` config secret, so these win for the keys they set.
+    global:
+      env:
+        - name: AUTHENTIK_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: AUTHENTIK_SECRET_KEY
+        - name: AUTHENTIK_POSTGRESQL__PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: authentik-postgres-app   # CNPG-generated application secret (<cluster>-app)
+              key: password
+        - name: AUTHENTIK_REDIS__HOST
+          value: authentik-redis
+        - name: AUTHENTIK_REDIS__PORT
+          value: "6379"
+
+    # Blueprints-as-code: every *.yaml key in this ConfigMap is mounted at
+    # /blueprints/custom/ on server+worker and auto-applied by the worker.
+    # The ConfigMap is produced by the kustomization's configMapGenerator from
+    # blueprints/*.yaml. Onboarding an app to SSO = add a blueprint file.
+    blueprints:
+      configMaps:
+        - authentik-blueprints
+
+    server:
+      replicas: 1
+      ingress:
+        enabled: false                   # we manage our own Ingress object
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          memory: 1Gi
+
+    worker:
+      replicas: 1
+      env:
+        # Surfaced to blueprints via `!Env GRAFANA_OAUTH2_CLIENT_SECRET` so the
+        # OIDC client secret never appears in a blueprint file in Git.
+        - name: GRAFANA_OAUTH2_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: GRAFANA_OAUTH2_CLIENT_SECRET
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          memory: 1Gi
