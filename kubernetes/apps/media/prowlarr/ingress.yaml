@@ -1,4 +1,13 @@
 ---
+# UI (gated) — requires an Authentik session via the shared domain-wide
+# forward-auth middleware. The more specific /api and /ping prefixes (prowlarr-api)
+# are routed ahead of this "/" router by Traefik.
+#
+# NOTE: Prowlarr proxies indexer search/grab traffic from Sonarr/Radarr on NUMERIC
+# paths (/<indexerId>/api, /<indexerId>/download) that a path-prefix Ingress cannot
+# match. Those would be caught by this gated "/" router. Keep Sonarr/Radarr -> Prowlarr
+# pointed at the in-cluster Service (http://prowlarr.media.svc.cluster.local:9696),
+# which bypasses the ingress + Authentik entirely, so indexing is unaffected.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -7,6 +16,7 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.middlewares: authentik-authentik-forwardauth@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
@@ -18,6 +28,41 @@ spec:
       http:
         paths:
           - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: prowlarr
+                port:
+                  number: 9696
+---
+# API (open) — /api and /ping stay reachable with the app's own API key (sync,
+# external API clients, monitoring). No forward-auth middleware here. Reuses the
+# prowlarr-tls cert minted by the UI Ingress above (no cert-manager annotation).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: prowlarr-api
+  namespace: media
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - prowlarr.int.nerdbox.dev
+      secretName: prowlarr-tls
+  rules:
+    - host: prowlarr.int.nerdbox.dev
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: prowlarr
+                port:
+                  number: 9696
+          - path: /ping
             pathType: Prefix
             backend:
               service:
