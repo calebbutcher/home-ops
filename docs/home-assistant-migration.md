@@ -107,16 +107,39 @@ kubectl -n home-assistant exec ha-seed -- chown -R 65534:65534 /config
 kubectl -n home-assistant delete pod ha-seed
 ```
 
-### 4. Fix reverse-proxy trust in `configuration.yaml`
+### 4. Fix the `http:` block in `configuration.yaml`
 
-Behind Traefik, Home Assistant rejects requests ("request from a reverse proxy
-... not set-up for reverse proxies", an HTTP **400**) unless it trusts the
-forwarding source. Because HA runs on `hostNetwork`, Traefik's traffic is
-**SNAT-ed to the node IP**, so the source HA sees is a **node IP** (nodes are
-`10.2.169.30–43`), not a pod IP — trust the node subnet. Also trust the pod CIDR
-so it keeps working if Traefik is ever co-located on HA's node. Edit the migrated
-`/config/configuration.yaml` (do this inside the `ha-seed` pod before deleting it,
-or via the running container later) so it includes:
+Two changes are needed, and **both matter** — getting this wrong is the most likely
+reason a freshly migrated HA won't load.
+
+**a) Remove HAOS's own TLS.** A HAOS `configuration.yaml` often terminates TLS
+itself (e.g. via the Let's Encrypt / DuckDNS add-on) with an `http:` block like:
+
+```yaml
+http:
+  ssl_certificate: /ssl/fullchain.pem
+  ssl_key: /ssl/privkey.pem
+  server_port: 443
+```
+
+Those `/ssl/*` paths don't exist in this container, and `server_port: 443` clashes
+with the Service/ingress/probe (all expect **8123**). Left in place, the `http`
+integration fails validation — and because almost everything depends on it, HA
+drops to **recovery mode** and the frontend never loads (`Setup failed for 'http':
+Invalid config` → cascading `Setup failed` for `auth`, `api`, `frontend`,
+`onboarding`, …). **Delete the `ssl_certificate`, `ssl_key`, and `server_port`
+lines.**
+
+**b) Trust the reverse proxy.** Behind Traefik, HA otherwise rejects requests
+("request from a reverse proxy … not set-up for reverse proxies", HTTP **400**).
+Because HA runs on `hostNetwork`, Traefik's traffic is **SNAT-ed to the node IP**,
+so the source HA sees is a **node IP** (nodes are `10.2.169.30–43`), not a pod IP
+— trust the node subnet, plus the pod CIDR in case Traefik is ever co-located on
+HA's node.
+
+Net result — edit the migrated `/config/configuration.yaml` (inside the `ha-seed`
+pod before deleting it, or via the running container later) so the `http:` block is
+exactly:
 
 ```yaml
 http:
@@ -127,9 +150,8 @@ http:
     - 127.0.0.1
 ```
 
-If a `http:` block already exists, merge these keys into it. After editing,
-restart Home Assistant (`kubectl rollout restart deploy/home-assistant -n
-home-assistant`) so it reloads `configuration.yaml`.
+After editing, restart Home Assistant (`kubectl rollout restart
+deploy/home-assistant -n home-assistant`) so it reloads `configuration.yaml`.
 
 ### 5. Start it up
 
@@ -141,7 +163,28 @@ kubectl -n home-assistant logs deploy/home-assistant -f
 First boot builds the venv (a few minutes — the startup probe allows ~10 min).
 Watch for `Home Assistant initialized` / the start of the HTTP server.
 
-### 6. Verify and cut over
+### 6. Remove HAOS-only integrations (Supervisor)
+
+A restored HAOS instance carries the **`hassio`** (Home Assistant Supervisor)
+integration, which cannot run in a Core container. It fails to initialise and drags
+down everything that depends on it — expect a cascade in the logs:
+
+```text
+Setup failed for 'hassio': Integration failed to initialize.
+Setup failed for 'backup': Could not setup dependencies: hassio
+Setup failed for 'cloud': Could not setup dependencies: backup
+Setup failed for 'default_config': Could not setup dependencies: cloud
+```
+
+Discovery (`zeroconf`/`ssdp`/`dhcp`), `recorder`, `mobile_app`, and the rest still
+load — they set up independently — but to clear the cascade:
+
+**Settings → Devices & Services → "Home Assistant Supervisor" → ⋮ → Delete**, then
+restart HA. Afterwards `cloud` (Nabu Casa) sets up normally if you use it. The
+Supervisor-based backup does **not** return — it isn't needed; VolSync backs up
+`/config` (see [backup-recovery.md](backup-recovery.md)).
+
+### 7. Verify and cut over
 
 - Browse <https://ha.int.nerdbox.dev>; log in with the migrated credentials.
 - Confirm dashboards, automations, and entity history are intact.
