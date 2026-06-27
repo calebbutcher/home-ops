@@ -109,8 +109,12 @@ kubectl -n home-assistant delete pod ha-seed
 
 ### 4. Fix reverse-proxy trust in `configuration.yaml`
 
-Behind Traefik, Home Assistant rejects logins ("request from a reverse proxy")
-unless it trusts the forwarding source. Edit the migrated
+Behind Traefik, Home Assistant rejects requests ("request from a reverse proxy
+... not set-up for reverse proxies", an HTTP **400**) unless it trusts the
+forwarding source. Because HA runs on `hostNetwork`, Traefik's traffic is
+**SNAT-ed to the node IP**, so the source HA sees is a **node IP** (nodes are
+`10.2.169.30–43`), not a pod IP — trust the node subnet. Also trust the pod CIDR
+so it keeps working if Traefik is ever co-located on HA's node. Edit the migrated
 `/config/configuration.yaml` (do this inside the `ha-seed` pod before deleting it,
 or via the running container later) so it includes:
 
@@ -118,11 +122,14 @@ or via the running container later) so it includes:
 http:
   use_x_forwarded_for: true
   trusted_proxies:
-    - 10.52.0.0/16   # cluster pod CIDR — Traefik forwards from a pod IP
+    - 10.2.169.0/24   # node subnet — HA is on hostNetwork, proxy source is the node IP
+    - 10.42.0.0/16    # pod CIDR — covers Traefik co-located on HA's node
     - 127.0.0.1
 ```
 
-If a `http:` block already exists, merge these keys into it.
+If a `http:` block already exists, merge these keys into it. After editing,
+restart Home Assistant (`kubectl rollout restart deploy/home-assistant -n
+home-assistant`) so it reloads `configuration.yaml`.
 
 ### 5. Start it up
 
