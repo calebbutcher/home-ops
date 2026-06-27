@@ -59,6 +59,10 @@ Use this for apps that have an OAuth2/OIDC login option (Grafana, etc.).
 3. **Add a blueprint** `blueprints/myapp-oauth2.yaml` (copy `grafana-oauth2.yaml`),
    changing `client_id`, the `!Env` key, and `redirect_uris`. Add the file to the
    `configMapGenerator` list in `kustomization.yaml`.
+   - **Gotcha:** keep the `grant_types: [authorization_code, refresh_token]` block.
+     Blueprint-created providers default to `grant_types: []` (the admin UI fills it
+     in, blueprints do not), and an empty list makes Authentik reject login with
+     *"Invalid grant_type for provider"*.
 4. **Configure the app** with `client_id`, the client secret (from its own secret),
    and the Authentik endpoints under `authentik.int.nerdbox.dev/application/o/`.
 
