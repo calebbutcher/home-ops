@@ -6,3 +6,4 @@ resources:
   - media
   - tools
   - uptime-kuma
+  - home-assistant

@@ -9,7 +9,7 @@ recover it.
 | State | Mechanism | Destination |
 | --- | --- | --- |
 | Desired state (manifests, HelmReleases) | Git | GitHub |
-| App config PVCs (`*-config` in `media`) | VolSync (restic) | RustFS `volsync` bucket on NAS |
+| App config PVCs (`*-config` in `media` + `home-assistant`) | VolSync (restic) | RustFS `volsync` bucket on NAS |
 | etcd (cluster runtime state) | k3s `--etcd-s3` snapshots | RustFS `etcd-snapshots` bucket + local on each control node |
 | Postgres (CNPG clusters) | barman-cloud plugin (base backup + WAL archive, PITR) | RustFS `postgres-backups` bucket |
 | MariaDB (mariadb-operator) | native `Backup` CR (nightly `mariadb-dump` → S3) | RustFS `mariadb-backups` bucket |
@@ -62,6 +62,42 @@ RustFS (S3-compatible object storage) runs on the TrueNAS at
 
 3. Wait for the mover job to complete (`kubectl get replicationdestination -n media`).
 4. Remove the `ReplicationDestination`, scale the app back up, resume the HR.
+
+## Restore: Home Assistant config (VolSync)
+
+Home Assistant lives in its **own `home-assistant` namespace** and follows the same
+VolSync `ReplicationDestination` procedure as above, with three deltas:
+
+- namespace `home-assistant`, repository secret `home-assistant-restic-secret`,
+  `destinationPVC: home-assistant-config`;
+- the mover must run as the image's user — **`runAsUser`/`runAsGroup`/`fsGroup:
+  65534`** (not `1000`);
+- suspend the HelmRelease first (`flux suspend hr home-assistant -n
+  home-assistant`) so nothing holds the PVC, then resume afterwards.
+
+```yaml
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationDestination
+metadata:
+  name: home-assistant-config-restore
+  namespace: home-assistant
+spec:
+  trigger:
+    manual: restore-once
+  restic:
+    repository: home-assistant-restic-secret
+    copyMethod: Direct
+    destinationPVC: home-assistant-config   # restore in place, or a scratch PVC
+    cacheCapacity: 2Gi
+    moverSecurityContext:
+      runAsUser: 65534
+      runAsGroup: 65534
+      fsGroup: 65534
+```
+
+> This restores an existing in-cluster config from backup. **Migrating a fresh HA
+> install from HAOS** is a separate one-time procedure — see
+> [home-assistant-migration.md](home-assistant-migration.md).
 
 ## etcd snapshots: where they go
 
@@ -268,7 +304,8 @@ node-by-node:
 
 ## Verifying backups are healthy
 
-- `kubectl get replicationsource -n media` → `LAST SYNC` recent for all four.
+- `kubectl get replicationsource -A` → `LAST SYNC` recent for every source (the
+  `*-config` sources in `media` plus `home-assistant-config` in `home-assistant`).
 - `kubectl get etcdsnapshotfiles.k3s.cattle.io` → entries with `s3://` locations.
 - `kubectl get cronjob uptime-kuma-mariadb -n uptime-kuma` → recent
   `LAST SCHEDULE`; objects present in RustFS `mariadb-backups/uptime-kuma/`.
