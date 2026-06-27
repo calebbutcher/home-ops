@@ -77,60 +77,50 @@ The shared middleware already exists:
 `allowCrossNamespacedIngresses: true`, so apps in other namespaces can use it as
 `authentik-authentik-forwardauth@kubernetescrd`.
 
-### Recipe: protect an app with forward-auth
+### This cluster uses **domain-wide** forward-auth
 
-1. **Blueprint** — add a proxy provider + application and bind it to the embedded
-   outpost (extend a single `proxy-forwardauth.yaml`, listing all proxy providers
-   in the one embedded-outpost entry):
-   ```yaml
-   version: 1
-   metadata:
-     name: proxy-forwardauth
-   entries:
-     - model: authentik_providers_proxy.proxyprovider
-       id: myapp-proxy
-       identifiers: { name: myapp }
-       attrs:
-         name: myapp
-         mode: forward_single
-         external_host: https://myapp.int.nerdbox.dev
-         authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-         invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
-     - model: authentik_core.application
-       id: myapp-app
-       identifiers: { slug: myapp }
-       attrs: { name: MyApp, slug: myapp, provider: !KeyOf myapp-proxy }
-     - model: authentik_outposts.outpost
-       identifiers: { name: authentik Embedded Outpost }
-       attrs:
-         providers:
-           - !KeyOf myapp-proxy   # list ALL forward-auth providers here
-   ```
-2. **Ingress** — on the protected app's Ingress:
-   - add the middleware annotation:
-     ```yaml
-     traefik.ingress.kubernetes.io/router.middlewares: authentik-authentik-forwardauth@kubernetescrd
-     ```
-   - route `/outpost.goauthentik.io` on the **same host** to the Authentik server
-     so the login redirect/callback resolves on the app's domain. For an app in a
-     **different namespace** than `authentik`, add a small `ExternalName` Service
-     and back the path with it:
-     ```yaml
-     # in the app's namespace
-     apiVersion: v1
-     kind: Service
-     metadata: { name: authentik-server, namespace: <app-ns> }
-     spec:
-       type: ExternalName
-       externalName: authentik-server.authentik.svc.cluster.local
-       ports: [{ name: http, port: 80 }]
-     ```
-     ```yaml
-     # in the app's Ingress rules, before the catch-all "/" path
-     - path: /outpost.goauthentik.io
-       pathType: Prefix
-       backend: { service: { name: authentik-server, port: { number: 80 } } }
-     ```
+A single proxy provider — **"Provider for Nerdbox Auth"** (mode `forward_domain`,
+`external_host https://authentik.int.nerdbox.dev`, `cookie_domain nerdbox.dev`),
+bound to the embedded outpost — covers **every** `*.nerdbox.dev` host. There is
+**no per-app proxy provider**. When an unauthenticated request hits a protected
+app, the outpost redirects to `authentik.int.nerdbox.dev` to sign in, then sends
+the user back with a session cookie scoped to `nerdbox.dev` (so the login is
+shared across all apps on the domain). Login happens centrally, so a protected
+app needs **no** `/outpost.goauthentik.io` routing of its own.
 
-That's it — the app now requires an Authentik login, and identity is passed
+> The `forward_domain` provider is a migration-era object (carried in from the
+> old Compose stack); it is not defined by a blueprint. It is the single source
+> of forward-auth for the whole domain, so don't delete it.
+
+### Recipe: protect an app with forward-auth (domain-wide)
+
+Just **one annotation** on the app's Ingress — nothing else:
+
+```yaml
+traefik.ingress.kubernetes.io/router.middlewares: authentik-authentik-forwardauth@kubernetescrd
+```
+
+No blueprint, no per-app provider, no `ExternalName` service, no extra path.
+
+**Worked example: it-tools** — `kubernetes/apps/tools/it-tools/ingress.yaml`
+carries exactly that annotation and nothing more. it-tools has no native login,
+so the whole site now requires an Authentik session.
+
+That's it — the app requires an Authentik login, and identity is passed
 downstream via the `X-authentik-*` headers the middleware copies through.
+
+### Alternative: per-app provider (`forward_single`)
+
+Only needed if you want an app **isolated** from the shared domain session (its
+own provider, its own authorization policy/consent). It is **not** how this
+cluster is set up, and it does **not** mix cleanly with the domain-wide provider:
+`forward_domain` matches the whole `cookie_domain`, so on the same outpost it can
+shadow a `forward_single` provider for a host under that domain. Adopting this
+pattern means retiring "Provider for Nerdbox Auth" first.
+
+If you go this route, you'd add a blueprint with a `forward_single` proxy
+provider + application bound to the embedded outpost, and on the app's Ingress
+both the middleware annotation **and** a `/outpost.goauthentik.io` path routed to
+the Authentik server (via an `ExternalName` service for apps in another
+namespace), because with per-app providers the login callback resolves on the
+app's own host rather than centrally.
