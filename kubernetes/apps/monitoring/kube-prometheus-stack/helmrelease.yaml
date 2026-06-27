@@ -81,6 +81,33 @@ spec:
         existingSecret: grafana-admin-secret
         passwordKey: admin-password
 
+      # OIDC SSO via Authentik (see kubernetes/apps/authentik). The client secret
+      # is injected from the SOPS secret grafana-oauth-secret as an env var, which
+      # Grafana maps to [auth.generic_oauth] client_secret automatically — so it
+      # never appears in these values. The same secret value is referenced by the
+      # authentik grafana-oauth2 blueprint. Local admin login stays enabled.
+      envValueFrom:
+        GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET:
+          secretKeyRef:
+            name: grafana-oauth-secret
+            key: client-secret
+      grafana.ini:
+        server:
+          root_url: https://grafana.int.nerdbox.dev
+        auth.generic_oauth:
+          enabled: true
+          name: Authentik
+          client_id: grafana
+          scopes: "openid email profile"
+          auth_url: https://authentik.int.nerdbox.dev/application/o/authorize/
+          token_url: https://authentik.int.nerdbox.dev/application/o/token/
+          api_url: https://authentik.int.nerdbox.dev/application/o/userinfo/
+          # Members of the "authentik Admins" group become Grafana Admins; all
+          # other authenticated users get Viewer.
+          role_attribute_path: "contains(groups[*], 'authentik Admins') && 'Admin' || 'Viewer'"
+          allow_sign_up: true
+          use_pkce: true
+
       persistence:
         enabled: false  # dashboards are config-managed; metrics live in Prometheus
 

@@ -1,0 +1,62 @@
+---
+# authentik uses Redis only as a cache and Celery broker — its data is
+# reconstructable, so this is intentionally NOT backed up. Run our own small
+# Redis (the cluster has no shared cache; same pattern as media/tracearr).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authentik-redis
+  namespace: authentik
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # single RWO PVC, no rolling overlap
+  selector:
+    matchLabels:
+      app: authentik-redis
+  template:
+    metadata:
+      labels:
+        app: authentik-redis
+    spec:
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+      containers:
+        - name: redis
+          image: redis:8-alpine
+          args:
+            - --save
+            - ""           # disable RDB snapshots
+            - --appendonly
+            - "no"         # pure cache; not persisted/backed up
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: authentik-redis
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authentik-redis
+  namespace: authentik
+spec:
+  selector:
+    app: authentik-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379

@@ -1,0 +1,34 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: authentik-postgres
+  namespace: authentik
+spec:
+  instances: 1
+  # Match the source deployment's Postgres major (official authentik compose uses 16)
+  # so the logical dump/restore migration is a same-major operation.
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  storage:
+    size: 10Gi
+    storageClass: local-path
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: authentik-postgres-store
+  bootstrap:
+    initdb:
+      database: authentik
+      owner: authentik
+      postInitApplicationSQL:
+        # authentik requires the pg_trgm extension; create it as superuser at
+        # bootstrap so the (non-superuser) app role and the migration restore
+        # don't have to.
+        - CREATE EXTENSION IF NOT EXISTS pg_trgm;
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
