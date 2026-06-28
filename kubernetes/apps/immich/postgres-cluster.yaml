@@ -1,0 +1,47 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: immich-postgres
+  namespace: immich
+spec:
+  instances: 1
+  # PG14 to match the source Docker Postgres major (pgvecto-rs:pg14-v0.2.0) so the
+  # logical dump/restore is a same-major operation. This image ships VectorChord
+  # (vchord) on the CNPG operand base; the source DB is migrated to VectorChord in
+  # Docker first (see docs/immich-migration.md), so this cluster only ever restores
+  # a clean VectorChord dump. vchord 1.1.1 is within Immich's accepted range
+  # (>=0.3,<2.0). If the Phase-2 restore reports a vchord version mismatch, pin this
+  # to the same vchord version the Docker transition image used.
+  imageName: ghcr.io/tensorchord/cloudnative-vectorchord:14-1.1.1
+  storage:
+    size: 20Gi
+    storageClass: local-path
+  # Immich expects superuser on its DB; this also exposes the
+  # immich-postgres-superuser secret used for the one-off restore.
+  enableSuperuserAccess: true
+  postgresql:
+    shared_preload_libraries:
+      - vchord.so
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: immich-postgres-store
+  bootstrap:
+    initdb:
+      database: immich
+      owner: immich
+      postInitApplicationSQL:
+        # Pre-create extensions as superuser so neither the restore nor the app
+        # has to. CASCADE on vchord pulls in pgvector; earthdistance pulls in cube.
+        - CREATE EXTENSION IF NOT EXISTS vchord CASCADE;
+        - CREATE EXTENSION IF NOT EXISTS earthdistance CASCADE;
+        # Immich manages extensions / pg_dumpall and expects superuser on its role.
+        - ALTER ROLE immich WITH SUPERUSER;
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi

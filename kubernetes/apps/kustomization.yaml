@@ -9,3 +9,4 @@ resources:
   - home-assistant
   - authentik
   - n8n
+  - immich
