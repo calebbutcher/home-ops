@@ -1,0 +1,18 @@
+---
+# The existing Immich photo/video library on TrueNAS, reused in-place (no copy).
+# Cluster-scoped PV bound by name to the namespaced PVC below. Same static-NFS
+# pattern as media/nfs-pv.yaml.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: immich-library
+spec:
+  capacity:
+    storage: 10Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  nfs:
+    server: 10.2.40.10
+    path: /mnt/mainPool/immich-data

@@ -1,0 +1,29 @@
+---
+# Machine-learning model cache. Regenerable (models re-download on demand), so
+# not backed up.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-model-cache
+  namespace: immich
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+# Redis is a pure cache / job queue — reconstructable, not backed up.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-redis
+  namespace: immich
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi

@@ -1,0 +1,28 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: immich
+  namespace: immich
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # NOTE: do not add the authentik forwardauth middleware here — it breaks the
+    # Immich mobile app/API. Use Immich's native OIDC against Authentik instead.
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - immich.int.nerdbox.dev
+      secretName: immich-tls
+  rules:
+    - host: immich.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: immich-server
+                port:
+                  number: 2283
