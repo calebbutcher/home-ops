@@ -24,10 +24,9 @@ spec:
   values:
     controllers:
       immich-server:
-        # MIGRATION: starts scaled to 0 so the CNPG DB can be bootstrapped and the
-        # logical restore completed (docs/immich-migration.md) before Immich runs.
-        # Flip to 1 once the dump is restored (Phase 4).
-        replicas: 0
+        # Go-live: DB migrated (pgvecto.rs 0.2.0 -> VectorChord 0.4.3) and restored
+        # into CNPG (docs/immich-migration.md). Running against the existing NFS library.
+        replicas: 1
         # NOTE: the Immich image runs as root by default, matching the existing
         # Docker stack that owns the NFS files. If `ls -lan` on the NFS export
         # shows a non-root owner, add `pod.securityContext` (runAsUser/fsGroup) here.
@@ -58,8 +57,8 @@ spec:
               limits:
                 memory: 4Gi
       immich-machine-learning:
-        # Scaled to 0 until cutover (Phase 4); keep the tag in lockstep with the server.
-        replicas: 0
+        # Keep the tag in lockstep with the server.
+        replicas: 1
         containers:
           app:
             image:
