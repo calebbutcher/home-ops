@@ -14,9 +14,20 @@ spec:
   tls:
     - hosts:
         - immich.int.nerdbox.dev
+        - immich.nerdbox.dev
       secretName: immich-tls
   rules:
     - host: immich.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: immich-server
+                port:
+                  number: 2283
+    - host: immich.nerdbox.dev
       http:
         paths:
           - path: /
