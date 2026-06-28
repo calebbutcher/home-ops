@@ -59,6 +59,10 @@ spec:
               PAPERLESS_TIKA_ENDPOINT: http://paperless-tika:9998
               PAPERLESS_TIKA_GOTENBERG_ENDPOINT: http://paperless-gotenberg:3000
               PAPERLESS_OCR_LANGUAGE: eng
+              # Document archive + watch folder live on the single NFS mount (/nfs).
+              # paperless mkdir+chowns these on first boot (runs as root → uid 1000).
+              PAPERLESS_MEDIA_ROOT: /nfs/media
+              PAPERLESS_CONSUMPTION_DIR: /nfs/consume
               # consume/ is on NFS where inotify is unreliable — poll instead.
               PAPERLESS_CONSUMER_POLLING: "60"
               # --- OIDC (allauth) — password login kept as a fallback ---
@@ -137,19 +141,12 @@ spec:
         existingClaim: paperless-data
         globalMounts:
           - path: /usr/src/paperless/data
-      # The three NFS subdirectories off the one RWX claim (paperless-media).
-      media:
+      # The NAS export, mounted ONCE at /nfs (no subPath). subPath bind-mounts on
+      # an NFS volume make the kubelet hang at ContainerCreating with no error
+      # event; a single plain mount matches the working immich pattern. paperless
+      # writes into /nfs/media + /nfs/consume (PAPERLESS_MEDIA_ROOT /
+      # PAPERLESS_CONSUMPTION_DIR), creating + chowning them on first boot.
+      nfs:
         existingClaim: paperless-media
         globalMounts:
-          - path: /usr/src/paperless/media
-            subPath: media
-      consume:
-        existingClaim: paperless-media
-        globalMounts:
-          - path: /usr/src/paperless/consume
-            subPath: consume
-      export:
-        existingClaim: paperless-media
-        globalMounts:
-          - path: /usr/src/paperless/export
-            subPath: export
+          - path: /nfs
