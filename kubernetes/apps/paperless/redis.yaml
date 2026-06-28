@@ -1,0 +1,62 @@
+---
+# Paperless uses Redis purely as the Celery broker / result cache — its contents
+# are reconstructable (the consume dir is re-scanned and the index is rebuildable),
+# so it is intentionally NOT persisted or backed up. Same pattern as
+# immich/redis.yaml, but with an emptyDir since nothing here is worth keeping.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paperless-redis
+  namespace: paperless
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: paperless-redis
+  template:
+    metadata:
+      labels:
+        app: paperless-redis
+    spec:
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+      containers:
+        - name: redis
+          image: redis:8-alpine
+          args:
+            - --save
+            - ""           # disable RDB snapshots
+            - --appendonly
+            - "no"         # pure broker/cache; not persisted/backed up
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: paperless-redis
+  namespace: paperless
+spec:
+  selector:
+    app: paperless-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379

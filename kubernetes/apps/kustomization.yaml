@@ -10,3 +10,4 @@ resources:
   - authentik
   - n8n
   - immich
+  - paperless

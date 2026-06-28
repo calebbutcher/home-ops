@@ -1,0 +1,29 @@
+---
+# Internal-only. No forward-auth middleware — paperless has its own login + OIDC
+# (Authentik via allauth), and a domain-wide forward-auth would break the OIDC
+# callback, the REST API, and the mobile app. SSO is handled inside paperless.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: paperless
+  namespace: paperless
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - paperless.int.nerdbox.dev
+      secretName: paperless-tls
+  rules:
+    - host: paperless.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: paperless
+                port:
+                  number: 8000

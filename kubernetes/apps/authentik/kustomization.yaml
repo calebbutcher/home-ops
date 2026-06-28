@@ -28,3 +28,4 @@ configMapGenerator:
     files:
       - blueprints/grafana-oauth2.yaml
       - blueprints/immich-oauth2.yaml
+      - blueprints/paperless-oauth2.yaml

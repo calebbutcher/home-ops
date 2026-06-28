@@ -1,0 +1,45 @@
+---
+# Apache Tika — stateless content/metadata extraction (Office docs, email) for
+# paperless. Driven via PAPERLESS_TIKA_ENDPOINT. No state.
+# NOTE: `latest-full` is used for the richer parser set; Renovate can pin this to
+# a digest/version like the other images.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paperless-tika
+  namespace: paperless
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: paperless-tika
+  template:
+    metadata:
+      labels:
+        app: paperless-tika
+    spec:
+      containers:
+        - name: tika
+          image: docker.io/apache/tika:latest-full
+          ports:
+            - name: http
+              containerPort: 9998
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: paperless-tika
+  namespace: paperless
+spec:
+  selector:
+    app: paperless-tika
+  ports:
+    - name: http
+      port: 9998
+      targetPort: 9998
