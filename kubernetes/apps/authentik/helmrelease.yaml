@@ -94,6 +94,11 @@ spec:
             secretKeyRef:
               name: authentik-secret
               key: IMMICH_OAUTH2_CLIENT_SECRET
+        - name: PAPERLESS_OAUTH2_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: PAPERLESS_OAUTH2_CLIENT_SECRET
       resources:
         requests:
           cpu: 100m

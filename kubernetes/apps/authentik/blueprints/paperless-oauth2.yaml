@@ -1,0 +1,76 @@
+# OIDC SSO for paperless-ngx — applied automatically by the authentik worker from
+# /blueprints/custom/. The client secret is NOT stored here: it is read from the
+# worker env var PAPERLESS_OAUTH2_CLIENT_SECRET (sourced from the SOPS secret
+# authentik-secret) via the !Env tag, and the same value lives inside paperless's
+# PAPERLESS_SOCIALACCOUNT_PROVIDERS JSON (paperless-secret). Access is restricted to
+# the paperless-users group. Unlike Immich there is no role/admin claim — the
+# paperless superuser stays the bootstrap admin; OIDC users auto-signup as regular
+# users (promote in the paperless admin if needed).
+version: 1
+metadata:
+  name: paperless-oauth2
+  labels:
+    blueprints.goauthentik.io/instantiate: "true"
+entries:
+  # Access group: members of paperless-users may sign in to paperless.
+  - model: authentik_core.group
+    id: paperless-users-group
+    identifiers:
+      name: paperless-users
+    attrs:
+      name: paperless-users
+
+  - model: authentik_providers_oauth2.oauth2provider
+    id: paperless-provider
+    identifiers:
+      name: paperless
+    attrs:
+      name: paperless
+      client_type: confidential
+      client_id: paperless
+      client_secret: !Env PAPERLESS_OAUTH2_CLIENT_SECRET
+      # grant_types defaults to [] for blueprint-created providers (the UI fills
+      # these in on creation); without authorization_code the authorize request
+      # is rejected ("Invalid grant_type for provider"). Set them explicitly.
+      grant_types:
+        - authorization_code
+        - refresh_token
+      authorization_flow:
+        !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow:
+        !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      # RS256 signing via the default self-signed keypair (gives paperless a JWKS to
+      # validate the ID token). If not found, !Find returns null -> HS256.
+      signing_key:
+        !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
+      # allauth's openid_connect callback for provider_id "authentik".
+      redirect_uris:
+        - matching_mode: strict
+          url: https://paperless.int.nerdbox.dev/accounts/oidc/authentik/login/callback/
+      property_mappings:
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, profile]]
+
+  - model: authentik_core.application
+    id: paperless-app
+    identifiers:
+      slug: paperless
+    attrs:
+      name: Paperless
+      slug: paperless
+      provider: !KeyOf paperless-provider
+      meta_launch_url: https://paperless.int.nerdbox.dev
+      meta_description: Documents
+      meta_publisher: paperless-ngx
+
+  # Restrict app access to the paperless-users group.
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf paperless-app
+      group: !KeyOf paperless-users-group
+      order: 0
+    attrs:
+      target: !KeyOf paperless-app
+      group: !KeyOf paperless-users-group
+      order: 0

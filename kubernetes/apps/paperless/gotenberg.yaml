@@ -1,0 +1,49 @@
+---
+# Gotenberg — stateless service that renders Office docs / email to PDF for OCR.
+# Driven by paperless via PAPERLESS_TIKA_GOTENBERG_ENDPOINT. No state. Runs as its
+# own image-default user (Chromium sandbox), so no securityContext override.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paperless-gotenberg
+  namespace: paperless
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: paperless-gotenberg
+  template:
+    metadata:
+      labels:
+        app: paperless-gotenberg
+    spec:
+      containers:
+        - name: gotenberg
+          image: docker.io/gotenberg/gotenberg:8
+          # paperless's recommended hardening: disable JS, restrict file access.
+          command:
+            - gotenberg
+            - --chromium-disable-javascript=true
+            - --chromium-allow-list=file:///tmp/.*
+          ports:
+            - name: http
+              containerPort: 3000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: paperless-gotenberg
+  namespace: paperless
+spec:
+  selector:
+    app: paperless-gotenberg
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000

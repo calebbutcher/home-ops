@@ -1,0 +1,17 @@
+---
+# Paperless data dir: search index (Whoosh) + ML classifier model + logs. Derived
+# and rebuildable from Postgres + the media archive (`document_index reindex` +
+# `document_create_classifier`), so — like immich's model-cache — it is NOT backed
+# up by VolSync. RWO, so the controller uses strategy: Recreate.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paperless-data
+  namespace: paperless
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi

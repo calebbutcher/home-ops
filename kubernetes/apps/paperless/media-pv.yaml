@@ -1,0 +1,20 @@
+---
+# Paperless document archive on the NAS: originals + archived PDFs (the critical
+# data) under media/, plus the consume/ drop-folder and export/ dir as sibling
+# subdirectories of the same export. Cluster-scoped NFS PV bound by name to the
+# namespaced PVC below — same static-NFS pattern as immich/library-pv.yaml. The
+# NAS handles durability for this data (the PVC is not VolSync'd).
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: paperless-media
+spec:
+  capacity:
+    storage: 1Ti          # nominal; NFS does not enforce a quota
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  nfs:
+    server: 10.2.40.10
+    path: /mnt/mainPool/paperless

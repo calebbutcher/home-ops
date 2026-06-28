@@ -92,6 +92,22 @@ in its admin UI** (Administration → Settings → OAuth), so there is no second
 namespace — the client secret lives only in `authentik-secret` (for the blueprint `!Env`) and is
 typed into the Immich UI. Immich links an OAuth login to an existing account **by email**.
 
+### Worked example: paperless-ngx (group-restricted, env-configured)
+
+`blueprints/paperless-oauth2.yaml` is the **leanest** Style-A example: a single group
+`paperless-users` + one `policybinding` (group-restricted access, no role claim), the OAuth2
+provider, and the application. There is **no scope mapping** — paperless does not grant Django
+superuser from an OIDC claim, so the bootstrap `admin` stays the superuser and OIDC users
+auto-signup as regular users.
+
+Unlike Immich (UI-configured), **paperless reads OIDC from env** (`PAPERLESS_APPS` +
+`PAPERLESS_SOCIALACCOUNT_PROVIDERS`), so the client secret lives in **two** SOPS secrets like
+Grafana: `authentik-secret` → `PAPERLESS_OAUTH2_CLIENT_SECRET` (blueprint `!Env`) and
+`paperless-secret` → the `PAPERLESS_SOCIALACCOUNT_PROVIDERS` JSON (same secret inline). The
+redirect URI is allauth's `/accounts/oidc/<provider_id>/login/callback/` — here
+`https://paperless.int.nerdbox.dev/accounts/oidc/authentik/login/callback/` (the `provider_id`
+in the JSON is `authentik`). See `paperless-deploy.md`.
+
 ---
 
 ## Style B — Forward-auth (apps with NO native SSO)

@@ -1,0 +1,155 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: paperless
+  namespace: paperless
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "3.7.3"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      paperless:
+        # Single RWO data PVC — the new pod must not overlap the old on rollout.
+        strategy: Recreate
+        # The paperless image starts as root and gosu-drops to USERMAP_UID/GID
+        # (1000) after chowning its dirs — same root-start pattern as immich. Do
+        # NOT pin a non-root pod securityContext or the usermap/chown step breaks.
+        containers:
+          app:
+            image:
+              repository: ghcr.io/paperless-ngx/paperless-ngx
+              tag: "2.20.15"
+            env:
+              TZ: UTC
+              PAPERLESS_TIME_ZONE: UTC
+              # gosu target uid/gid (must match the NFS export's writable owner).
+              USERMAP_UID: "1000"
+              USERMAP_GID: "1000"
+              PAPERLESS_URL: https://paperless.int.nerdbox.dev
+              PAPERLESS_CSRF_TRUSTED_ORIGINS: https://paperless.int.nerdbox.dev
+              # --- Postgres (CNPG) ---
+              PAPERLESS_DBENGINE: postgresql
+              PAPERLESS_DBHOST: paperless-postgres-rw
+              PAPERLESS_DBPORT: "5432"
+              PAPERLESS_DBNAME: paperless
+              PAPERLESS_DBUSER: paperless
+              PAPERLESS_DBPASS:
+                valueFrom:
+                  secretKeyRef:
+                    name: paperless-postgres-app   # CNPG-generated (<cluster>-app)
+                    key: password
+              # --- Redis broker + Tika/Gotenberg ---
+              PAPERLESS_REDIS: redis://paperless-redis:6379
+              PAPERLESS_TIKA_ENABLED: "1"
+              PAPERLESS_TIKA_ENDPOINT: http://paperless-tika:9998
+              PAPERLESS_TIKA_GOTENBERG_ENDPOINT: http://paperless-gotenberg:3000
+              PAPERLESS_OCR_LANGUAGE: eng
+              # consume/ is on NFS where inotify is unreliable — poll instead.
+              PAPERLESS_CONSUMER_POLLING: "60"
+              # --- OIDC (allauth) — password login kept as a fallback ---
+              PAPERLESS_APPS: allauth.socialaccount.providers.openid_connect
+              PAPERLESS_SOCIAL_AUTO_SIGNUP: "true"
+              PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS: "true"
+              PAPERLESS_DISABLE_REGULAR_LOGIN: "false"
+              PAPERLESS_REDIRECT_LOGIN_TO_SSO: "false"
+              # --- Secret-sourced (paperless-secret) ---
+              PAPERLESS_SECRET_KEY:
+                valueFrom:
+                  secretKeyRef:
+                    name: paperless-secret
+                    key: PAPERLESS_SECRET_KEY
+              PAPERLESS_ADMIN_USER:
+                valueFrom:
+                  secretKeyRef:
+                    name: paperless-secret
+                    key: PAPERLESS_ADMIN_USER
+              PAPERLESS_ADMIN_PASSWORD:
+                valueFrom:
+                  secretKeyRef:
+                    name: paperless-secret
+                    key: PAPERLESS_ADMIN_PASSWORD
+              # JSON blob containing the OIDC client secret (allauth provider config).
+              PAPERLESS_SOCIALACCOUNT_PROVIDERS:
+                valueFrom:
+                  secretKeyRef:
+                    name: paperless-secret
+                    key: PAPERLESS_SOCIALACCOUNT_PROVIDERS
+            probes:
+              # First boot runs DB migrations + creates the bootstrap superuser,
+              # so give startup a generous window.
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /accounts/login/
+                    port: 8000
+                  periodSeconds: 10
+                  failureThreshold: 60
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /accounts/login/
+                    port: 8000
+                  periodSeconds: 30
+                  failureThreshold: 5
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /accounts/login/
+                    port: 8000
+                  periodSeconds: 15
+                  failureThreshold: 3
+            resources:
+              requests:
+                cpu: 250m
+                memory: 1Gi
+              limits:
+                memory: 4Gi
+    service:
+      app:               # controller == release name ⇒ Service "paperless"
+        controller: paperless
+        ports:
+          http:
+            port: 8000
+    persistence:
+      # Search index + classifier model + logs (local-path, rebuildable).
+      data:
+        existingClaim: paperless-data
+        globalMounts:
+          - path: /usr/src/paperless/data
+      # The three NFS subdirectories off the one RWX claim (paperless-media).
+      media:
+        existingClaim: paperless-media
+        globalMounts:
+          - path: /usr/src/paperless/media
+            subPath: media
+      consume:
+        existingClaim: paperless-media
+        globalMounts:
+          - path: /usr/src/paperless/consume
+            subPath: consume
+      export:
+        existingClaim: paperless-media
+        globalMounts:
+          - path: /usr/src/paperless/export
+            subPath: export
