@@ -27,3 +27,4 @@ configMapGenerator:
       disableNameSuffixHash: true
     files:
       - blueprints/grafana-oauth2.yaml
+      - blueprints/immich-oauth2.yaml

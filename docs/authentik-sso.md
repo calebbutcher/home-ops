@@ -66,6 +66,32 @@ Use this for apps that have an OAuth2/OIDC login option (Grafana, etc.).
 4. **Configure the app** with `client_id`, the client secret (from its own secret),
    and the Authentik endpoints under `authentik.int.nerdbox.dev/application/o/`.
 
+### Worked example: Immich (group-restricted access + role claim)
+
+`blueprints/immich-oauth2.yaml` extends the Grafana pattern with two reusable sub-patterns:
+
+- **Group-restricted access.** Two groups (`immich-users`, `immich-admins`) plus
+  `authentik_policies.policybinding` entries binding each group to the application. With the
+  default `policy_engine_mode: any`, membership in *either* group grants access and everyone
+  else is denied at Authentik. (Grafana has no binding, so it is open to all users.)
+- **Role-claim scope mapping.** A custom `authentik_providers_oauth2.scopemapping`
+  (`scope_name: immich_role`) whose expression emits an `immich_role` claim, added to the
+  provider's `property_mappings`. Immich consumes it via **Role Claim = `immich_role`** and
+  **Scope = `openid email profile immich_role`** to grant admin to `immich-admins` members:
+
+```python
+return {
+  "immich_role": "admin" if ak_is_group_member(request.user, name="immich-admins") else "user",
+}
+```
+
+Other Immich specifics: redirect URIs are registered for **both** FQDNs
+(`immich.int.nerdbox.dev` and `immich.nerdbox.dev`) plus the mobile scheme
+`app.immich:///oauth-callback`. Unlike Grafana (env-configured), **Immich's OAuth settings live
+in its admin UI** (Administration → Settings → OAuth), so there is no second secret in the immich
+namespace — the client secret lives only in `authentik-secret` (for the blueprint `!Env`) and is
+typed into the Immich UI. Immich links an OAuth login to an existing account **by email**.
+
 ---
 
 ## Style B — Forward-auth (apps with NO native SSO)

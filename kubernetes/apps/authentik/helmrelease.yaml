@@ -82,13 +82,18 @@ spec:
     worker:
       replicas: 1
       env:
-        # Surfaced to blueprints via `!Env GRAFANA_OAUTH2_CLIENT_SECRET` so the
-        # OIDC client secret never appears in a blueprint file in Git.
+        # Surfaced to blueprints via `!Env <NAME>` so OIDC client secrets never
+        # appear in a blueprint file in Git.
         - name: GRAFANA_OAUTH2_CLIENT_SECRET
           valueFrom:
             secretKeyRef:
               name: authentik-secret
               key: GRAFANA_OAUTH2_CLIENT_SECRET
+        - name: IMMICH_OAUTH2_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: IMMICH_OAUTH2_CLIENT_SECRET
       resources:
         requests:
           cpu: 100m
