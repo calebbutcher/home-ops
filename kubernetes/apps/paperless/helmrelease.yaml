@@ -65,6 +65,10 @@ spec:
               PAPERLESS_CONSUMPTION_DIR: /nfs/consume
               # consume/ is on NFS where inotify is unreliable — poll instead.
               PAPERLESS_CONSUMER_POLLING: "60"
+              # Check the IMAP mailbox(es) every 5 min (default is ~10) so emailed
+              # docs/photos appear quickly. Mail accounts/rules are configured in the
+              # paperless UI (DB-side); see docs/paperless-deploy.md.
+              PAPERLESS_EMAIL_TASK_CRON: "*/5 * * * *"
               # --- OIDC (allauth) — password login kept as a fallback ---
               PAPERLESS_APPS: allauth.socialaccount.providers.openid_connect
               PAPERLESS_SOCIAL_AUTO_SIGNUP: "true"

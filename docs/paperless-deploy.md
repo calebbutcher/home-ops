@@ -104,6 +104,42 @@ from any host — a network scanner, another machine, etc. — and paperless ing
 and files them automatically. Because the dir is on NFS (where inotify is unreliable),
 `PAPERLESS_CONSUMER_POLLING: "60"` makes paperless poll every 60s instead.
 
+## Email-in (mail consumption)
+
+paperless can pull documents from a mailbox over **IMAP** — email/forward bills, receipts,
+or a phone photo and they get filed automatically. paperless polls every 5 min
+(`PAPERLESS_EMAIL_TASK_CRON: "*/5 * * * *"`); inline-body emails render to a PDF via
+Tika/Gotenberg (already deployed).
+
+**Mailbox:** a **dedicated Gmail** used only for intake. Enable 2-Step Verification and
+generate an **App Password** (Google → Security → App passwords); IMAP is on by default.
+The mail account + rule live in **paperless' DB**, configured in the **UI**
+(Settings → *Mail*) — there is **no SOPS secret**. The app password is held only in the
+barman-backed Postgres (re-enter it on a from-scratch rebuild; revoke it in Google to cut
+access).
+
+**Mail Account** — `imap.gmail.com` : `993`, security **SSL**, username = the Gmail
+address, password = the **app password**.
+
+**Mail Rule** — one rule covers both attachments and inline bodies:
+
+| Field | Value |
+| --- | --- |
+| Folder | `INBOX` |
+| Attachment type | *All files, incl. inline* |
+| Consumption scope | *Process full Mail as `.eml` **+** attachments as separate documents* |
+| Action | *Mark as read* (non-destructive; won't reprocess) |
+| Filter "from" *(recommended)* | your own sending address(es) — stops stray mail becoming docs |
+| Assign tag *(optional)* | e.g. `email-in` |
+
+The "`.eml` + attachments" scope is the key: the **body** becomes a PDF (inline receipts/text)
+**and** attached photos/PDFs are consumed as their own OCR'd documents.
+
+> ⚠️ **HEIC photos won't OCR** — the image lacks `pillow_heif`, so iPhone "Actual Size"
+> (HEIC) photos are skipped. On the phone set **Camera → Formats → "Most Compatible"** (saves
+> JPEG), or when emailing pick a size other than "Actual Size" (Mail re-encodes to JPEG).
+> **JPEG/PNG/TIFF/AVIF/PDF** all work.
+
 ## Recovery
 
 - **Documents** live on the NAS (`media/`) — restore from the NAS's own backups.
