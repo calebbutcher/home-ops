@@ -1,0 +1,16 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: n8n-postgres
+  namespace: n8n
+spec:
+  # 6-field cron (seconds first); daily at 04:00, offset from tracearr's 02:00
+  # and authentik's 03:00.
+  schedule: "0 0 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: n8n-postgres
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

@@ -1,0 +1,114 @@
+---
+# UI (gated) — the n8n editor requires an Authentik session via the shared
+# domain-wide forward-auth middleware. The more specific machine paths below
+# (n8n-public) are routed ahead of this "/" router by Traefik (longer prefix
+# wins). n8n keeps its own owner login, so this gate stacks = a second login.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: n8n
+  namespace: n8n
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.middlewares: authentik-authentik-forwardauth@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - n8n.int.nerdbox.dev
+      secretName: n8n-tls
+  rules:
+    - host: n8n.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: n8n-app
+                port:
+                  number: 5678
+---
+# Machine endpoints (open) — webhooks, form triggers, the public REST API
+# (n8n-API-key protected) and the health endpoint stay reachable WITHOUT an
+# Authentik session so external callers / automation keep working. No
+# forward-auth middleware here. Reuses the n8n-tls cert minted by the UI
+# Ingress above (no cert-manager annotation -> no duplicate Certificate).
+#
+# NOTE: /rest (the editor's own backend) intentionally stays under the gate
+# above. If a Form Trigger is meant only for authenticated users, move /form*
+# back under the gated Ingress instead.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: n8n-public
+  namespace: n8n
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - n8n.int.nerdbox.dev
+      secretName: n8n-tls
+  rules:
+    - host: n8n.int.nerdbox.dev
+      http:
+        paths:
+          - path: /webhook
+            pathType: Prefix
+            backend:
+              service:
+                name: n8n-app
+                port:
+                  number: 5678
+          - path: /webhook-test
+            pathType: Prefix
+            backend:
+              service:
+                name: n8n-app
+                port:
+                  number: 5678
+          - path: /webhook-waiting
+            pathType: Prefix
+            backend:
+              service:
+                name: n8n-app
+                port:
+                  number: 5678
+          - path: /form
+            pathType: Prefix
+            backend:
+              service:
+                name: n8n-app
+                port:
+                  number: 5678
+          - path: /form-test
+            pathType: Prefix
+            backend:
+              service:
+                name: n8n-app
+                port:
+                  number: 5678
+          - path: /form-waiting
+            pathType: Prefix
+            backend:
+              service:
+                name: n8n-app
+                port:
+                  number: 5678
+          - path: /api/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: n8n-app
+                port:
+                  number: 5678
+          - path: /healthz
+            pathType: Prefix
+            backend:
+              service:
+                name: n8n-app
+                port:
+                  number: 5678
