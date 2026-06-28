@@ -25,9 +25,14 @@ The paperless image runs the webserver + Celery workers + scheduler + consumer i
 1. **NFS export** at `10.2.40.10:/mnt/mainPool/paperless`, same config as the Immich
    export (**no_root_squash**, cluster subnet allowed). The container starts as root
    and `gosu`-drops to **uid/gid 1000** (`USERMAP_UID/GID`), so the export must accept
-   uid 1000 writes — simplest is `chown 1000:1000` the dataset. The kubelet auto-creates
-   the `media/`, `consume/`, and `export/` subdirectories on first mount. To use a
+   uid 1000 writes — simplest is `chown 1000:1000` the dataset. The export is mounted
+   once at `/nfs` in the pod; paperless creates the `media/` and `consume/` subdirectories
+   itself on first boot (`PAPERLESS_MEDIA_ROOT` / `PAPERLESS_CONSUMPTION_DIR`). To use a
    different path, edit `media-pv.yaml`.
+
+   > **Why a single `/nfs` mount and not subPaths:** mounting the export three times with
+   > `subPath:` (media/consume/export) makes the kubelet hang at `ContainerCreating` with no
+   > error event on this NFS server. A single plain mount (like Immich's) avoids that.
 2. **DNS**: `paperless.int.nerdbox.dev` → cluster ingress (like the other `*.int` hosts).
 3. **`nfs-common`** present on every node (already true cluster-wide; a fresh worker
    without it leaves the pod stuck `ContainerCreating`).
