@@ -30,19 +30,21 @@ So we first run Immich's **official pgvecto.rs → VectorChord migration in the
 working Docker env** (Phase 1), then do a clean same-extension dump/restore into
 the cluster (Phases 2–4).
 
-> **Versions:** source Postgres major is **14**; the CNPG cluster pins
-> `ghcr.io/tensorchord/cloudnative-vectorchord:14-*` to keep the restore same-major.
-> Keep the in-cluster `immich-server`/`immich-machine-learning` tags **equal** and
-> **≥** your running server (v2.7.5) — Immich only migrates schemas forward.
+> **Versions — pinned to match on both ends.** Source Postgres major is **14**. Phase 1
+> migrates Docker onto **VectorChord 0.4.3** (the newest transition image on the
+> `pgvectors-0.2.0` path), and the CNPG cluster pins the matching
+> `ghcr.io/tensorchord/cloudnative-vectorchord:14-0.4.3` — so the restore is a
+> same-major **and** same-vchord-version operation (no VectorChord 1.0 boundary to
+> cross). Keep the in-cluster `immich-server`/`immich-machine-learning` tags **equal**
+> and **≥** your running server (v2.7.5) — Immich only migrates schemas forward.
 
 ## What you need
 
 - `kubectl` / `flux` pointed at the cluster, from this repo's context.
 - Shell access to the Docker host running Immich.
-- The exact transition image tag from Immich's current example `docker-compose.yml`
-  / the [v1.133.0 release notes](https://github.com/immich-app/immich/releases/tag/v1.133.0):
-  `ghcr.io/immich-app/postgres:14-vectorchord<X>-pgvectors0.2.0` (the `-pgvectors0.2.0`
-  suffix is what lets it read your existing `0.2.0` data).
+- The transition image **`ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0`**
+  (the `-pgvectors0.2.0` suffix lets it read your existing `0.2.0` data; `vectorchord0.4.3`
+  matches the CNPG cluster). Background: [v1.133.0 release notes](https://github.com/immich-app/immich/releases/tag/v1.133.0).
 
 ## Steps
 
@@ -71,19 +73,21 @@ docker exec -t immich_postgres pg_dump --clean --if-exists \
   --dbname=immich --username=postgres | gzip > immich-pre-vchord.sql.gz
 # copy immich-pre-vchord.sql.gz off-box
 
-# 1b. In docker-compose.yml, swap the DB image:
-#   docker.io/tensorchord/pgvecto-rs:pg14-v0.2.0
-#   → ghcr.io/immich-app/postgres:14-vectorchord<X>-pgvectors0.2.0
-# Ensure nothing forces DB_VECTOR_EXTENSION=pgvector|pgvecto.rs.
+# 1b. In docker-compose.yml, update the `database:` service:
+#   image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
+#   - DELETE the `command:` line(s) (old `-c shared_preload_libraries=vectors.so ...`)
+#   - DELETE the `healthcheck:` block (both are now handled inside the image)
+#   - keep the volume + POSTGRES_* env
+# Also ensure nothing forces DB_VECTOR_EXTENSION=pgvector|pgvecto.rs on immich-server.
 
-docker compose up -d
+docker compose pull && docker compose up -d
 docker compose logs -f immich_server   # watch the reindex
 # Normal to sit on "Reindexing clip_index" / "Reindexing face_index" for minutes
 # on large libraries.
 
-# 1c. Confirm the extension is now VectorChord and the UI/search/faces work:
+# 1c. Confirm the extension is now VectorChord 0.4.3 and the UI/search/faces work:
 docker exec immich_postgres psql -U postgres -d immich -c "\dx"
-# → vchord (+ vector) present; no more "vectors 0.2.0"
+# → vchord 0.4.3 (+ vector) present; no more "vectors 0.2.0"
 ```
 
 ### 2. Quiesce + dump (cutover begins)

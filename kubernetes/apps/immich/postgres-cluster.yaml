@@ -6,14 +6,12 @@ metadata:
   namespace: immich
 spec:
   instances: 1
-  # PG14 to match the source Docker Postgres major (pgvecto-rs:pg14-v0.2.0) so the
-  # logical dump/restore is a same-major operation. This image ships VectorChord
-  # (vchord) on the CNPG operand base; the source DB is migrated to VectorChord in
-  # Docker first (see docs/immich-migration.md), so this cluster only ever restores
-  # a clean VectorChord dump. vchord 1.1.1 is within Immich's accepted range
-  # (>=0.3,<2.0). If the Phase-2 restore reports a vchord version mismatch, pin this
-  # to the same vchord version the Docker transition image used.
-  imageName: ghcr.io/tensorchord/cloudnative-vectorchord:14-1.1.1
+  # PG14 + vchord 0.4.3 to exactly match the Docker migration: Phase 1 moves the
+  # source DB onto VectorChord via ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
+  # (the newest transition image on the pgvectors-0.2.0 path), so restoring its dump
+  # here is a same-version operation — no VectorChord 1.0 boundary to cross. 0.4.3 is
+  # within Immich's accepted range (>=0.3,<2.0). See docs/immich-migration.md.
+  imageName: ghcr.io/tensorchord/cloudnative-vectorchord:14-0.4.3
   storage:
     size: 20Gi
     storageClass: local-path
