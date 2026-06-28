@@ -1,4 +1,13 @@
 ---
+- name: Install NFS client utilities (so NFS-backed PVCs can mount on this worker)
+  # Without /sbin/mount.nfs the kubelet cannot mount NFS volumes and pods using
+  # NFS-backed PVCs (e.g. immich library, paperless documents) get stuck in
+  # ContainerCreating. Baked into the worker role so freshly-added nodes are ready.
+  ansible.builtin.package:
+    name: "{{ {'Debian': 'nfs-common', 'RedHat': 'nfs-utils'}[ansible_os_family] }}"
+    state: present
+  when: ansible_os_family in ['Debian', 'RedHat']
+
 - name: Check for PXE-booted system
   block:
     - name: Check if system is PXE-booted
