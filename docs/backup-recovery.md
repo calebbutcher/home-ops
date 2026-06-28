@@ -9,10 +9,11 @@ recover it.
 | State | Mechanism | Destination |
 | --- | --- | --- |
 | Desired state (manifests, HelmReleases) | Git | GitHub |
-| App config PVCs (`*-config` in `media` + `home-assistant`) | VolSync (restic) | RustFS `volsync` bucket on NAS |
+| App config PVCs (`*-config` in `media` + `home-assistant`, `n8n-data`) | VolSync (restic) | RustFS `volsync` bucket on NAS |
 | etcd (cluster runtime state) | k3s `--etcd-s3` snapshots | RustFS `etcd-snapshots` bucket + local on each control node |
-| Postgres (CNPG clusters, e.g. `tracearr-postgres`, `authentik-postgres`) | barman-cloud plugin (base backup + WAL archive, PITR) | RustFS `postgres-backups` bucket |
+| Postgres (CNPG clusters, e.g. `tracearr-postgres`, `authentik-postgres`, `n8n-postgres`) | barman-cloud plugin (base backup + WAL archive, PITR) | RustFS `postgres-backups` bucket |
 | Authentik signing key (`AUTHENTIK_SECRET_KEY`) | Git (SOPS) | `kubernetes/apps/authentik/secret.sops.yaml` |
+| n8n credential-encryption key (`N8N_ENCRYPTION_KEY`) | Git (SOPS) | `kubernetes/apps/n8n/secret.sops.yaml` |
 | MariaDB (mariadb-operator) | native `Backup` CR (nightly `mariadb-dump` → S3) | RustFS `mariadb-backups` bucket |
 | Media / downloads | NAS-level (out of scope here) | NAS `mainPool` |
 | SOPS age key | **Manual / offline** | Password manager + offline copy |
@@ -199,6 +200,33 @@ Two authentik-specific points:
 > Migrating a fresh Authentik install **from an existing deployment** is a separate
 > one-time procedure — see [authentik-migration.md](authentik-migration.md).
 
+## Restore: n8n
+
+n8n keeps its real state in **two** places, so a full restore is two steps:
+
+1. **Postgres (`n8n-postgres` in the `n8n` namespace)** holds all workflows,
+   credentials (encrypted), executions, and settings. Restore it exactly like any
+   other CNPG cluster (see [Restore: CNPG Postgres](#restore-cnpg-postgres-point-in-time)):
+   bootstrap a **new** Cluster that recovers from the `n8n-postgres-store`
+   ObjectStore, then let the HelmRelease repoint at the new `-rw` service (it reads
+   the DB password from the regenerated `n8n-postgres-app` secret automatically).
+2. **The `n8n-data` PVC** (`/home/node/.n8n` — execution binary-data files +
+   local state) follows the standard VolSync `ReplicationDestination` procedure
+   (see [Restore: a single app config PVC](#restore-a-single-app-config-pvc-volsync)),
+   with namespace `n8n`, repository secret `n8n-restic-secret`,
+   `destinationPVC: n8n-data`, and the mover running as **`runAsUser`/`runAsGroup`/`fsGroup:
+   1000`** (the n8n `node` user). Suspend the HelmRelease first so nothing holds the PVC.
+
+One n8n-specific point:
+
+- **The `N8N_ENCRYPTION_KEY` must match the era of the database you restore.** It
+  encrypts every stored credential; with a different key the restored DB loads but
+  all saved credentials become undecryptable (workflows that use them break). The key
+  lives in Git (`kubernetes/apps/n8n/secret.sops.yaml`), so it is recovered with the
+  repo + age key — just don't rotate it independently of a restore. (It is supplied
+  via env, **not** the auto-generated `.n8n/config` on the PVC, so the DB and the key
+  are the only things that must line up.)
+
 ## Restore: MariaDB (mariadb-operator)
 
 MariaDB runs under the **mariadb-operator** (`mariadb-system`), one instance per
@@ -328,9 +356,10 @@ node-by-node:
 ## Verifying backups are healthy
 
 - `kubectl get replicationsource -A` → `LAST SYNC` recent for every source (the
-  `*-config` sources in `media` plus `home-assistant-config` in `home-assistant`).
+  `*-config` sources in `media`, `home-assistant-config` in `home-assistant`, and
+  `n8n-data` in `n8n`).
 - `kubectl get scheduledbackup -A` → recent for every CNPG cluster
-  (`tracearr-postgres`, `authentik-postgres`); objects under RustFS
+  (`tracearr-postgres`, `authentik-postgres`, `n8n-postgres`); objects under RustFS
   `postgres-backups/<cluster>/`.
 - `kubectl get etcdsnapshotfiles.k3s.cattle.io` → entries with `s3://` locations.
 - `kubectl get cronjob uptime-kuma-mariadb -n uptime-kuma` → recent

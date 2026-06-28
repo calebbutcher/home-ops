@@ -1,0 +1,24 @@
+---
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationSource
+metadata:
+  name: n8n-data
+  namespace: n8n
+spec:
+  sourcePVC: n8n-data
+  trigger:
+    # After the 04:00 CNPG base backup.
+    schedule: "35 4 * * *"
+  restic:
+    repository: n8n-restic-secret
+    copyMethod: Direct
+    cacheCapacity: 1Gi
+    pruneIntervalDays: 7
+    retain:
+      daily: 7
+      weekly: 4
+      monthly: 3
+    moverSecurityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000

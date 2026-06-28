@@ -113,6 +113,36 @@ so the whole site now requires an Authentik session.
 That's it — the app requires an Authentik login, and identity is passed
 downstream via the `X-authentik-*` headers the middleware copies through.
 
+### Recipe: gate the UI but keep machine endpoints open (two Ingresses)
+
+The middleware annotation applies to the **whole** Ingress — every router it
+defines. So when an app serves both a human UI **and** machine endpoints (API
+keys, webhooks) on the same host, split it into **two** Ingress objects:
+
+- a **gated** Ingress with the middleware annotation on the catch-all `path: /`, and
+- an **open** Ingress (no middleware) listing only the machine paths.
+
+Traefik computes router priority by rule length, so the **more specific path
+prefixes win** — the open Ingress's `/api`, `/webhook`, … are matched ahead of the
+gated `/`. Give the open Ingress `entrypoints: websecure` and a `tls` block reusing
+the same secret, but **no** `cert-manager.io/cluster-issuer` annotation (only the
+gated Ingress should mint the cert, or you get a duplicate `Certificate`).
+
+If a machine endpoint lives on a **numeric/dynamic path** a prefix can't match
+(e.g. Prowlarr's per-indexer proxy paths), don't try to carve it out at the
+ingress — keep those callers pointed at the in-cluster Service
+(`<svc>.<ns>.svc.cluster.local`), which bypasses Traefik + Authentik entirely.
+
+**Worked examples:**
+
+- **The *arr apps** (`kubernetes/apps/media/{sonarr,radarr,prowlarr}/ingress.yaml`)
+  — gated `/` UI + an open `-api` Ingress for `/api`, `/feed`, `/ping`.
+- **n8n** (`kubernetes/apps/n8n/ingress.yaml`) — the canonical case: gated `/`
+  editor + an open `n8n-public` Ingress for `/webhook*`, `/form*`, the public REST
+  API `/api/v1`, and `/healthz`. (`/rest`, the editor's own backend, stays gated.)
+  Without this split, inbound webhooks would get a 302 to Authentik and every
+  external trigger would break.
+
 ### Alternative: per-app provider (`forward_single`)
 
 Only needed if you want an app **isolated** from the shared domain session (its

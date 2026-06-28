@@ -1,0 +1,18 @@
+---
+# n8n's home dir (/home/node/.n8n): execution binary-data files (filesystem mode)
+# plus local state. The credential-encryption key is supplied via env from
+# n8n-secret (NOT the auto-generated .n8n/config), so this PVC is non-critical
+# but still backed up by VolSync (replicationsource.yaml). Workflows/credentials/
+# executions all live in Postgres (CNPG), not here.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: n8n-data
+  namespace: n8n
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
