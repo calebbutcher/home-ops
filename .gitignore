@@ -80,6 +80,7 @@ vault_pass.txt
 infrastructure/ansible/inventory/my-cluster/group_vars/all/secrets.yml
 # kubeconfig fetched by site.yml
 infrastructure/ansible/kubeconfig
+.ansible
 
 # -----------------------------------------------------------------------------
 # OS
