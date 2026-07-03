@@ -9,4 +9,5 @@ resources:
   - controllers/cloudnative-pg
   - controllers/cnpg-barman-plugin
   - controllers/mariadb-operator
+  - controllers/system-upgrade-controller
   - configs
