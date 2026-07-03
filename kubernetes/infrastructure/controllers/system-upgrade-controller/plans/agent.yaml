@@ -6,8 +6,14 @@
 # every agent WAIT until the control-plane upgrade has finished — enforcing the
 # correct order (servers before agents) even if you label everything at once.
 #
-# Workers ARE drained (pods evicted, respecting PDBs) before the binary swap, so
-# workloads reschedule off the node first. concurrency:1 → one worker at a time.
+# Workers are CORDON-ONLY (no drain) — same as the server Plan. We deliberately do
+# NOT drain: every worker hosts single-instance CloudNativePG clusters on node-local
+# (local-path) storage, whose `-primary` PDB allows 0 disruptions. An eviction can
+# therefore never succeed (no replica to fail over to) so `kubectl drain` deadlocks
+# forever; and because the storage is node-local the DB can only come back on the
+# SAME node anyway, so draining buys nothing but downtime. concurrency:1 → one worker
+# at a time; k3s's embedded containerd keeps pods running across the binary swap (only
+# a brief blip). Revisit adding drain only if DBs move to HA/replicated storage.
 apiVersion: upgrade.cattle.io/v1
 kind: Plan
 metadata:
@@ -27,8 +33,5 @@ spec:
   prepare:
     image: rancher/k3s-upgrade
     args: ["prepare", "k3s-server"]
-  drain:
-    force: true
-    skipWaitForDeleteTimeout: 60
   upgrade:
     image: rancher/k3s-upgrade
