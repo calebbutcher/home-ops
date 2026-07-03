@@ -34,7 +34,7 @@ spec:
           app:
             image:
               repository: ghcr.io/immich-app/immich-server
-              tag: v2.7.5
+              tag: v3.0.1
             env:
               TZ: UTC
               DB_HOSTNAME: immich-postgres-rw
@@ -63,7 +63,7 @@ spec:
           app:
             image:
               repository: ghcr.io/immich-app/immich-machine-learning
-              tag: v2.7.5
+              tag: v3.0.1
             resources:
               requests:
                 cpu: 500m
