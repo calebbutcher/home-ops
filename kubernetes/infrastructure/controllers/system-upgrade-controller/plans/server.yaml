@@ -1,0 +1,44 @@
+---
+# Control-plane (k3s server) upgrade Plan.
+#
+# GATED BY NODE LABEL: this Plan only acts on nodes that are BOTH control-plane
+# AND labelled `k3s-upgrade=true`. Merging the PR installs the controller and
+# these Plans but upgrades NOTHING until you opt a node in:
+#
+#     kubectl label node <control-plane-node> k3s-upgrade=true
+#
+# Arm ONE control-plane node first, watch it go NotReady→Ready on the new
+# version, then label the other two (concurrency:1 still does them strictly one
+# at a time, preserving etcd quorum). Leaving the label on is safe — SUC won't
+# re-run a node already at .spec.version; it only re-fires when you bump version.
+#
+# Servers are CORDONED ONLY (no drain) — draining a control-plane node is
+# unnecessary and risks disrupting etcd; the k3s-upgrade image swaps the binary
+# and restarts the service in place.
+apiVersion: upgrade.cattle.io/v1
+kind: Plan
+metadata:
+  name: k3s-server
+  namespace: system-upgrade
+spec:
+  # First hop from the cluster's current v1.30.2+k3s2. k3s/Kubernetes only
+  # support +1 minor skew, so step ONE minor at a time: once every node is on
+  # 1.31, bump this to the latest v1.32.x, reconcile, verify, repeat up to the
+  # current release. Keep in rough sync with ansible `k3s_version` (the
+  # fresh-install pin in inventory/my-cluster/group_vars/all/main.yml).
+  version: v1.31.14+k3s1
+  concurrency: 1
+  cordon: true
+  nodeSelector:
+    matchExpressions:
+      - { key: node-role.kubernetes.io/control-plane, operator: In, values: ["true"] }
+      - { key: k3s-upgrade, operator: In, values: ["true"] }
+  serviceAccountName: system-upgrade
+  # Let the upgrade job land on tainted control-plane / etcd nodes.
+  tolerations:
+    - { key: CriticalAddonsOnly, operator: Exists }
+    - { key: node-role.kubernetes.io/control-plane, effect: NoSchedule, operator: Exists }
+    - { key: node-role.kubernetes.io/master, effect: NoSchedule, operator: Exists }
+    - { key: node-role.kubernetes.io/etcd, effect: NoExecute, operator: Exists }
+  upgrade:
+    image: rancher/k3s-upgrade

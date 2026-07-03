@@ -26,6 +26,48 @@ Install the Renovate app on the repo at <https://github.com/apps/renovate>, gran
 pinned by **immutable digest** (`tag: latest@sha256:...`). Renovate's `pinDigests`
 opens a PR whenever that digest changes.
 
+## k3s version upgrades (System Upgrade Controller)
+
+The **k3s version itself** (Kubernetes version) is upgraded in-cluster by the
+[System Upgrade Controller](https://docs.k3s.io/upgrades/automated) (SUC), deployed at
+[`kubernetes/infrastructure/controllers/system-upgrade-controller/`](../kubernetes/infrastructure/controllers/system-upgrade-controller/).
+This is separate from the Ansible `k3s_version` pin (which is only the *fresh-install /
+node-join* baseline) and from Renovate (which does not touch k3s).
+
+**How it works.** Two `Plan` CRs (`k3s-server`, `k3s-agent`) declare a target `version`.
+SUC cordons → (drains, agents only) → swaps the k3s binary via a per-node Job →
+uncordons, **one node at a time** (`concurrency: 1`). The agent Plan's `prepare` step
+blocks on the server Plan, so **control-plane upgrades fully before any worker**.
+
+**Nothing upgrades until you opt a node in.** Both Plans are gated on a node label, so
+merging only installs the controller:
+
+```sh
+# 1. (Recommended) take a fresh etcd snapshot first — instant rollback if a
+#    control-plane node goes bad. See docs/backup-recovery.md.
+# 2. Arm ONE control-plane node, watch it go NotReady→Ready on the new version:
+kubectl label node <control-plane-node> k3s-upgrade=true
+kubectl -n system-upgrade get jobs,plans -w
+kubectl get nodes -o wide          # confirm the new version, node Ready
+# 3. Arm the other two control-plane nodes (SUC still does them one at a time):
+kubectl label node <cp-2> <cp-3> k3s-upgrade=true
+# 4. Then arm the workers (they wait for the control plane automatically):
+kubectl label node <worker-1> ... k3s-upgrade=true
+```
+
+**One minor at a time.** k3s/Kubernetes only support a +1 minor version skew. The Plans
+start at `v1.31.14+k3s1` (first hop from the cluster's `v1.30.2+k3s2`). Once **every** node
+is on 1.31, bump `.spec.version` in *both* `plans/*.yaml` to the latest `v1.32.x`, commit,
+let Flux reconcile — already-labelled nodes roll automatically — verify, then repeat up to
+the current release. **Never skip a minor.** Keep the Ansible `k3s_version`
+(`ansible/inventory/my-cluster/group_vars/all/main.yml`) roughly in sync so freshly-joined
+nodes don't land far behind.
+
+**Rollback / stop.** Remove the label from un-upgraded nodes to halt further rollout
+(`kubectl label node <name> k3s-upgrade-`). Nodes already upgraded stay upgraded — recover
+those from the etcd snapshot if needed. The controller only bundles CoreDNS / metrics-server
+/ local-path here (Traefik and ServiceLB are `--disable`d), so the upgrade surface is small.
+
 ## Follow-on: Discord notifications (not yet enabled)
 
 GitHub already notifies on PRs and the Dependency Dashboard. To *also* push Flux

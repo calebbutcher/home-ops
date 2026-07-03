@@ -1,0 +1,11 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# No top-level namespace/label transformers — the vendored manifests already
+# carry their own namespaces, and Flux applies the CRD (crd.yaml) before the
+# Plan CRs (plans/*) within a single Kustomization, so no ordering split needed.
+resources:
+  - crd.yaml
+  - controller.yaml
+  - plans/server.yaml
+  - plans/agent.yaml
