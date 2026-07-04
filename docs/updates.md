@@ -35,9 +35,19 @@ This is separate from the Ansible `k3s_version` pin (which is only the *fresh-in
 node-join* baseline) and from Renovate (which does not touch k3s).
 
 **How it works.** Two `Plan` CRs (`k3s-server`, `k3s-agent`) declare a target `version`.
-SUC cordons → (drains, agents only) → swaps the k3s binary via a per-node Job →
-uncordons, **one node at a time** (`concurrency: 1`). The agent Plan's `prepare` step
-blocks on the server Plan, so **control-plane upgrades fully before any worker**.
+SUC cordons → swaps the k3s binary via a per-node Job → uncordons, **one node at a
+time** (`concurrency: 1`). The agent Plan's `prepare` step blocks on the server Plan,
+so **control-plane upgrades fully before any worker**.
+
+**Both Plans are cordon-only (no drain) — on purpose.** Every worker hosts
+single-instance CloudNativePG clusters on node-local `local-path` storage, whose
+`-primary` PodDisruptionBudget allows **0** disruptions. A drain can therefore never
+evict them (no replica to fail over to) and `kubectl drain` deadlocks forever; and
+because the storage is node-local the DB can only come back on the *same* node, so
+draining buys nothing. k3s's embedded containerd keeps pods running across the binary
+swap (only a brief blip). If the Postgres clusters are ever moved to HA
+(`instances: 3`) or replicated storage, draining can be re-enabled (add `drain:` back
+to the agent Plan, plus `deleteEmptyDirData: true`).
 
 **Nothing upgrades until you opt a node in.** Both Plans are gated on a node label, so
 merging only installs the controller:
