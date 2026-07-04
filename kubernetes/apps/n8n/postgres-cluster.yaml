@@ -5,7 +5,16 @@ metadata:
   name: n8n-postgres
   namespace: n8n
 spec:
-  instances: 1
+  # HA: primary + 2 streaming replicas (was 1) — failover on node loss + a PDB that
+  # permits drains. Scaling up is online (replicas clone via pg_basebackup). The
+  # affinity block rolls the primary once, so switchover promotes a replica first
+  # (~seconds) instead of a full restart. Async default. See docs/cnpg-ha.md.
+  instances: 3
+  primaryUpdateMethod: switchover
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
   imageName: ghcr.io/cloudnative-pg/postgresql:17
   storage:
     size: 10Gi
