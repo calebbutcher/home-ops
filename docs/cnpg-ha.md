@@ -36,6 +36,7 @@ Nothing else changes (image, storage class/size, barman plugin, bootstrap, resou
 ```yaml
 spec:
   instances: 3                       # was 1  → primary + 2 replicas
+  primaryUpdateMethod: switchover    # graceful primary roll (see gotcha below)
   affinity:
     enablePodAntiAffinity: true
     topologyKey: kubernetes.io/hostname
@@ -45,8 +46,8 @@ spec:
 
 Why it's safe:
 
-- Scaling 1→3 is **online**. CNPG clones each new replica from the running primary via
-  `pg_basebackup`; the primary (and the app) stay up — no downtime.
+- Adding **replicas** is online — CNPG clones them from the running primary via
+  `pg_basebackup`; the primary keeps serving.
 - `bootstrap.postInitApplicationSQL` runs only at the *original* primary bootstrap, **not**
   on replica creation. Replicas inherit the schema (and extensions) via streaming, so those
   statements never re-run.
@@ -55,13 +56,27 @@ Why it's safe:
 - `podAntiAffinityType: required` guarantees replicas land on different nodes (co-location
   defeats HA). If a replica ever goes `Pending` for capacity, soften to `preferred`.
 
+### ⚠️ Gotcha: the affinity block rolls the primary
+
+Adding the `affinity` block changes the **primary's** pod spec, so CNPG must roll the primary
+too — and its **default `primaryUpdateMethod` is `restart`** (tear down + recreate the primary
+pod, ~1–2 min). During that window the `<cluster>-rw` service has no endpoint and the app
+loses its DB → **authentik crashlooped on its startup probe until the primary returned.** The
+scale-up itself (adding replicas) is *not* what causes this — it's the primary roll.
+
+Mitigation (baked into the snippet above): **`primaryUpdateMethod: switchover`** — CNPG
+promotes a caught-up replica first (~seconds), then restarts the old primary as a replica, so
+the write outage is a brief blip instead of a full restart. Setting this field does **not**
+itself roll any pod. (authentik already took its one-time restart before this was added; the
+field protects its future changes.)
+
 ## Rollout order & per-app quirks
 
 Do one app per PR, and verify each reaches `READY 3` before starting the next.
 
 | # | App | File | Quirk |
-|---|-----|------|-------|
-| 1 | **authentik** | `kubernetes/apps/authentik/postgres-cluster.yaml` | PG16 + `pg_trgm`. First — SSO for everything. |
+| --- | --- | --- | --- |
+| 1 | **authentik** | `kubernetes/apps/authentik/postgres-cluster.yaml` | PG16 + `pg_trgm`. First — SSO for everything. ✅ done |
 | 2 | paperless | `kubernetes/apps/paperless/postgres-cluster.yaml` | plain PG17 — trivial |
 | 3 | n8n | `kubernetes/apps/n8n/postgres-cluster.yaml` | plain PG17 — trivial |
 | 4 | tracearr | `kubernetes/apps/media/tracearr/postgres-cluster.yaml` | TimescaleDB — validate replicas load the extension |

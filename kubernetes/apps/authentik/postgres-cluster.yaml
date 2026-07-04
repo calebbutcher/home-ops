@@ -10,6 +10,11 @@ spec:
   # both. Scaling up is online (replicas clone from the primary via pg_basebackup, no
   # downtime). Async replication (default) is kept. See docs/cnpg-ha.md.
   instances: 3
+  # Roll the primary via a graceful switchover (promote a caught-up replica first,
+  # ~seconds) instead of CNPG's default in-place restart (~1-2 min write outage). The
+  # initial scale-up already restarted the primary once; this makes FUTURE pod-spec
+  # changes (image bumps, affinity edits) non-disruptive.
+  primaryUpdateMethod: switchover
   affinity:
     enablePodAntiAffinity: true
     topologyKey: kubernetes.io/hostname
