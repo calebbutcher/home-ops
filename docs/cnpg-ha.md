@@ -128,20 +128,25 @@ is usually fine; re-add drain only if you want stateless/replicated apps to pre-
 ## Known issue: WAL archiving stuck after a busy switchover (#828)
 
 On a **busy** DB, the affinity-triggered switchover can leave the old primary with a backlog
-of **un-archived WALs**, creating a gap that trips
-[plugin-barman-cloud #828](https://github.com/cloudnative-pg/plugin-barman-cloud/issues/828):
-the new primary fails `barman-cloud-check-wal-archive` with **"Expected empty archive"**, so
-WAL archiving wedges cluster-wide (`ContinuousArchiving=False`, empty `lastArchivedWAL`) and the
-old primary can't rejoin (stuck `1/2`, cluster "Upgrading"). Hit on **immich** (622 pending
-WALs); the quieter DBs switched over cleanly. The app stays up and data is safe (replicated) —
-only the backup pipeline is affected.
+of un-archived WALs and — more importantly — the `.check-empty-wal-archive` marker file
+persisting in `$PGDATA` (it should be removed once archiving resumes). That makes
+[plugin-barman-cloud #828](https://github.com/cloudnative-pg/plugin-barman-cloud/issues/828)
+fire: the plugin runs `barman-cloud-check-wal-archive` on **every** archive call and fails
+**"Expected empty archive"** against the legitimately non-empty archive — so WAL archiving
+wedges cluster-wide (`ContinuousArchiving=False`, empty `lastArchivedWAL`) and the old primary
+can't rejoin (stuck `1/2`, cluster "Upgrading"). Hit on **immich** (622 pending WALs); the
+quieter DBs switched over cleanly. App stays up and data is safe (replicated) — only the backup
+pipeline is affected.
 
-Fix (no upstream release yet): **start a fresh archive chain** by overriding the barman
-`serverName` to a new value in the cluster's `spec.plugins[].parameters`, e.g.
-`serverName: immich-postgres-r2`. The new `s3://.../immich-postgres-r2/` path is empty, so the
-first-WAL check passes, archiving resumes, and the stuck instance rejoins. **Then take a fresh
-base backup** so the new chain is restorable; the old chain is retained for its 14d window.
-Verify: `kubectl -n <ns> get cluster <name>` → `ContinuousArchiving=True`, `READY 3`.
+**Fix — the `cnpg.io/skipEmptyWalArchiveCheck: "enabled"` annotation** on the Cluster (skips the
+buggy check; fixed upstream by PR #843 but not yet released — we're on v0.13.0). ⚠️ A fresh
+`serverName` does **NOT** fix this (confirmed by the maintainer on #828): the check fails against
+*any* non-empty archive, so pointing at a new path only works until the first WAL lands. With the
+annotation set, archiving resumes on the existing chain and the stuck instance flushes its pending
+WALs (closing the gap) and rejoins. Verify: `kubectl -n <ns> get cluster <name>` →
+`ContinuousArchiving=True`, `READY 3`. The annotation can be removed once healthy (or kept until
+PR #843 ships). Not needed pre-emptively on the other DBs — they only trip this on a *busy*
+switchover.
 
 ## Out of scope
 
