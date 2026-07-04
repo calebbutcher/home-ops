@@ -5,7 +5,18 @@ metadata:
   name: immich-postgres
   namespace: immich
 spec:
-  instances: 1
+  # HA: primary + 2 streaming replicas (was 1) — failover on node loss + a PDB that
+  # permits drains. Scaling up is online (replicas clone via pg_basebackup; this is the
+  # biggest DB at 20Gi so the clone takes a bit longer). The affinity block rolls the
+  # primary once, so switchover promotes a replica first (~seconds) instead of a full
+  # restart. Async default. VectorChord replicates over physical streaming (vchord.so is
+  # in shared_preload_libraries below); verify replicas load it. See docs/cnpg-ha.md.
+  instances: 3
+  primaryUpdateMethod: switchover
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
   # PG14 + vchord 0.4.3 to exactly match the Docker migration: Phase 1 moves the
   # source DB onto VectorChord via ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
   # (the newest transition image on the pgvectors-0.2.0 path), so restoring its dump
