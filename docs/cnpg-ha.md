@@ -109,21 +109,32 @@ kubectl -n media get cluster tracearr-postgres -w   # new primary within seconds
 
 The app should reconnect on its own.
 
-## Re-enabling worker drains (optional, later)
+## Worker drains (enabled, now that the DBs are HA)
 
-Once the DBs are HA, draining *can* work again. Add back to
-`kubernetes/infrastructure/controllers/system-upgrade-controller/plans/agent.yaml`:
+The SUC agent Plan (`.../system-upgrade-controller/plans/agent.yaml`) drains movable pods
+before the binary swap:
 
 ```yaml
   drain:
     force: true
+    ignoreDaemonSets: true
+    deleteEmptydirData: true        # note: lowercase "dir" is the CRD field name
     skipWaitForDeleteTimeout: 60
-    deleteEmptyDirData: true    # needed for emptyDir-backed pods
+    podSelector:                     # drain everything EXCEPT CNPG pods
+      matchExpressions:
+        - { key: cnpg.io/cluster, operator: DoesNotExist }
 ```
 
-But note: other single-instance `local-path` apps (Prometheus TSDB, MariaDB, `paperless-data`)
-still can't relocate, so they'd go **down** during a drain rather than deadlock. Cordon-only
-is usually fine; re-add drain only if you want stateless/replicated apps to pre-migrate.
+**Why exclude CNPG.** Their PVCs are node-local (`local-path`), so a drained replica can't
+move anyway, and draining a node with a CNPG **primary** forces a switchover — which on a busy
+DB re-triggers [#828](https://github.com/cloudnative-pg/plugin-barman-cloud/issues/828). Excluding
+them lets CNPG restart in place on the k3s restart (no switchover, no #828), while everything
+movable migrates gracefully.
+
+**Trade-off to know:** other single-instance `local-path` apps (Prometheus TSDB, MariaDB,
+`*arr` configs) also can't relocate, so they blip/down for their node's upgrade window — that's
+inherent to draining on a node-local-storage cluster. Cordon-only (drop the `drain:` block) is
+gentler for those and remains a valid choice.
 
 ## Known issue: WAL archiving stuck after a busy switchover (#828)
 
