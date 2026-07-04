@@ -37,6 +37,15 @@ spec:
       isWALArchiver: true
       parameters:
         barmanObjectName: immich-postgres-store
+        # Fresh archive chain. The HA switchover left 622 un-archived WALs on the old
+        # primary → a gap that trips plugin-barman-cloud #828 ("Expected empty archive"),
+        # wedging WAL archiving cluster-wide and stalling immich-postgres-1's rejoin.
+        # serverName defaults to the cluster name; overriding it points barman at a NEW,
+        # empty path (s3://postgres-backups/immich-postgres-r2/) so the first-WAL check
+        # passes, archiving resumes, and -1 rejoins. A fresh base backup is taken after
+        # this applies; the old s3://.../immich-postgres/ chain is kept (14d retention)
+        # for emergency restore up to the switchover. See docs/cnpg-ha.md.
+        serverName: immich-postgres-r2
   bootstrap:
     initdb:
       database: immich

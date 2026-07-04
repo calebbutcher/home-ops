@@ -125,6 +125,24 @@ But note: other single-instance `local-path` apps (Prometheus TSDB, MariaDB, `pa
 still can't relocate, so they'd go **down** during a drain rather than deadlock. Cordon-only
 is usually fine; re-add drain only if you want stateless/replicated apps to pre-migrate.
 
+## Known issue: WAL archiving stuck after a busy switchover (#828)
+
+On a **busy** DB, the affinity-triggered switchover can leave the old primary with a backlog
+of **un-archived WALs**, creating a gap that trips
+[plugin-barman-cloud #828](https://github.com/cloudnative-pg/plugin-barman-cloud/issues/828):
+the new primary fails `barman-cloud-check-wal-archive` with **"Expected empty archive"**, so
+WAL archiving wedges cluster-wide (`ContinuousArchiving=False`, empty `lastArchivedWAL`) and the
+old primary can't rejoin (stuck `1/2`, cluster "Upgrading"). Hit on **immich** (622 pending
+WALs); the quieter DBs switched over cleanly. The app stays up and data is safe (replicated) —
+only the backup pipeline is affected.
+
+Fix (no upstream release yet): **start a fresh archive chain** by overriding the barman
+`serverName` to a new value in the cluster's `spec.plugins[].parameters`, e.g.
+`serverName: immich-postgres-r2`. The new `s3://.../immich-postgres-r2/` path is empty, so the
+first-WAL check passes, archiving resumes, and the stuck instance rejoins. **Then take a fresh
+base backup** so the new chain is restorable; the old chain is retained for its 14d window.
+Verify: `kubectl -n <ns> get cluster <name>` → `ContinuousArchiving=True`, `READY 3`.
+
 ## Out of scope
 
 - **MariaDB / uptime-kuma** HA (mariadb-operator replication/Galera) — non-critical, no PDB.
