@@ -5,7 +5,17 @@ metadata:
   name: tracearr-postgres
   namespace: media
 spec:
-  instances: 1
+  # HA: primary + 2 streaming replicas (was 1) — failover on node loss + a PDB that
+  # permits drains. Scaling up is online (replicas clone via pg_basebackup). The
+  # affinity block rolls the primary once, so switchover promotes a replica first
+  # (~seconds) instead of a full restart. Async default. TimescaleDB replicates over
+  # physical streaming; verify replicas load the extension. See docs/cnpg-ha.md.
+  instances: 3
+  primaryUpdateMethod: switchover
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
   imageName: ghcr.io/clevyr/cloudnativepg-timescale:17-ts2
   storage:
     size: 10Gi
