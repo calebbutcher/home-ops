@@ -6,14 +6,20 @@
 # every agent WAIT until the control-plane upgrade has finished — enforcing the
 # correct order (servers before agents) even if you label everything at once.
 #
-# Workers are CORDON-ONLY (no drain) — same as the server Plan. We deliberately do
-# NOT drain: every worker hosts single-instance CloudNativePG clusters on node-local
-# (local-path) storage, whose `-primary` PDB allows 0 disruptions. An eviction can
-# therefore never succeed (no replica to fail over to) so `kubectl drain` deadlocks
-# forever; and because the storage is node-local the DB can only come back on the
-# SAME node anyway, so draining buys nothing but downtime. concurrency:1 → one worker
-# at a time; k3s's embedded containerd keeps pods running across the binary swap (only
-# a brief blip). Revisit adding drain only if DBs move to HA/replicated storage.
+# Workers are DRAINED (movable pods evicted before the binary swap) now that the
+# CloudNativePG clusters are HA (instances: 3) — see docs/cnpg-ha.md.
+#
+# CRITICAL: the drain EXCLUDES CNPG pods (podSelector: cnpg.io/cluster DoesNotExist).
+# Reasons: (1) their PVCs are node-local (local-path) so a drained replica can't move
+# anyway, and (2) draining a node with a CNPG *primary* would force a switchover, which
+# on a busy DB re-triggers plugin-barman-cloud #828 (the "Expected empty archive" WAL
+# stall we hit on immich). Excluding them means CNPG just restarts in place on the k3s
+# restart (no switchover, no #828), exactly like the old cordon-only behaviour, while
+# everything movable migrates gracefully. concurrency:1 → one worker at a time.
+#
+# NOTE: other single-instance local-path apps (Prometheus, MariaDB, *arr configs) still
+# can't relocate, so they blip/down for the node's upgrade window — that's the inherent
+# cost of draining on a node-local-storage cluster; cordon-only avoided it.
 apiVersion: upgrade.cattle.io/v1
 kind: Plan
 metadata:
@@ -33,5 +39,15 @@ spec:
   prepare:
     image: rancher/k3s-upgrade
     args: ["prepare", "k3s-server"]
+  drain:
+    force: true                    # evict bare/standalone pods too
+    ignoreDaemonSets: true         # node-exporter, metallb speaker, etc. stay
+    deleteEmptydirData: true       # allow evicting pods backed by emptyDir
+    skipWaitForDeleteTimeout: 60   # don't hang on already-unreachable pods
+    # Do NOT drain CNPG pods — they're node-local and draining the primary forces a
+    # switchover that can re-trigger #828 (see header). They restart in place instead.
+    podSelector:
+      matchExpressions:
+        - { key: cnpg.io/cluster, operator: DoesNotExist }
   upgrade:
     image: rancher/k3s-upgrade
