@@ -138,15 +138,30 @@ can't rejoin (stuck `1/2`, cluster "Upgrading"). Hit on **immich** (622 pending 
 quieter DBs switched over cleanly. App stays up and data is safe (replicated) — only the backup
 pipeline is affected.
 
-**Fix — the `cnpg.io/skipEmptyWalArchiveCheck: "enabled"` annotation** on the Cluster (skips the
-buggy check; fixed upstream by PR #843 but not yet released — we're on v0.13.0). ⚠️ A fresh
-`serverName` does **NOT** fix this (confirmed by the maintainer on #828): the check fails against
-*any* non-empty archive, so pointing at a new path only works until the first WAL lands. With the
-annotation set, archiving resumes on the existing chain and the stuck instance flushes its pending
-WALs (closing the gap) and rejoins. Verify: `kubectl -n <ns> get cluster <name>` →
-`ContinuousArchiving=True`, `READY 3`. The annotation can be removed once healthy (or kept until
-PR #843 ships). Not needed pre-emptively on the other DBs — they only trip this on a *busy*
-switchover.
+**Recovery — the `cnpg.io/skipEmptyWalArchiveCheck: "enabled"` annotation** on the Cluster (skips
+the buggy check). With it set, archiving resumes on the existing chain and the stuck instance
+flushes its pending WALs (closing the gap) and rejoins. Verify: `kubectl -n <ns> get cluster
+<name>` → `ContinuousArchiving=True`, `READY 3`. ⚠️ A fresh `serverName` does **NOT** fix this
+(confirmed by the maintainer on issue #828): the check fails against *any* non-empty archive, so
+pointing at a new path only works until the first WAL lands.
+
+**Then remove the annotation again** — it globally disables a safety check, so it's a recovery
+lever, not a permanent setting. It's only safe to remove once continuous archiving is healthy
+**and** the `.check-empty-wal-archive` marker is gone in `$PGDATA` on **every** instance (the check
+is gated on that marker; CNPG numbers instances from `1`):
+
+```sh
+for i in 1 2 3; do echo "== <name>-$i =="; kubectl -n <ns> exec <name>-$i -c postgres -- \
+  ls -la /var/lib/postgresql/data/pgdata/.check-empty-wal-archive 2>&1 || true; done
+# all "No such file or directory" → safe to drop the annotation (GitOps; metadata-only, no pod roll)
+# still present on a pod → `rm -f` that path on it first (benign stale flag), then drop the annotation
+```
+
+⚠️ **No released upstream fix exists** — PR #843 was closed unmerged and we're on the latest plugin
+(v0.13.0) — so a future *busy* switchover can re-trigger #828; just re-apply the annotation to
+recover, then remove it again. On **immich** the marker was confirmed gone on all three instances
+and the annotation was dropped (PR #73). Not needed pre-emptively on the other DBs — they only trip
+this on a *busy* switchover.
 
 ## Out of scope
 
