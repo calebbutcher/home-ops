@@ -5,15 +5,16 @@ metadata:
   name: immich-postgres
   namespace: immich
   annotations:
-    # Work around plugin-barman-cloud #828: after the HA switchover the
-    # `.check-empty-wal-archive` marker file persisted in PGDATA (it should be
-    # removed once archiving resumes), so the plugin ran `barman-cloud-check-wal-archive`
-    # on every archive call and failed ("Expected empty archive") against the
-    # legitimately non-empty archive — wedging WAL archiving cluster-wide and blocking
-    # immich-postgres-1's rejoin (stuck 1/2). This annotation skips that (buggy) check.
-    # Fixed upstream by PR #843 but not yet in a release (we're on v0.13.0). Safe: the
-    # check only guards against pointing a NEW cluster at an existing archive, which is
-    # not our case. Once every instance is healthy this can be removed. See docs/cnpg-ha.md.
+    # Standing workaround for plugin-barman-cloud #828: after the HA switchover the
+    # `.check-empty-wal-archive` marker file persisted in PGDATA (it should be cleared once
+    # archiving resumes), so the plugin ran `barman-cloud-check-wal-archive` on every archive
+    # call and failed ("Expected empty archive") against the legitimately non-empty archive —
+    # wedging WAL archiving cluster-wide and blocking immich-postgres-1's rejoin. This
+    # annotation skips that (buggy) check. No released upstream fix exists: PR #843 was CLOSED
+    # unmerged and we're already on the latest plugin (v0.13.0). Safe to keep — the check only
+    # guards a NEW cluster pointed at an existing archive, which is not our case. Removing it
+    # is only safe once `.check-empty-wal-archive` is confirmed gone on ALL instances (else
+    # #828 re-fires). See docs/cnpg-ha.md.
     cnpg.io/skipEmptyWalArchiveCheck: "enabled"
 spec:
   # HA: primary + 2 streaming replicas (was 1) — failover on node loss + a PDB that
@@ -48,11 +49,6 @@ spec:
       isWALArchiver: true
       parameters:
         barmanObjectName: immich-postgres-store
-        # NOTE: the serverName override tried in #70 does NOT fix #828 (confirmed by the
-        # maintainer on the issue) — the marker-file check fails against ANY non-empty
-        # archive. Reverted to the default path so the existing backup chain stays
-        # continuous; the skipEmptyWalArchiveCheck annotation above is the actual fix, and
-        # -1 flushes its pending WALs into the original chain, closing the gap.
   bootstrap:
     initdb:
       database: immich

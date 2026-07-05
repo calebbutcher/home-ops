@@ -139,13 +139,14 @@ quieter DBs switched over cleanly. App stays up and data is safe (replicated) �
 pipeline is affected.
 
 **Fix — the `cnpg.io/skipEmptyWalArchiveCheck: "enabled"` annotation** on the Cluster (skips the
-buggy check; fixed upstream by PR #843 but not yet released — we're on v0.13.0). ⚠️ A fresh
-`serverName` does **NOT** fix this (confirmed by the maintainer on #828): the check fails against
-*any* non-empty archive, so pointing at a new path only works until the first WAL lands. With the
-annotation set, archiving resumes on the existing chain and the stuck instance flushes its pending
-WALs (closing the gap) and rejoins. Verify: `kubectl -n <ns> get cluster <name>` →
-`ContinuousArchiving=True`, `READY 3`. The annotation can be removed once healthy (or kept until
-PR #843 ships). Not needed pre-emptively on the other DBs — they only trip this on a *busy*
+buggy check). No released upstream fix exists: PR #843 was closed unmerged, and we're on the latest
+plugin (v0.13.0). ⚠️ A fresh `serverName` does **NOT** fix this (confirmed by the maintainer on
+issue #828): the check fails against *any* non-empty archive, so pointing at a new path only works
+until the first WAL lands. With the annotation set, archiving resumes on the existing chain and the
+stuck instance flushes its pending WALs (closing the gap) and rejoins. Verify: `kubectl -n <ns> get
+cluster <name>` → `ContinuousArchiving=True`, `READY 3`. Keep it as the standing workaround; it's
+only safe to remove once `.check-empty-wal-archive` is confirmed gone on all instances (otherwise
+this re-fires). Not needed pre-emptively on the other DBs — they only trip this on a *busy*
 switchover.
 
 ## Out of scope
