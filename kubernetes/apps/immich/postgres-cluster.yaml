@@ -4,18 +4,6 @@ kind: Cluster
 metadata:
   name: immich-postgres
   namespace: immich
-  annotations:
-    # Standing workaround for plugin-barman-cloud #828: after the HA switchover the
-    # `.check-empty-wal-archive` marker file persisted in PGDATA (it should be cleared once
-    # archiving resumes), so the plugin ran `barman-cloud-check-wal-archive` on every archive
-    # call and failed ("Expected empty archive") against the legitimately non-empty archive —
-    # wedging WAL archiving cluster-wide and blocking immich-postgres-1's rejoin. This
-    # annotation skips that (buggy) check. No released upstream fix exists: PR #843 was CLOSED
-    # unmerged and we're already on the latest plugin (v0.13.0). Safe to keep — the check only
-    # guards a NEW cluster pointed at an existing archive, which is not our case. Removing it
-    # is only safe once `.check-empty-wal-archive` is confirmed gone on ALL instances (else
-    # #828 re-fires). See docs/cnpg-ha.md.
-    cnpg.io/skipEmptyWalArchiveCheck: "enabled"
 spec:
   # HA: primary + 2 streaming replicas (was 1) — failover on node loss + a PDB that
   # permits drains. Scaling up is online (replicas clone via pg_basebackup; this is the
