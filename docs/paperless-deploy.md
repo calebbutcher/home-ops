@@ -54,7 +54,7 @@ The paperless image runs the webserver + Celery workers + scheduler + consumer i
 
 ## Deploy
 
-1. Merge the PR to `main`, then `flux reconcile kustomization cluster --with-source`
+1. Merge the PR to `main`, then `flux reconcile kustomization apps --with-source`
    (or wait for the interval).
 2. Watch it come up:
    ```sh
