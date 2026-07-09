@@ -1,0 +1,30 @@
+---
+# Internal-only HTTP(S). No forward-auth middleware — Gitea has its own login + OIDC
+# (Authentik), and a domain-wide forward-auth would break the OIDC callback, the API,
+# and git-over-HTTP. Git-over-SSH is exposed separately as a LoadBalancer Service
+# (see helmrelease.yaml service.ssh), not through this Ingress.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gitea
+  namespace: gitea
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - gitea.int.nerdbox.dev
+      secretName: gitea-tls
+  rules:
+    - host: gitea.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gitea
+                port:
+                  number: 3000

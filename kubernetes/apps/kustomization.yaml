@@ -11,3 +11,4 @@ resources:
   - n8n
   - immich
   - paperless
+  - gitea

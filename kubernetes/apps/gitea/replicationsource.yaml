@@ -1,0 +1,26 @@
+---
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationSource
+metadata:
+  name: gitea-data
+  namespace: gitea
+spec:
+  sourcePVC: gitea-data
+  trigger:
+    # After the 06:00 CNPG base backup.
+    schedule: "35 6 * * *"
+  restic:
+    repository: gitea-restic-secret
+    copyMethod: Direct
+    cacheCapacity: 1Gi
+    pruneIntervalDays: 7
+    retain:
+      daily: 7
+      weekly: 4
+      monthly: 3
+    # Gitea's standard image chowns /data to the git user (uid/gid 1000); the mover
+    # must run as the same owner to read the files.
+    moverSecurityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
