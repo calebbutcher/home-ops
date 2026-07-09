@@ -153,3 +153,14 @@ spec:
     monitoring:
       serviceMonitor:
         enabled: true
+      # Official Loki mixin dashboards (Operational / Reads / Writes / Chunks /
+      # Retention / ...) emitted as ConfigMaps labelled grafana_dashboard: "1" and
+      # auto-imported by the Grafana dashboard sidecar. The mixin's $cluster var is
+      # empty here (no cluster label), but cluster=~"" still matches our label-less
+      # series so the panels populate.
+      dashboards:
+        enabled: true
+      # Recording rules several mixin panels depend on — created as a PrometheusRule
+      # and picked up by our cluster-wide Prometheus.
+      rules:
+        enabled: true
