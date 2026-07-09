@@ -73,9 +73,13 @@ Gitea's admin account and OAuth login source are **DB-stored**, not GitOps-manag
 create them once via the CLI. Both commands pull their secret values from
 `gitea-secret`, so nothing sensitive is typed on the shell.
 
+> **Run the `gitea` CLI as the `git` user.** `kubectl exec` enters the (rootful)
+> container as root, and the `gitea` binary refuses to run as root
+> (`mustNotRunAsRoot`). Wrap every in-pod `gitea …` call in `su-exec git`.
+
 1. **Bootstrap admin** (the web installer is locked via `INSTALL_LOCK`):
    ```sh
-   kubectl -n gitea exec deploy/gitea -- gitea admin user create \
+   kubectl -n gitea exec deploy/gitea -- su-exec git gitea admin user create \
      --username "$(kubectl -n gitea get secret gitea-secret -o jsonpath='{.data.GITEA_ADMIN_USERNAME}' | base64 -d)" \
      --email    "$(kubectl -n gitea get secret gitea-secret -o jsonpath='{.data.GITEA_ADMIN_EMAIL}' | base64 -d)" \
      --password "$(kubectl -n gitea get secret gitea-secret -o jsonpath='{.data.GITEA_ADMIN_PASSWORD}' | base64 -d)" \
@@ -85,7 +89,7 @@ create them once via the CLI. Both commands pull their secret values from
 2. **Add the Authentik OAuth source** (name `authentik` → matches the blueprint's
    redirect URI `/user/oauth2/authentik/callback`):
    ```sh
-   kubectl -n gitea exec deploy/gitea -- gitea admin auth add-oauth \
+   kubectl -n gitea exec deploy/gitea -- su-exec git gitea admin auth add-oauth \
      --name authentik \
      --provider openidConnect \
      --key gitea \
