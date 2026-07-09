@@ -153,6 +153,13 @@ spec:
           url: http://thanos-query.monitoring.svc.cluster.local:9090
           jsonData:
             timeInterval: 30s
+        # Loki (logs) — served through the loki-gateway nginx front (port 80).
+        # Enables log browsing in Explore and metric-to-log correlation.
+        - name: Loki
+          type: loki
+          uid: loki
+          access: proxy
+          url: http://loki-gateway.monitoring.svc.cluster.local
 
       # Sidecar discovers ConfigMaps labelled grafana_dashboard: "1"
       # and auto-imports them as dashboards

@@ -1,0 +1,52 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: alloy-events
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: alloy
+      version: "1.10.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # Kubernetes events collector. Events are a cluster-scoped singleton stream, so
+    # this runs as a single Deployment replica (not the DaemonSet) to avoid emitting
+    # each event once per node. No PVC/host mounts, so it reschedules freely if its
+    # node goes down; on restart the events source re-lists recent events from the API.
+    controller:
+      type: deployment
+      replicas: 1
+    alloy:
+      configMap:
+        content: |-
+          // Watch events in every namespace and ship them to Loki.
+          loki.source.kubernetes_events "events" {
+            forward_to = [loki.write.default.receiver]
+          }
+
+          loki.write "default" {
+            endpoint {
+              url = "http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push"
+            }
+          }
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          memory: 128Mi
+    rbac:
+      create: true

@@ -1,0 +1,155 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: loki
+      version: "6.55.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # HA "monolithic" topology: 3 SingleBinary replicas with replication_factor 3.
+    # Every log line lands on 3 pods spread across 3 nodes (topologySpread below),
+    # so a node reboot/outage keeps ingestion + queries alive on the survivors and
+    # loses no in-flight data. Read/Write/Backend targets are disabled.
+    deploymentMode: SingleBinary
+
+    loki:
+      # Single tenant — this is a private homelab cluster.
+      auth_enabled: false
+
+      commonConfig:
+        replication_factor: 3
+
+      # TSDB index + S3 chunks. Both the index and chunks live in RustFS — nothing
+      # durable is kept on the nodes (only the WAL PVC, a pre-flush crash buffer).
+      schemaConfig:
+        configs:
+          - from: "2024-04-01"
+            store: tsdb
+            object_store: s3
+            schema: v13
+            index:
+              prefix: loki_index_
+              period: 24h
+
+      storage:
+        type: s3
+        bucketNames:
+          chunks: loki
+          ruler: loki
+          admin: loki
+        s3:
+          # RustFS on the NAS — HTTP (insecure) + path-style, same store as Thanos.
+          endpoint: 10.2.40.10:30292
+          region: us-east-1
+          s3ForcePathStyle: true
+          insecure: true
+          # Credentials are env-expanded at runtime from the SOPS Secret loki-s3
+          # (see singleBinary.extraArgs / extraEnvFrom). They never appear in the
+          # rendered ConfigMap.
+          accessKeyId: ${LOKI_S3_ACCESS_KEY}
+          secretAccessKey: ${LOKI_S3_SECRET_KEY}
+
+      limits_config:
+        # 30-day retention (enforced by the compactor below). Loki keeps
+        # full-resolution logs — no downsampling tiers like Thanos.
+        retention_period: 720h
+        reject_old_samples: true
+        reject_old_samples_max_age: 168h
+
+      compactor:
+        # The compactor deletes chunks/index older than retention_period from S3.
+        retention_enabled: true
+        delete_request_store: s3
+
+      querier:
+        max_concurrent: 4
+
+    singleBinary:
+      replicas: 3
+      # -config.expand-env=true lets the ${LOKI_S3_*} placeholders in the config
+      # resolve from the injected Secret env. global.extraArgs does NOT reach the
+      # SingleBinary target, so these must live here.
+      extraArgs:
+        - "-config.expand-env=true"
+      extraEnvFrom:
+        - secretRef:
+            name: loki-s3
+      # Durable node-local WAL/head buffer. local-path pins each replica to a node;
+      # RF3 makes the WAL redundant across nodes.
+      persistence:
+        enabled: true
+        storageClass: local-path
+        size: 10Gi
+      # Custom pod label + topologySpread guarantees the 3 replicas land on 3
+      # distinct nodes (the whole point of HA here).
+      podLabels:
+        loki-ha-member: "true"
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              loki-ha-member: "true"
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          memory: 1Gi
+
+    # Disable the SimpleScalable / microservices targets — we run monolithic.
+    write:
+      replicas: 0
+    read:
+      replicas: 0
+    backend:
+      replicas: 0
+
+    # nginx front that load-balances reads + writes across the 3 replicas. Alloy
+    # and Grafana both target the loki-gateway Service.
+    gateway:
+      enabled: true
+      replicas: 2
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 64Mi
+
+    # The chart's default chunk/results memcached tiers request ~1GB each — far
+    # more than a homelab needs. Disable; add back later if query latency warrants.
+    chunksCache:
+      enabled: false
+    resultsCache:
+      enabled: false
+
+    # Canary DaemonSet + helm test pod off to keep the pod count lean; the
+    # node-outage drill and real queries are our validation instead.
+    lokiCanary:
+      enabled: false
+    test:
+      enabled: false
+
+    # Let our existing Prometheus scrape Loki's own metrics (it selects
+    # ServiceMonitors cluster-wide).
+    monitoring:
+      serviceMonitor:
+        enabled: true
