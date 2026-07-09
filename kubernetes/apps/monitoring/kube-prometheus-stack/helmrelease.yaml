@@ -46,9 +46,20 @@ spec:
     prometheus:
       service:
         type: ClusterIP
+      # Headless Service exposing the sidecar gRPC (port 10901) so Thanos Query
+      # can discover this Prometheus for recent (< retention) data.
+      thanosService:
+        enabled: true
       prometheusSpec:
-        retention: 14d
-        retentionSize: "10GB"
+        # Two replicas for HA; Thanos Query de-duplicates them via the
+        # prometheus_replica external label the operator injects.
+        replicas: 2
+        # Short local retention — Thanos holds long-term history in object
+        # storage. 2d comfortably covers the 2h block + sidecar upload lag.
+        retention: 2d
+        # Required so the sidecar uploads clean 2h blocks (Prometheus must not
+        # compact them locally).
+        disableCompaction: true
 
         # Allow Prometheus to scrape ServiceMonitors and PodMonitors from ALL
         # namespaces — not just those created by this chart. Critical for
@@ -58,9 +69,25 @@ spec:
         ruleSelectorNilUsesHelmValues: false
         probeSelectorNilUsesHelmValues: false
 
-        # No persistent storage for now — metrics live in memory/emptyDir.
-        # Add a PVC here when you want durable metric history across restarts.
-        storageSpec: {}
+        # Thanos sidecar: uploads 2h TSDB blocks to RustFS S3. Object store
+        # config comes from the SOPS-managed thanos-objstore Secret (key
+        # objstore.yml), reused by the Thanos Store Gateway / Compactor.
+        thanos:
+          objectStorageConfig:
+            existingSecret:
+              name: thanos-objstore
+              key: objstore.yml
+
+        # Durable node-local storage for the TSDB head/WAL — also the sidecar's
+        # upload source. local-path pins each replica to one node.
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: local-path
+              accessModes: [ReadWriteOnce]
+              resources:
+                requests:
+                  storage: 20Gi
 
         resources:
           requests:
@@ -109,10 +136,23 @@ spec:
           use_pkce: true
 
       persistence:
-        enabled: false  # dashboards are config-managed; metrics live in Prometheus
+        enabled: true
+        storageClassName: local-path
+        size: 5Gi
 
-      # Automatically provision Prometheus as a datasource
-      additionalDataSources: []
+      # kube-prometheus-stack auto-provisions the local Prometheus datasource
+      # (default). Add Thanos Query for the unified recent + long-term view and
+      # replica de-duplication. To make dashboards use full history by default,
+      # promote this to isDefault: true (and disable the built-in default via
+      # sidecar.datasources.defaultDatasourceEnabled: false).
+      additionalDataSources:
+        - name: Thanos
+          type: prometheus
+          uid: thanos
+          access: proxy
+          url: http://thanos-query.monitoring.svc.cluster.local:9090
+          jsonData:
+            timeInterval: 30s
 
       # Sidecar discovers ConfigMaps labelled grafana_dashboard: "1"
       # and auto-imports them as dashboards
@@ -138,7 +178,15 @@ spec:
       service:
         type: ClusterIP
       alertmanagerSpec:
-        storage: {}  # no persistence for now
+        # Durable storage so silences / notification state survive restarts.
+        storage:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: local-path
+              accessModes: [ReadWriteOnce]
+              resources:
+                requests:
+                  storage: 2Gi
         resources:
           requests:
             memory: 64Mi

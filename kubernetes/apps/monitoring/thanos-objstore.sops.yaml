@@ -1,0 +1,23 @@
+apiVersion: ENC[AES256_GCM,data:hjY=,iv:xskU86I+CyqFP+DpYwY0PsVlkq5E2COqJr+S1oOhG9g=,tag:INo3kVhv7DuJGEcvkErTKg==,type:str]
+kind: ENC[AES256_GCM,data:wWxkFeyp,iv:QMHsUDienp9xe/joDtWzMWvK5HVMcYFs8F8ee7oK+jI=,tag:luHjmHpXDg2df8abtrDngA==,type:str]
+metadata:
+    name: ENC[AES256_GCM,data:fbxR6nCaXaHTGCtqaN8A,iv:d9xYolf467KwPxB6HwR8G7xJxp2ZU68DDUNFrUCtlqI=,tag:j7CU7o5L880qtq5JJREu5w==,type:str]
+    namespace: ENC[AES256_GCM,data:kNPujhZXzpNlbw==,iv:gugKYdBprIXqX4Il7MAZUOsJNfNVzFrNMeTPaCL/B9U=,tag:yalwIhYdKIrM7Gx4+E7LNg==,type:str]
+type: ENC[AES256_GCM,data:DLxcl0Ja,iv:znsP9d0dPzJ/ZlltTRLoavCVK38GY95nVmysd14zO5c=,tag:G95077ZvucqY22o9rbesrQ==,type:str]
+stringData:
+    objstore.yml: ENC[AES256_GCM,data:VpIBMqew6PvlMNIINlIGaDyliAeHWqUPVsiQTlm5/ypqHRVHyyJU2VpjPqgPOF+TbhVvQpGeoyk0qLONp7On8Wa7gpp9spJrkIfqydSYLT+AnobePgIrUpVP8eWJkUn6Ymw6ZDbJC4wwrf0tV5menoXdAlexyqnQbLdkTMNbR97JtjtR/6qk/R17F3DXMS1yQeA7SC277RkDKwYBz0qmBadtOIbyqSiWad1/j0xHXI6SgY/CRYx2BxQIxPSaig==,iv:uCPCgSTjZm1b7RQY9t9JTqI/vWHH9xHui7VVJStczLM=,tag:ImNXV38NxgUe8YHO748cow==,type:str]
+sops:
+    age:
+        - recipient: age1wcyzl9vjwakzxtxzw2qupn5332q7kpe8j4zyz434dcx2frqwd58qeutllz
+          enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB1anRpQlpFTzNyT2tUV0l4
+            TXBrOTcwd25rSWNLN3RHWUtXSGdrMnp4cTJ3Ck5iOVFvanlLN040QmZNa3JERHRT
+            YUhyUTFpYXZiZUVkaHNGRWdSY3orL0EKLS0tIG05UGJUSXBLYzI5cWp5cFhyblZY
+            TmEwanNGQXBoem5XUUtqc3NkM3VvMTgKdk46QyzgIUUAYlotAz0HMybFfrs0U8eu
+            tOxvclJPfwJ9QhCr/BM5qwwzHpiarw8SIhEJxj+GYmXISvXwbLoG1g==
+            -----END AGE ENCRYPTED FILE-----
+    lastmodified: "2026-07-08T23:48:27Z"
+    mac: ENC[AES256_GCM,data:HH9r7+e8H6VZm/b8IrqVo77oWaZWPrVAeUvfXoyWmXccVfDOqMg//1WDwWmVzJfADe0zrjrxlb7A+pjrtdm2j33NjVj6PHTaggO43msXIB0UZDBxoSxjQHmj/IPFxqyGz8Lz/+6mBIrWYbmmuBNOcRtTEAklxnWmZUZPi2KWh3Y=,iv:mNvmjMj5eBhQyoHAFNQhJdLX4pVGSir6FM62x1TyN2k=,tag:psFwOBxuUGDWxOq8qFZXNQ==,type:str]
+    unencrypted_suffix: _unencrypted
+    version: 3.12.2

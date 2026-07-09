@@ -1,0 +1,9 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: thanos-community
+  namespace: flux-system
+spec:
+  interval: 24h
+  url: https://thanos-community.github.io/helm-charts
