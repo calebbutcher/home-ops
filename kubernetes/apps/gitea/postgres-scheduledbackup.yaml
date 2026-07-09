@@ -1,0 +1,16 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: gitea-postgres
+  namespace: gitea
+spec:
+  # 6-field cron (seconds first); daily at 06:00, offset from authentik (03:00),
+  # n8n/immich (04:00) and paperless (05:00).
+  schedule: "0 0 6 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: gitea-postgres
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

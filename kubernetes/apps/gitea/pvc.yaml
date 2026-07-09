@@ -1,0 +1,18 @@
+---
+# Gitea's single /data dir: git repositories, LFS objects, avatars, attachments,
+# and the generated app.ini (which holds the auto-generated SECRET_KEY /
+# INTERNAL_TOKEN / oauth2 JWT_SECRET). Non-rebuildable — the repos are the crown
+# jewels — so this PVC is backed up by VolSync (see replicationsource.yaml). RWO,
+# so the controller uses strategy: Recreate.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitea-data
+  namespace: gitea
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
