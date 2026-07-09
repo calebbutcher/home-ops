@@ -5,9 +5,14 @@ resources:
   - namespace.yaml
   - helmrepository.yaml
   - helmrepository-thanos-community.yaml
+  - helmrepository-grafana.yaml
   - grafana-admin.sops.yaml
   - grafana-oauth-secret.sops.yaml
   - thanos-objstore.sops.yaml
+  - loki-s3.sops.yaml
   - grafana-ingress.yaml
   - kube-prometheus-stack/helmrelease.yaml
   - thanos/helmrelease.yaml
+  - loki/helmrelease.yaml
+  - alloy/helmrelease.yaml
+  - alloy/helmrelease-events.yaml
