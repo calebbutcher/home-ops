@@ -25,6 +25,9 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: gitea
+                # app-template suffixes service names with the identifier when a
+                # controller has >1 service (here: app + ssh), so the HTTP service
+                # is "gitea-app", not "gitea".
+                name: gitea-app
                 port:
                   number: 3000
