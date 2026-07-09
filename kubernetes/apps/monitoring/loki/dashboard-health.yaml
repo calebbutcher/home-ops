@@ -1,0 +1,116 @@
+---
+# Custom "Loki / Health" dashboard for our SingleBinary deployment. The upstream
+# mixin filters by per-component job names (distributor/ingester/loki-read/...) that
+# don't exist here, so it shows "No data"; this one targets the single
+# job="monitoring/loki" and queries Prometheus (recent data). Auto-imported by the
+# kube-prometheus-stack Grafana sidecar via the grafana_dashboard label.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-health-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  loki-health.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "graphTooltip": 1,
+      "schemaVersion": 39,
+      "version": 1,
+      "uid": "loki-health-singlebinary",
+      "title": "Loki / Health",
+      "tags": ["loki", "health"],
+      "time": { "from": "now-6h", "to": "now" },
+      "refresh": "30s",
+      "templating": { "list": [] },
+      "panels": [
+        {
+          "id": 1, "type": "stat", "title": "Ingestion (bytes/s)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "Bps", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "area", "textMode": "auto" },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(loki_distributor_bytes_received_total{job=\"monitoring/loki\"}[$__rate_interval]))" } ]
+        },
+        {
+          "id": 2, "type": "stat", "title": "Ingestion (lines/s)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "area", "textMode": "auto" },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(loki_distributor_lines_received_total{job=\"monitoring/loki\"}[$__rate_interval]))" } ]
+        },
+        {
+          "id": 3, "type": "stat", "title": "Active streams",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "area", "textMode": "auto" },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(loki_ingester_memory_streams{job=\"monitoring/loki\"})" } ]
+        },
+        {
+          "id": 4, "type": "stat", "title": "Compactor last run (age)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "s", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 10800 }, { "color": "red", "value": 21600 } ] } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "textMode": "auto" },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "time() - max(loki_boltdb_shipper_compact_tables_operation_last_successful_run_timestamp_seconds{job=\"monitoring/loki\"})" } ]
+        },
+        {
+          "id": 5, "type": "timeseries", "title": "Push requests/s by status",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 7, "w": 12, "x": 0, "y": 4 },
+          "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 20, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (status_code) (rate(loki_request_duration_seconds_count{job=\"monitoring/loki\", route=\"loki_api_v1_push\"}[$__rate_interval]))", "legendFormat": "{{status_code}}" } ]
+        },
+        {
+          "id": 6, "type": "timeseries", "title": "Push latency (p50/p99)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 7, "w": 12, "x": 12, "y": 4 },
+          "fieldConfig": { "defaults": { "unit": "s", "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "histogram_quantile(0.99, sum by (le) (rate(loki_request_duration_seconds_bucket{job=\"monitoring/loki\", route=\"loki_api_v1_push\"}[$__rate_interval])))", "legendFormat": "p99" },
+            { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "histogram_quantile(0.50, sum by (le) (rate(loki_request_duration_seconds_bucket{job=\"monitoring/loki\", route=\"loki_api_v1_push\"}[$__rate_interval])))", "legendFormat": "p50" }
+          ]
+        },
+        {
+          "id": 7, "type": "timeseries", "title": "Query requests/s by status",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 7, "w": 12, "x": 0, "y": 11 },
+          "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 20, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (status_code) (rate(loki_request_duration_seconds_count{job=\"monitoring/loki\", route=~\"loki_api_v1_query_range|loki_api_v1_query|loki_api_v1_labels|loki_api_v1_label_values|loki_api_v1_index_volume.*\"}[$__rate_interval]))", "legendFormat": "{{status_code}}" } ]
+        },
+        {
+          "id": 8, "type": "timeseries", "title": "Query latency p99 (range)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 7, "w": 12, "x": 12, "y": 11 },
+          "fieldConfig": { "defaults": { "unit": "s", "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "histogram_quantile(0.99, sum by (le) (rate(loki_request_duration_seconds_bucket{job=\"monitoring/loki\", route=~\"loki_api_v1_query_range|loki_api_v1_query\"}[$__rate_interval])))", "legendFormat": "p99" } ]
+        },
+        {
+          "id": 9, "type": "timeseries", "title": "Ingester in-memory (streams & chunks)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 7, "w": 12, "x": 0, "y": 18 },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(loki_ingester_memory_streams{job=\"monitoring/loki\"})", "legendFormat": "streams" },
+            { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(loki_ingester_memory_chunks{job=\"monitoring/loki\"})", "legendFormat": "chunks" }
+          ]
+        },
+        {
+          "id": 10, "type": "timeseries", "title": "Discarded lines/s by reason",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 7, "w": 12, "x": 12, "y": 18 },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 20, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (reason) (rate(loki_discarded_samples_total{job=\"monitoring/loki\"}[$__rate_interval]))", "legendFormat": "{{reason}}" } ]
+        }
+      ]
+    }

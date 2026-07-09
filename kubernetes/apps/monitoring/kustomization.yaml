@@ -14,6 +14,7 @@ resources:
   - kube-prometheus-stack/helmrelease.yaml
   - thanos/helmrelease.yaml
   - loki/helmrelease.yaml
+  - loki/dashboard-health.yaml
   - loki/dashboard-logs-explorer.yaml
   - alloy/helmrelease.yaml
   - alloy/helmrelease-events.yaml
