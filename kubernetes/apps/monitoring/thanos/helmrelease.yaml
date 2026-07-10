@@ -46,6 +46,14 @@ spec:
     bucket:
       enabled: false
 
+    # The chart ships its PrometheusRule (thanos-rules) on by default but
+    # ServiceMonitors off, so the "ThanosXIsDown" rules — absent(up{job=~".*thanos.*"})
+    # — fire even though every component is healthy. Enable the monitors so Prometheus
+    # actually scrapes Thanos; the operator's serviceMonitorSelector is {} (matches all).
+    metrics:
+      serviceMonitor:
+        enabled: true
+
     query:
       enabled: true
       replicas: 2

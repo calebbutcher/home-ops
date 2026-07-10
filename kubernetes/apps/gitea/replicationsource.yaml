@@ -18,9 +18,11 @@ spec:
       daily: 7
       weekly: 4
       monthly: 3
-    # Gitea's standard image chowns /data to the git user (uid/gid 1000); the mover
-    # must run as the same owner to read the files.
+    # This gitea image runs as root (su-exec drops to the git user for CLI only) and
+    # keeps /data/ssh host keys root-owned (0600 in a 0700 dir). Run the mover as root
+    # so restic can read them; a uid-1000 mover gets "open ssh: permission denied" and
+    # the backup fails on every run, retrying forever.
     moverSecurityContext:
-      runAsUser: 1000
-      runAsGroup: 1000
-      fsGroup: 1000
+      runAsUser: 0
+      runAsGroup: 0
+      fsGroup: 0
