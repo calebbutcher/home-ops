@@ -5,3 +5,7 @@ resources:
   - cloudflare-token.sops.yaml
   - letsencrypt-staging.yaml
   - letsencrypt-prod.yaml
+  # Flux notification-controller -> Discord (#flux-deploys): reconcile events.
+  - flux-discord-webhook.sops.yaml
+  - flux-discord-provider.yaml
+  - flux-discord-alert.yaml

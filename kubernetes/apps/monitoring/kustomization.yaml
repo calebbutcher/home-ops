@@ -10,6 +10,7 @@ resources:
   - grafana-oauth-secret.sops.yaml
   - thanos-objstore.sops.yaml
   - loki-s3.sops.yaml
+  - discord-webhooks.sops.yaml
   - grafana-ingress.yaml
   - kube-prometheus-stack/helmrelease.yaml
   - thanos/helmrelease.yaml
