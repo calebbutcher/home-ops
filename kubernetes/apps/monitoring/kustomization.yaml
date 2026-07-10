@@ -13,6 +13,7 @@ resources:
   - discord-webhooks.sops.yaml
   - grafana-ingress.yaml
   - kube-prometheus-stack/helmrelease.yaml
+  - kube-prometheus-stack/alertmanagerconfig.yaml
   - thanos/helmrelease.yaml
   - loki/helmrelease.yaml
   - loki/dashboard-health.yaml
