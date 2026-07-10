@@ -212,45 +212,18 @@ spec:
     alertmanager:
       service:
         type: ClusterIP
-      # Route all alerts to Discord (#cluster-alerts). The webhook URL is supplied
-      # from the SOPS-managed discord-webhooks Secret, mounted as a file by
-      # alertmanagerSpec.secrets below — so it never appears in these values.
-      config:
-        route:
-          group_by: ["alertname", "namespace"]
-          group_wait: 30s
-          group_interval: 5m
-          repeat_interval: 4h
-          receiver: discord
-          routes:
-            # Watchdog fires continuously by design (dead-man's switch) — drop it
-            # so it doesn't spam the channel.
-            - receiver: "null"
-              matchers: ['alertname = "Watchdog"']
-        receivers:
-          - name: "null"
-          - name: discord
-            discord_configs:
-              - webhook_url_file: /etc/alertmanager/secrets/discord-webhooks/alertmanager-url
-                send_resolved: true
-        # Preserve the chart's default noise-reduction (this config replaces the
-        # chart default wholesale): suppress lower-severity alerts when a higher
-        # one for the same alertname/namespace is already firing.
-        inhibit_rules:
-          - source_matchers: ['severity = "critical"']
-            target_matchers: ['severity =~ "warning|info"']
-            equal: ["namespace", "alertname"]
-          - source_matchers: ['severity = "warning"']
-            target_matchers: ['severity = "info"']
-            equal: ["namespace", "alertname"]
-          - source_matchers: ['alertname = "InfoInhibitor"']
-            target_matchers: ['severity = "info"']
-            equal: ["namespace"]
       alertmanagerSpec:
-        # Mounts the discord-webhooks Secret at
-        # /etc/alertmanager/secrets/discord-webhooks/<key>, feeding webhook_url_file above.
-        secrets:
-          - discord-webhooks
+        # Route alerts to Discord (#cluster-alerts) via the `discord`
+        # AlertmanagerConfig (alertmanagerconfig.yaml), whose discordConfigs.apiURL
+        # reads the webhook straight from the discord-webhooks Secret. The
+        # Prometheus Operator rejects `webhook_url_file` in an inline config, so an
+        # AlertmanagerConfig is the supported way to keep the URL out of git.
+        # matcherStrategy None applies it cluster-wide (not just the monitoring ns).
+        alertmanagerConfigSelector:
+          matchLabels:
+            alertmanagerConfig: discord
+        alertmanagerConfigMatcherStrategy:
+          type: None
         # Durable storage so silences / notification state survive restarts.
         storage:
           volumeClaimTemplate:
