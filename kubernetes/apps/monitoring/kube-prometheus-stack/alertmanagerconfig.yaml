@@ -1,12 +1,16 @@
 ---
 # Discord receiver for Alertmanager. Selected by the Prometheus Operator via
 # alertmanager.alertmanagerSpec.alertmanagerConfigSelector (matchLabels below) and
-# merged into the chart's default base config as a catch-all child route — so the
-# chart default still handles Watchdog (dead-man's switch) and the stock
-# inhibit_rules, while everything else routes here. The webhook URL is read
-# straight from the SOPS-managed discord-webhooks Secret (key alertmanager-url),
-# so it never appears in git. This replaces an inline `webhook_url_file` config,
-# which the operator's config validator rejects.
+# merged into the chart's default base config. The webhook URL is read straight
+# from the SOPS-managed discord-webhooks Secret (key alertmanager-url), so it
+# never appears in git. This replaces an inline `webhook_url_file` config, which
+# the operator's config validator rejects.
+#
+# The operator inserts this route ahead of the base Watchdog->null route with
+# continue: true, so a plain catch-all would also match Watchdog (the constantly
+# firing dead-man's switch). Exclude it explicitly here so only real alerts route
+# to Discord; the base config's Watchdog->null route still drops it. The chart
+# default also provides the stock inhibit_rules.
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig
 metadata:
@@ -17,6 +21,11 @@ metadata:
 spec:
   route:
     receiver: discord
+    # Everything except Watchdog (dropped by the base config's own route).
+    matchers:
+      - name: alertname
+        value: Watchdog
+        matchType: "!="
     groupBy: ["alertname", "namespace"]
     groupWait: 30s
     groupInterval: 5m
