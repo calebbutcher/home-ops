@@ -26,3 +26,10 @@ spec:
       retries: 3
   values:
     manageCRDs: true
+    # VolSync 0.16 dropped the kube-rbac-proxy sidecar and serves metrics from the
+    # manager on :8443 via controller-runtime's secure endpoint, which requires a
+    # bearer token the chart's ServiceMonitor does not send (→ 401 → TargetDown).
+    # Metrics live on an in-cluster ClusterIP, so disable the auth filter to let
+    # Prometheus scrape them.
+    metrics:
+      disableAuth: true
