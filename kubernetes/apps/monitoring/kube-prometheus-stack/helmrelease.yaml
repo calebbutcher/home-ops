@@ -118,6 +118,13 @@ spec:
           secretKeyRef:
             name: grafana-oauth-secret
             key: client-secret
+        # Discord webhook for the provisioned contact point below. Grafana
+        # interpolates ${DISCORD_WEBHOOK_URL} in provisioning files at startup, so
+        # the URL stays in the SOPS-managed discord-webhooks Secret, not in git.
+        DISCORD_WEBHOOK_URL:
+          secretKeyRef:
+            name: discord-webhooks
+            key: grafana-url
       grafana.ini:
         server:
           root_url: https://grafana.int.nerdbox.dev
@@ -134,6 +141,27 @@ spec:
           role_attribute_path: "contains(groups[*], 'authentik Admins') && 'Admin' || 'Viewer'"
           allow_sign_up: true
           use_pkce: true
+
+      # Grafana-managed alerting → Discord contact point. Complements Alertmanager
+      # (which handles the stock Prometheus rules); use this for Grafana-native
+      # alerts, e.g. Loki log-based rules. The URL is interpolated from the
+      # DISCORD_WEBHOOK_URL env var injected above.
+      alerting:
+        contactpoints.yaml:
+          apiVersion: 1
+          contactPoints:
+            - orgId: 1
+              name: Discord
+              receivers:
+                - uid: discord_default
+                  type: discord
+                  settings:
+                    url: ${DISCORD_WEBHOOK_URL}
+        policies.yaml:
+          apiVersion: 1
+          policies:
+            - orgId: 1
+              receiver: Discord
 
       persistence:
         enabled: true
@@ -184,7 +212,45 @@ spec:
     alertmanager:
       service:
         type: ClusterIP
+      # Route all alerts to Discord (#cluster-alerts). The webhook URL is supplied
+      # from the SOPS-managed discord-webhooks Secret, mounted as a file by
+      # alertmanagerSpec.secrets below — so it never appears in these values.
+      config:
+        route:
+          group_by: ["alertname", "namespace"]
+          group_wait: 30s
+          group_interval: 5m
+          repeat_interval: 4h
+          receiver: discord
+          routes:
+            # Watchdog fires continuously by design (dead-man's switch) — drop it
+            # so it doesn't spam the channel.
+            - receiver: "null"
+              matchers: ['alertname = "Watchdog"']
+        receivers:
+          - name: "null"
+          - name: discord
+            discord_configs:
+              - webhook_url_file: /etc/alertmanager/secrets/discord-webhooks/alertmanager-url
+                send_resolved: true
+        # Preserve the chart's default noise-reduction (this config replaces the
+        # chart default wholesale): suppress lower-severity alerts when a higher
+        # one for the same alertname/namespace is already firing.
+        inhibit_rules:
+          - source_matchers: ['severity = "critical"']
+            target_matchers: ['severity =~ "warning|info"']
+            equal: ["namespace", "alertname"]
+          - source_matchers: ['severity = "warning"']
+            target_matchers: ['severity = "info"']
+            equal: ["namespace", "alertname"]
+          - source_matchers: ['alertname = "InfoInhibitor"']
+            target_matchers: ['severity = "info"']
+            equal: ["namespace"]
       alertmanagerSpec:
+        # Mounts the discord-webhooks Secret at
+        # /etc/alertmanager/secrets/discord-webhooks/<key>, feeding webhook_url_file above.
+        secrets:
+          - discord-webhooks
         # Durable storage so silences / notification state survive restarts.
         storage:
           volumeClaimTemplate:
