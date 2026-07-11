@@ -3,3 +3,10 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: gitea
+  annotations:
+    # Allow VolSync to run the gitea-data backup mover as a privileged (root, full
+    # capabilities) pod. The gitea PVC has mixed ownership — /data/ssh host keys are
+    # root-owned 0600 while the rest is uid 1000 — and VolSync's default mover drops
+    # ALL capabilities, so neither uid can read everything (root loses CAP_DAC_OVERRIDE).
+    # A privileged mover keeps DAC_OVERRIDE so restic can read the whole volume.
+    volsync.backube/privileged-movers: "true"

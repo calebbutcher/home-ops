@@ -18,10 +18,11 @@ spec:
       daily: 7
       weekly: 4
       monthly: 3
-    # This gitea image runs as root (su-exec drops to the git user for CLI only) and
-    # keeps /data/ssh host keys root-owned (0600 in a 0700 dir). Run the mover as root
-    # so restic can read them; a uid-1000 mover gets "open ssh: permission denied" and
-    # the backup fails on every run, retrying forever.
+    # The gitea PVC has mixed ownership: /data/ssh host keys are root-owned 0600, while
+    # /data/git and /data/gitea are uid 1000. Run the mover as root so it can read the
+    # root-owned host keys — but root only helps because the gitea namespace is annotated
+    # volsync.backube/privileged-movers=true, which keeps CAP_DAC_OVERRIDE (the default
+    # mover drops ALL caps, so plain root still can't read the uid-1000 0700 dirs).
     moverSecurityContext:
       runAsUser: 0
       runAsGroup: 0
