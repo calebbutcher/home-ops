@@ -29,6 +29,13 @@ spec:
         createSecret: false
         secretName: thanos-objstore
         secretKey: objstore.yml
+      # The chart ships its PrometheusRule (thanos-rules) on by default but
+      # ServiceMonitors off, so the "ThanosXIsDown" rules — absent(up{job=~".*thanos.*"})
+      # — fire even though every component is healthy. This global default cascades to
+      # every enabled component (query/storegateway/compactor) so Prometheus actually
+      # scrapes them; the operator's serviceMonitorSelector is {} (matches all).
+      serviceMonitor:
+        enabled: true
 
     # We already run kube-prometheus-stack as a separate HelmRelease, and RustFS
     # lives on the NAS — do NOT deploy the chart's bundled subcharts.
@@ -45,14 +52,6 @@ spec:
     # Optional bucketweb block-explorer UI — off to save a pod.
     bucket:
       enabled: false
-
-    # The chart ships its PrometheusRule (thanos-rules) on by default but
-    # ServiceMonitors off, so the "ThanosXIsDown" rules — absent(up{job=~".*thanos.*"})
-    # — fire even though every component is healthy. Enable the monitors so Prometheus
-    # actually scrapes Thanos; the operator's serviceMonitorSelector is {} (matches all).
-    metrics:
-      serviceMonitor:
-        enabled: true
 
     query:
       enabled: true
