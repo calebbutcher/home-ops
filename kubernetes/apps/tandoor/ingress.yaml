@@ -1,0 +1,29 @@
+---
+# Internal-only. No forward-auth middleware — Tandoor has its own login + OIDC
+# (Authentik via django-allauth), and a domain-wide forward-auth would break the
+# OIDC callback and the REST API. SSO is handled inside Tandoor.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tandoor
+  namespace: tandoor
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - tandoor.int.nerdbox.dev
+      secretName: tandoor-tls
+  rules:
+    - host: tandoor.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tandoor
+                port:
+                  number: 8080

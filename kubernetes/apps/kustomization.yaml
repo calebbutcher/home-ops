@@ -12,3 +12,4 @@ resources:
   - immich
   - paperless
   - gitea
+  - tandoor

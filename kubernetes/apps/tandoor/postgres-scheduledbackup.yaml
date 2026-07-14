@@ -1,0 +1,16 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: tandoor-postgres
+  namespace: tandoor
+spec:
+  # 6-field cron (seconds first); daily at 07:00, offset from authentik (03:00),
+  # n8n/immich (04:00), paperless (05:00) and gitea (06:00).
+  schedule: "0 0 7 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: tandoor-postgres
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

@@ -1,0 +1,24 @@
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: tandoor-postgres-store
+  namespace: tandoor
+spec:
+  retentionPolicy: "14d"
+  configuration:
+    # Shared bucket; barman namespaces backups by server name (tandoor-postgres),
+    # so there is no collision with the other apps' clusters.
+    destinationPath: s3://postgres-backups/
+    endpointURL: http://10.2.40.10:30292
+    s3Credentials:
+      accessKeyId:
+        name: cnpg-rustfs-creds
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: cnpg-rustfs-creds
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip

@@ -1,0 +1,35 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: tandoor-postgres
+  namespace: tandoor
+spec:
+  # HA: primary + 2 streaming replicas — failover on node loss + a PDB that permits
+  # drains. The affinity block rolls the primary via switchover (promote a replica,
+  # ~seconds) instead of a full restart. Async default. See docs/cnpg-ha.md.
+  instances: 3
+  primaryUpdateMethod: switchover
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+  imageName: ghcr.io/cloudnative-pg/postgresql:17
+  storage:
+    size: 8Gi
+    storageClass: local-path
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: tandoor-postgres-store
+  bootstrap:
+    initdb:
+      database: tandoor
+      owner: tandoor
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
