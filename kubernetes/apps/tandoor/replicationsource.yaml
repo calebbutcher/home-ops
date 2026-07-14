@@ -1,0 +1,27 @@
+---
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationSource
+metadata:
+  name: tandoor-media
+  namespace: tandoor
+spec:
+  sourcePVC: tandoor-media
+  trigger:
+    # After the 07:00 CNPG base backup.
+    schedule: "35 7 * * *"
+  restic:
+    repository: tandoor-restic-secret
+    copyMethod: Direct
+    cacheCapacity: 1Gi
+    pruneIntervalDays: 7
+    retain:
+      daily: 7
+      weekly: 4
+      monthly: 3
+    # Tandoor writes mediafiles as uid/gid 1000; run the mover to match so it can
+    # read them. Verify on first boot (see docs/tandoor-deploy.md) — if the image
+    # writes media as root, switch to privileged movers like gitea.
+    moverSecurityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000

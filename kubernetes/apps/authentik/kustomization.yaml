@@ -30,3 +30,4 @@ configMapGenerator:
       - blueprints/immich-oauth2.yaml
       - blueprints/paperless-oauth2.yaml
       - blueprints/gitea-oauth2.yaml
+      - blueprints/tandoor-oauth2.yaml

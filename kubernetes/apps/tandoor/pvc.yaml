@@ -1,0 +1,17 @@
+---
+# Tandoor's /opt/recipes/mediafiles: user-uploaded recipe images + imported files.
+# Non-rebuildable — all recipe text/metadata lives in Postgres — so this PVC is
+# backed up by VolSync (see replicationsource.yaml). RWO, so the controller uses
+# strategy: Recreate. Static assets are regenerated at boot (emptyDir, not here).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tandoor-media
+  namespace: tandoor
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi

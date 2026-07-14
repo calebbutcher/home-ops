@@ -1,0 +1,139 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tandoor
+  namespace: tandoor
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "3.7.3"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    defaultPodOptions:
+      securityContext:
+        # Make the fresh local-path media PVC writable by the app. Tandoor 2 runs
+        # as a non-root user, so fsGroup gives its process group ownership of the
+        # volume. Do NOT pin runAsUser here yet — revisit only if first-boot logs
+        # show a permission error on /opt/recipes/mediafiles (see the runbook).
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+    controllers:
+      tandoor:
+        # Single RWO media PVC — the new pod must not overlap the old on rollout.
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/tandoorrecipes/recipes
+              tag: "2.6.2"
+            env:
+              TZ: UTC
+              DEBUG: "0"
+              # Internal-only behind Traefik + OIDC; kubelet probes hit the pod IP,
+              # so keep the Django default (*) rather than 400-ing health checks.
+              ALLOWED_HOSTS: "*"
+              # Traefik terminates TLS and forwards HTTP, so Django must be told the
+              # public HTTPS origin is trusted or the login POST fails CSRF
+              # (CSRF_TRUSTED_ORIGINS defaults to [] and is NOT auto-populated).
+              CSRF_TRUSTED_ORIGINS: https://tandoor.int.nerdbox.dev
+              # Bundled nginx on an unprivileged port (Tandoor 2 serves the app +
+              # media via its own nginx). Service / ingress / probes all target 8080.
+              TANDOOR_PORT: "8080"
+              GUNICORN_MEDIA: "0"
+              # --- Postgres (CNPG) ---
+              DB_ENGINE: django.db.backends.postgresql
+              POSTGRES_HOST: tandoor-postgres-rw
+              POSTGRES_PORT: "5432"
+              POSTGRES_DB: tandoor
+              POSTGRES_USER: tandoor
+              POSTGRES_PASSWORD:
+                valueFrom:
+                  secretKeyRef:
+                    name: tandoor-postgres-app   # CNPG-generated (<cluster>-app)
+                    key: password
+              # --- OIDC (django-allauth) — local login kept as a fallback ---
+              SOCIAL_PROVIDERS: allauth.socialaccount.providers.openid_connect
+              SOCIALACCOUNT_AUTO_SIGNUP: "1"
+              # Auto-join new SSO users to the default space as regular users.
+              SOCIAL_DEFAULT_ACCESS: "1"
+              SOCIAL_DEFAULT_GROUP: user
+              # One reverse-proxy hop (Traefik) for allauth's client-IP handling.
+              ALLAUTH_TRUSTED_PROXY_COUNT: "1"
+              # --- Secret-sourced (tandoor-secret) ---
+              SECRET_KEY:
+                valueFrom:
+                  secretKeyRef:
+                    name: tandoor-secret
+                    key: SECRET_KEY
+              # allauth provider config JSON (holds the OIDC client secret).
+              SOCIALACCOUNT_PROVIDERS:
+                valueFrom:
+                  secretKeyRef:
+                    name: tandoor-secret
+                    key: SOCIALACCOUNT_PROVIDERS
+            probes:
+              # First boot runs DB migrations + collectstatic, so give startup a
+              # generous window. All probes hit the bundled nginx on 8080.
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 8080
+                  periodSeconds: 10
+                  failureThreshold: 60
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 8080
+                  periodSeconds: 30
+                  failureThreshold: 5
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 8080
+                  periodSeconds: 15
+                  failureThreshold: 3
+            resources:
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                memory: 1Gi
+    service:
+      app:               # controller == release name ⇒ Service "tandoor"
+        controller: tandoor
+        ports:
+          http:
+            port: 8080
+    persistence:
+      # User uploads (recipe images / imported files) — the only durable on-disk data.
+      media:
+        existingClaim: tandoor-media
+        globalMounts:
+          - path: /opt/recipes/mediafiles
+      # Static assets are regenerated by collectstatic on every boot — ephemeral.
+      staticfiles:
+        type: emptyDir
+        globalMounts:
+          - path: /opt/recipes/staticfiles
