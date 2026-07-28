@@ -21,12 +21,13 @@ metadata:
   name: k3s-server
   namespace: system-upgrade
 spec:
-  # First hop from the cluster's current v1.30.2+k3s2. k3s/Kubernetes only
-  # support +1 minor skew, so step ONE minor at a time: once every node is on
-  # 1.31, bump this to the latest v1.32.x, reconcile, verify, repeat up to the
-  # current release. Keep in rough sync with ansible `k3s_version` (the
-  # fresh-install pin in inventory/my-cluster/group_vars/all/main.yml).
-  version: v1.31.14+k3s1
+  # Hop 1.31 -> 1.32 (cluster path: v1.30.2 -> v1.31.14 -> now v1.32.13).
+  # k3s/Kubernetes only support +1 minor skew, so step ONE minor at a time: once
+  # every node is on 1.32, bump this to the latest v1.33.x, reconcile, verify,
+  # repeat up to the current release (stable is ~v1.36). Keep in rough sync with
+  # ansible `k3s_version` (the fresh-install pin in
+  # inventory/my-cluster/group_vars/all/main.yml).
+  version: v1.32.13+k3s1
   concurrency: 1
   cordon: true
   nodeSelector:
