@@ -30,7 +30,7 @@ spec:
               repository: seerr/seerr
               # seerr only publishes a moving `latest` tag (no semver releases),
               # so it is pinned by immutable digest; Renovate bumps the digest via PR.
-              tag: latest@sha256:c92d2dc117f62185e7bcb88cd56efd374ea79210eaf433275449e8d5988eb5a8
+              tag: latest@sha256:d206d9e4056bb90178297df58047791196e7721e6dc19384579b0530702fe086
             env:
               TZ: "UTC"
             resources:
