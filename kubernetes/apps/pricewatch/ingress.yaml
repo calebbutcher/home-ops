@@ -1,0 +1,31 @@
+---
+# UI (gated) — internal-only, fully behind Authentik via the shared domain-wide
+# forward-auth middleware. changedetection.io has only a single-password login of its
+# own, so we front the whole app (UI + API) with SSO instead. No open-API split is
+# needed (nothing else consumes this app's API), unlike media/sonarr.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pricewatch
+  namespace: pricewatch
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.middlewares: authentik-authentik-forwardauth@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - pricewatch.int.nerdbox.dev
+      secretName: pricewatch-tls
+  rules:
+    - host: pricewatch.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pricewatch
+                port:
+                  number: 5000

@@ -1,0 +1,17 @@
+---
+# changedetection.io keeps ALL state on disk under /datastore: watch definitions,
+# price/text history, page snapshots and notification config (there is no database).
+# Non-rebuildable, so this PVC is backed up by VolSync (see replicationsource.yaml).
+# RWO, so the controller uses strategy: Recreate.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pricewatch-data
+  namespace: pricewatch
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi

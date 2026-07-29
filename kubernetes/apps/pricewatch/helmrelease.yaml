@@ -1,0 +1,135 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: pricewatch
+  namespace: pricewatch
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "3.7.3"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      changedetection:
+        # Single RWO /datastore PVC — the new pod must not overlap the old on rollout.
+        strategy: Recreate
+        containers:
+          # changedetection.io itself. The image ships ONLY the fast non-JS fetcher;
+          # JS-heavy / bot-protected retailers (Target, Walmart, Best Buy, Amazon) are
+          # rendered by the sockpuppetbrowser sidecar below, reached over localhost.
+          app:
+            image:
+              repository: ghcr.io/dgtlmoon/changedetection.io
+              tag: "0.55.8"
+            env:
+              TZ: UTC
+              # Used to build correct absolute links in Discord/Apprise notifications.
+              BASE_URL: https://pricewatch.int.nerdbox.dev
+              # Point the "Chrome/Playwright" fetcher at the in-pod browser sidecar.
+              # Same pod ⇒ shared network namespace ⇒ localhost:3000.
+              PLAYWRIGHT_DRIVER_URL: ws://localhost:3000
+            probes:
+              # First boot just loads the datastore (no migrations), but keep a
+              # generous startup window; all probes hit the Flask app on :5000.
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 5000
+                  periodSeconds: 10
+                  failureThreshold: 30
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 5000
+                  periodSeconds: 30
+                  failureThreshold: 5
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 5000
+                  periodSeconds: 15
+                  failureThreshold: 3
+            resources:
+              requests:
+                cpu: 50m
+                memory: 256Mi
+              limits:
+                memory: 512Mi
+          # Headless-Chrome companion (upstream-recommended). Versioned tags are stale
+          # (0.0.3 = Aug 2025) while :latest tracks the maintainer's current build, so
+          # follow upstream and pin :latest here; Renovate manages the app image above.
+          browser:
+            image:
+              repository: dgtlmoon/sockpuppetbrowser
+              tag: latest
+            env:
+              SCREEN_WIDTH: "1920"
+              SCREEN_HEIGHT: "1024"
+              SCREEN_DEPTH: "16"
+              # Home-scale: a handful of watches, so cap concurrent Chrome tabs low.
+              MAX_CONCURRENT_CHROME_PROCESSES: "2"
+            probes:
+              # ws control port; TCP is enough to know Chrome is up. No HTTP health path.
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: 3000
+                  periodSeconds: 30
+                  failureThreshold: 5
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: 3000
+                  periodSeconds: 15
+                  failureThreshold: 3
+              startup:
+                enabled: false
+            resources:
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                # Chrome is memory-hungry; give it headroom for a couple of tabs.
+                memory: 1Gi
+    service:
+      app:               # controller == release name ⇒ Service "pricewatch"
+        controller: changedetection
+        ports:
+          http:
+            port: 5000
+    persistence:
+      # Watches, price history, page snapshots and notification config all live here.
+      # No database — this PVC is the entire app state (backed up by VolSync).
+      data:
+        existingClaim: pricewatch-data
+        advancedMounts:
+          # Mount only on the app container; the browser sidecar has no use for it.
+          changedetection:
+            app:
+              - path: /datastore
