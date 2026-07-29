@@ -1,0 +1,29 @@
+---
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationSource
+metadata:
+  name: pricewatch-data
+  namespace: pricewatch
+spec:
+  sourcePVC: pricewatch-data
+  trigger:
+    # Staggered after the other apps' overnight backups.
+    schedule: "50 7 * * *"
+  restic:
+    repository: pricewatch-restic-secret
+    copyMethod: Direct
+    cacheCapacity: 1Gi
+    pruneIntervalDays: 7
+    retain:
+      daily: 7
+      weekly: 4
+      monthly: 3
+    # changedetection.io runs as root and owns everything under /datastore with normal
+    # read bits, so a root mover reads it fine WITHOUT privileged movers (unlike gitea,
+    # whose volume has uid-1000 0700 dirs the default caps-dropped root mover can't read).
+    # If the first backup ever fails on permissions, annotate the namespace with
+    # volsync.backube/privileged-movers=true.
+    moverSecurityContext:
+      runAsUser: 0
+      runAsGroup: 0
+      fsGroup: 0
