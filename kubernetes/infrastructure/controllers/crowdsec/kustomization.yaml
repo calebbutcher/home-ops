@@ -4,6 +4,6 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - helmrepository.yaml
+  - secret.sops.yaml
   - helmrelease.yaml
-  # Bouncer API key mounted into Traefik for the CrowdSec plugin (crowdsecLapiKeyFile).
-  - crowdsec-bouncer-key.sops.yaml
+  - middleware.yaml
