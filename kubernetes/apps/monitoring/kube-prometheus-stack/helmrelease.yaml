@@ -163,10 +163,18 @@ spec:
             - orgId: 1
               receiver: Discord
 
+      # Run Grafana without a PVC. Everything is GitOps-provisioned — dashboards
+      # via the sidecar (grafana_dashboard ConfigMaps), datasources + alerting via
+      # these values, users via Authentik OIDC — so nothing of value lives in
+      # Grafana's SQLite. A local-path PVC hard-pinned Grafana to one worker via PV
+      # node-affinity; when that node hit DiskPressure the pod was evicted and could
+      # only reschedule back onto the same full node, causing up/down flapping. An
+      # emptyDir keeps Grafana unpinned (schedulable on any node) and lets the
+      # Deployment roll cleanly. Plugins are Grafana's default preinstall, restored
+      # on boot; re-enable persistence (+ a networked StorageClass) only if you need
+      # UI-authored dashboards/annotations to survive restarts.
       persistence:
-        enabled: true
-        storageClassName: local-path
-        size: 5Gi
+        enabled: false
 
       # kube-prometheus-stack auto-provisions the local Prometheus datasource
       # (default). Add Thanos Query for the unified recent + long-term view and
