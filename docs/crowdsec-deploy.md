@@ -119,20 +119,41 @@ the `volumes` mount from the Traefik HelmRelease and remove `controllers/crowdse
 `kubernetes/infrastructure/kustomization.yaml`. `abortOnPluginFailure` is left at the chart
 default (`false`), so even a failed plugin download never takes Traefik down.
 
-## Request-level WAF (AppSec) — detect-only
+## Request-level WAF (AppSec) — staged enforcement
 
-CrowdSec's AppSec component (port 7422) adds in-band OWASP-CRS / virtual-patching signature
-inspection (the same niche as Coraza), in one ecosystem. It is deployed via
-`appsec.enabled: true` + a custom `home-ops/appsec-detect` config in the HelmRelease
-(`default_remediation: allow` = **detect-only**, logs matches but never blocks) and a
-`crowdsec-appsec` Middleware pointing at `crowdsec-appsec-service:7422`. Attached to **seerr
-only** for now (immich is excluded — large uploads get body-inspected). Rollout:
+CrowdSec's AppSec component (port 7422) does in-band request inspection. Deployed via
+`appsec.enabled: true` + the custom `home-ops/appsec-detect` config in the HelmRelease, behind the
+`crowdsec-appsec` Middleware (`crowdsec-appsec-service:7422`), attached to **seerr only** for now
+(immich excluded — large uploads get body-inspected). It runs in **two tiers**:
 
-1. **Detect** (current): watch `cscli alerts list` / `cscli metrics show appsec` for a few days
-   of real use; matches on legit seerr traffic are false positives to tune.
-2. **Tune**: exclude noisy rules, or add `crowdsecurity/crs-exclusion-plugin-*` for the app.
-3. **Enforce**: change `default_remediation` to `ban` in the HelmRelease, then widen to other
-   external hosts (raise `crowdsecAppsecBodyLimit` before adding immich).
+- **In-band (enforcing): `default_remediation: ban`** over `base-config` + `vpatch-*` (CVE virtual
+  patches) + `generic-*` (scanner patterns). A match **403s the live request**. These are narrow,
+  high-confidence signatures → low false-positive risk. The `appsec-vpatch`/`appsec-native` ban
+  scenarios fire on in-band (`appsec-block`) events only.
+- **Out-of-band (detect-only): OWASP CRS** (`crowdsecurity/crs`), for generic SQLi/XSS/etc. that the
+  vpatch/generic sets don't cover. Out-of-band rules run **after** the response, so they **never
+  block the live request**. CRS is installed as an `APPSEC_RULES` **rule**, *not* the
+  `crowdsecurity/appsec-crs` collection — so its banning scenario `crowdsec-appsec-outofband` is
+  **absent** and CRS can only **alert** (`on_match: SendAlert()`), never ban, while we tune.
+
+> **Prerequisite that made this real:** the AppSec engine only sees genuine attacker IPs because
+> Traefik now preserves the client source IP (`externalTrafficPolicy: Local`). Before that, external
+> traffic was SNAT'd to a whitelisted node IP and AppSec inspected nothing. Read appsec metrics on
+> the **appsec pod** (`:6060`), not via `cscli` on the LAPI (which has no appsec metrics locally).
+
+**CRS tuning → promotion rollout:**
+
+1. **Observe** (current): watch `cs_appsec_rule_hits{type="outofband"}` (AppSec Grafana dashboard) and
+   `cscli alerts list` (kind `waf`) for CRS matches on legit seerr traffic — those are false positives.
+2. **Tune**: add an app exclusion rule (`crowdsecurity/crs-exclusion-plugin-*`) to `outofband_rules`,
+   or drop a noisy rule id with a custom appsec-rule (`SecRuleRemoveById <id>` /
+   `SecRuleUpdateTargetById <id> "!ARGS:<param>"`). Raise `tx.inbound_anomaly_score_threshold` only if
+   broadly noisy.
+3. **Promote CRS to enforcing** once quiet: move `crowdsecurity/crs` from `outofband_rules` to
+   `inband_rules`. (Do **not** switch to the `crowdsecurity/appsec-crs` collection — that reintroduces
+   the auto-ban scenario; keep it as the rule.)
+4. **Widen** beyond seerr: attach the `crowdsec-appsec` middleware to other external hosts (raise
+   `crowdsecAppsecBodyLimit` before adding immich).
 
 ## Observability (Grafana dashboards + metrics)
 
