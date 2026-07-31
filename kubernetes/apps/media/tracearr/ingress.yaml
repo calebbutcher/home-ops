@@ -11,7 +11,8 @@ metadata:
     # login. It polls the *arr APIs outbound and exposes no inbound API, so a
     # full gate is functionally safe. Drop this annotation to rely on its native
     # auth alone, or switch to OIDC later.
-    traefik.ingress.kubernetes.io/router.middlewares: authentik-authentik-forwardauth@kubernetescrd
+    # Bouncer first (cheap IP-reputation check), then Authentik forward-auth.
+    traefik.ingress.kubernetes.io/router.middlewares: crowdsec-crowdsec-bouncer@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:

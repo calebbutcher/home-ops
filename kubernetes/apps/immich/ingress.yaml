@@ -7,6 +7,9 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # CrowdSec bouncer is IP-reputation only (drops known-bad IPs), NOT auth — it does
+    # not challenge/redirect, so unlike forward-auth (below) it is safe for the mobile app.
+    traefik.ingress.kubernetes.io/router.middlewares: crowdsec-crowdsec-bouncer@kubernetescrd
     # NOTE: do not add the authentik forwardauth middleware here — it breaks the
     # Immich mobile app/API. Use Immich's native OIDC against Authentik instead.
 spec:
