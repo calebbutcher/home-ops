@@ -32,7 +32,19 @@ spec:
       replicas: 2
 
     service:
-      type: LoadBalancer
+      # externalTrafficPolicy: Local preserves the REAL client source IP. Under the
+      # chart-default `Cluster` policy, kube-proxy SNATs every external client to a node
+      # flannel IP (10.42.x.0 / RFC1918) before Traefik sees it — which the CrowdSec
+      # bouncer, AppSec middleware, and agent log-parser all whitelist, silently no-oping
+      # enforcement + detection + WAF on ALL external traffic (verified 2026-07-31: every
+      # ClientHost Traefik logged was RFC1918, zero public IPs). `Local` drops the
+      # cross-node hop so the true client IP reaches Traefik. Viable here: 2 replicas on 2
+      # nodes + MetalLB L2 endpoint-aware announcement (VIP advertised only from a node
+      # running a Traefik pod). Must live under service.spec (chart v41 passthrough) —
+      # top-level `service.type` is a no-op (LoadBalancer comes from the chart default).
+      spec:
+        type: LoadBalancer
+        externalTrafficPolicy: Local
 
     ports:
       web:
