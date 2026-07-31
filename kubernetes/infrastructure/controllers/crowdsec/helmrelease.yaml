@@ -49,6 +49,16 @@ spec:
       envFrom:
         - secretRef:
             name: crowdsec-bouncer-key
+        # Console enrollment key → the image runs `cscli console enroll` on startup
+        # (idempotent). Enrolls this engine with app.crowdsec.net for extra blocklists.
+        - secretRef:
+            name: crowdsec-console-enroll
+      # Enrollment metadata (non-secret): instance name + tags shown in the console.
+      env:
+        - name: ENROLL_INSTANCE_NAME
+          value: home-ops
+        - name: ENROLL_TAGS
+          value: "k3s homelab"
       # Persist the decision DB + machine/CAPI credentials. Tiny + low-churn, so local-path
       # (which pins the pod to a node) is fine here — the bouncer re-registers from the env
       # key on any fresh volume regardless.
