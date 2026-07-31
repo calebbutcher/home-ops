@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - controllers/cert-manager
   - controllers/traefik
+  - controllers/crowdsec
   - controllers/snapshot-controller
   - controllers/volsync
   - controllers/cloudnative-pg
