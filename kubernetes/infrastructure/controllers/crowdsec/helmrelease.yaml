@@ -120,6 +120,14 @@ spec:
     # the crowdsec-appsec middleware (immich excluded — large uploads would be body-inspected).
     appsec:
       enabled: true
+      # Scrape the appsec component's Prometheus endpoint (port 6060) so cs_appsec_*
+      # metrics reach Prometheus. The chart's appsec-serviceMonitor selects
+      # crowdsec-appsec-service; kube-prometheus-stack scrapes all ServiceMonitors
+      # (serviceMonitorSelectorNilUsesHelmValues: false). Series stay empty until the
+      # WAF actually processes requests (detect-only on seerr today).
+      metrics:
+        serviceMonitor:
+          enabled: true
       # Installs the AppSec rule sets (virtual-patching CVEs + generic attack rules).
       env:
         - name: COLLECTIONS
