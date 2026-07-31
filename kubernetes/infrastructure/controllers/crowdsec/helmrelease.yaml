@@ -96,17 +96,14 @@ spec:
         - namespace: traefik
           podName: traefik-*
           program: traefik
-        # Authentik server logs → SSO credential-stuffing / failed-login detection
-        # (Traefik access logs can't tell a failed login from a success).
-        - namespace: authentik
-          podName: authentik-server-*
-          program: authentik
+        # NOTE: no Authentik acquisition. Authentik writes auth events to its DB, not stdout
+        # (its logs are only authentik.asgi request logs), so a log-based CrowdSec parser has
+        # nothing to match — SSO brute-force is handled by Authentik's own Reputation policy.
       env:
-        # HTTP attack scenarios (traefik + base), the L7 DoS collection (http-dos — its 4
-        # scenarios run in simulation first, see above), and the community Authentik
-        # collection (parser + brute-force scenarios). firix/authentik is a third-party item.
+        # HTTP attack scenarios (traefik + base) + the L7 DoS collection (http-dos — its 4
+        # scenarios run in simulation first, see above).
         - name: COLLECTIONS
-          value: "crowdsecurity/traefik crowdsecurity/base-http-scenarios crowdsecurity/http-dos firix/authentik"
+          value: "crowdsecurity/traefik crowdsecurity/base-http-scenarios crowdsecurity/http-dos"
       metrics:
         serviceMonitor:
           enabled: true
