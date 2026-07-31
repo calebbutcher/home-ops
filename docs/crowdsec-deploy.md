@@ -134,6 +134,42 @@ only** for now (immich is excluded — large uploads get body-inspected). Rollou
 3. **Enforce**: change `default_remediation` to `ban` in the HelmRelease, then widen to other
    external hosts (raise `crowdsecAppsecBodyLimit` before adding immich).
 
+## Observability (Grafana dashboards + metrics)
+
+Prometheus scrapes the CrowdSec ServiceMonitors (lapi + agent + appsec, port `metrics`/6060) —
+`serviceMonitorSelectorNilUsesHelmValues: false` means no label wiring is needed. The appsec
+ServiceMonitor is enabled via `appsec.metrics.serviceMonitor.enabled: true` in the HelmRelease.
+
+Five dashboards are provisioned as ConfigMaps in `kubernetes/apps/monitoring/crowdsec/` (label
+`grafana_dashboard: "1"`, datasource pinned to uid `prometheus`, auto-imported by the Grafana
+sidecar). The first four are the official `crowdsecurity/grafana-dashboards` v5 set (vendored:
+`__inputs`/`__requires` stripped, `${DS_PROMETHEUS}` → hardcoded `prometheus`); the last is
+hand-authored:
+
+| Dashboard | File | Notes |
+|-----------|------|-------|
+| Overview | `dashboard.yaml` | Global decisions / alerts / buckets / parsers. |
+| Insight | `dashboard-insight.yaml` | Per-node health + Top scenarios. |
+| Details per instance | `dashboard-details.yaml` | Deep per-node parser/bucket internals + heatmaps. |
+| LAPI Metrics | `dashboard-lapi.yaml` | LAPI request-duration heatmaps (pick the lapi instance). |
+| AppSec | `dashboard-appsec.yaml` | `cs_appsec_*` WAF metrics — **empty until the WAF processes traffic**. |
+
+> **Instance dropdowns** on Insight/Details/LAPI list every CrowdSec pod as `IP:port` (the
+> Prometheus `instance` label). Only the two agents co-located with a Traefik replica emit parse
+> metrics (`cs_parser_hits_*`, `cs_parsing_time_*`) — the rest just carry `cs_info`.
+>
+> **AppSec panels stay empty** until the AppSec component actually inspects requests. It is
+> detect-only on seerr today, so `cs_appsec_reqs_total` / `cs_appsec_block_total` /
+> `cs_appsec_rule_hits` register only once real WAF traffic flows (see the smoke test below).
+
+To confirm AppSec metrics after some traffic:
+
+```sh
+kubectl -n crowdsec exec deploy/crowdsec-lapi -- cscli metrics show appsec   # non-empty once traffic hits
+# smoke-test from an external vantage (detect-only → logs/counts, won't block):
+#   curl -s -o /dev/null 'https://seerr.nerdbox.dev/?id=1%20OR%201=1'
+```
+
 ## Notes
 
 - **Community blocklist (CAPI)**: the LAPI auto-enrolls with the central API on first start
