@@ -119,12 +119,20 @@ the `volumes` mount from the Traefik HelmRelease and remove `controllers/crowdse
 `kubernetes/infrastructure/kustomization.yaml`. `abortOnPluginFailure` is left at the chart
 default (`false`), so even a failed plugin download never takes Traefik down.
 
-## Later: request-level WAF (AppSec)
+## Request-level WAF (AppSec) — detect-only
 
-CrowdSec's AppSec component (port 7422) adds OWASP-CRS / virtual-patching signature inspection
-(the same niche as Coraza), kept in one ecosystem. Enable `appsec.enabled: true` +
-`appsec.acquisitions`/`configs` in the HelmRelease and add a second Middleware in `appsec`
-mode (`crowdsecAppsecEnabled: true`, host `crowdsec-appsec-service:7422`). Deferred for now.
+CrowdSec's AppSec component (port 7422) adds in-band OWASP-CRS / virtual-patching signature
+inspection (the same niche as Coraza), in one ecosystem. It is deployed via
+`appsec.enabled: true` + a custom `home-ops/appsec-detect` config in the HelmRelease
+(`default_remediation: allow` = **detect-only**, logs matches but never blocks) and a
+`crowdsec-appsec` Middleware pointing at `crowdsec-appsec-service:7422`. Attached to **seerr
+only** for now (immich is excluded — large uploads get body-inspected). Rollout:
+
+1. **Detect** (current): watch `cscli alerts list` / `cscli metrics show appsec` for a few days
+   of real use; matches on legit seerr traffic are false positives to tune.
+2. **Tune**: exclude noisy rules, or add `crowdsecurity/crs-exclusion-plugin-*` for the app.
+3. **Enforce**: change `default_remediation` to `ban` in the HelmRelease, then widen to other
+   external hosts (raise `crowdsecAppsecBodyLimit` before adding immich).
 
 ## Notes
 
