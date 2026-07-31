@@ -41,6 +41,17 @@ spec:
                 - "10.0.0.0/8"
                 - "172.16.0.0/12"
                 - "192.168.0.0/16"
+      # The http-dos scenarios start in SIMULATION (detect-only): they ban on request-rate,
+      # and Immich photo-grid browsing is request-heavy → real false-positive risk. In
+      # simulation they log alerts but do NOT enforce. Remove these exclusions to enforce
+      # once confirmed quiet. (Simulation matches scenario names, not the collection name.)
+      simulation.yaml: |
+        simulation: false
+        exclusions:
+          - crowdsecurity/http-dos-bypass-cache
+          - crowdsecurity/http-dos-invalid-http-versions
+          - crowdsecurity/http-dos-random-uri
+          - crowdsecurity/http-dos-switching-ua
 
     # Local API — stores decisions, pulls the CrowdSec community blocklist (CAPI).
     lapi:
@@ -85,10 +96,17 @@ spec:
         - namespace: traefik
           podName: traefik-*
           program: traefik
+        # Authentik server logs → SSO credential-stuffing / failed-login detection
+        # (Traefik access logs can't tell a failed login from a success).
+        - namespace: authentik
+          podName: authentik-server-*
+          program: authentik
       env:
-        # Installs the Traefik parser + HTTP attack scenarios on the agent at startup.
+        # HTTP attack scenarios (traefik + base), the L7 DoS collection (http-dos — its 4
+        # scenarios run in simulation first, see above), and the community Authentik
+        # collection (parser + brute-force scenarios). firix/authentik is a third-party item.
         - name: COLLECTIONS
-          value: "crowdsecurity/traefik crowdsecurity/base-http-scenarios"
+          value: "crowdsecurity/traefik crowdsecurity/base-http-scenarios crowdsecurity/http-dos firix/authentik"
       metrics:
         serviceMonitor:
           enabled: true
