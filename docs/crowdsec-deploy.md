@@ -70,11 +70,14 @@ kubectl -n traefik logs deploy/traefik | grep -i crowdsec
 Let observe mode run long enough to confirm normal usage (Immich upload, `*arr` API polling,
 Authentik logins) does **not** raise decisions against legitimate clients.
 
-## Enforce (second step — one PR per the staged rollout)
+## Enforce
 
-Attach the bouncer to the **public** `*.nerdbox.dev` Ingresses by adding it to the
-`router.middlewares` annotation. Put the bouncer **first** (cheap IP check before auth).
-Start with one low-risk host (e.g. uptime-kuma), verify, then roll out the rest.
+The bouncer is attached to every Ingress carrying a bare `*.nerdbox.dev` host by adding it to the
+`router.middlewares` annotation (bouncer **first** — cheap IP check before any auth). Only
+`immich` and `seerr` actually have external Cloudflare DNS; the rest (`uptime`, `radarr`/`sonarr`
++ their `-api`, `tracearr`) have no DNS but their bare routers still answer on the public IP with a
+spoofed `Host` header, so they are covered as **defense-in-depth**. Internal `*.int` routes on the
+same Ingresses are unaffected — LAN is whitelisted.
 
 Routes with **no** existing middleware — set the annotation:
 
@@ -99,11 +102,14 @@ the bouncer only.
 ### Test enforcement
 
 ```sh
-# Ban a throwaway IP, confirm 403, then clean up
-kubectl -n crowdsec exec deploy/crowdsec-lapi -- cscli decisions add --ip 203.0.113.7 --duration 5m --type ban
-curl -sO -H 'X-Forwarded-For: 203.0.113.7' https://uptime.nerdbox.dev   # expect 403 (from an enforced host)
-kubectl -n crowdsec exec deploy/crowdsec-lapi -- cscli decisions delete --ip 203.0.113.7
+# Ban a throwaway IP, then hit an enforced host FROM THAT EXTERNAL IP (phone on cellular / a VPS)
+kubectl -n crowdsec exec deploy/crowdsec-lapi -- cscli decisions add --ip <external-ip> --duration 5m --type ban
+#   from that IP:  curl -s -o /dev/null -w '%{http_code}\n' https://immich.nerdbox.dev   # expect 403
+kubectl -n crowdsec exec deploy/crowdsec-lapi -- cscli decisions delete --ip <external-ip>
 ```
+
+> You **cannot** test a block from a LAN machine (even with a spoofed `X-Forwarded-For`): LAN
+> sources are in the bouncer's `clientTrustedIPs`, so they bypass the check entirely.
 
 ## Rollback
 

@@ -10,7 +10,8 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    traefik.ingress.kubernetes.io/router.middlewares: authentik-authentik-forwardauth@kubernetescrd
+    # Bouncer first (cheap IP-reputation check), then Authentik forward-auth.
+    traefik.ingress.kubernetes.io/router.middlewares: crowdsec-crowdsec-bouncer@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
@@ -51,6 +52,8 @@ metadata:
   namespace: media
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # CrowdSec IP-reputation bouncer in front of the open (unauthenticated) API paths.
+    traefik.ingress.kubernetes.io/router.middlewares: crowdsec-crowdsec-bouncer@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
