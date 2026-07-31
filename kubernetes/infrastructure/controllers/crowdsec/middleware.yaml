@@ -30,3 +30,33 @@ spec:
         - 10.0.0.0/8
         - 172.16.0.0/12
         - 192.168.0.0/16
+---
+# CrowdSec AppSec middleware — forwards each request to the AppSec component (:7422) for
+# in-band WAF inspection (virtual-patching CVEs + generic attack rules). The appsec config
+# is DETECT-ONLY (default_remediation: allow in the HelmRelease), so this logs matches but
+# does NOT block. Attach ALONGSIDE crowdsec-bouncer (IP reputation, which stays first).
+# Referenced as `crowdsec-crowdsec-appsec@kubernetescrd`. Wired to seerr only for now.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: crowdsec-appsec
+  namespace: crowdsec
+spec:
+  plugin:
+    bouncer:
+      enabled: true
+      logLevel: INFO
+      crowdsecMode: appsec
+      crowdsecLapiScheme: http
+      crowdsecLapiHost: crowdsec-service.crowdsec.svc.cluster.local:8080
+      crowdsecLapiKeyFile: /var/run/secrets/crowdsec/bouncer-key
+      crowdsecAppsecEnabled: true
+      crowdsecAppsecScheme: http
+      crowdsecAppsecHost: crowdsec-appsec-service.crowdsec.svc.cluster.local:7422
+      # Detect-first safety: never block just because AppSec errored or is unreachable.
+      crowdsecAppsecFailureBlock: false
+      crowdsecAppsecUnreachableBlock: false
+      clientTrustedIPs:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16

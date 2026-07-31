@@ -7,8 +7,9 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    # CrowdSec IP-reputation bouncer (drops known-bad IPs before the app; own login handles auth).
-    traefik.ingress.kubernetes.io/router.middlewares: crowdsec-crowdsec-bouncer@kubernetescrd
+    # CrowdSec IP-reputation bouncer (drops known-bad IPs) + AppSec in-band WAF in
+    # detect-only mode (logs rule matches, does not block yet). Bouncer stays first.
+    traefik.ingress.kubernetes.io/router.middlewares: crowdsec-crowdsec-bouncer@kubernetescrd,crowdsec-crowdsec-appsec@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
