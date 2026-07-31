@@ -19,5 +19,6 @@ resources:
   - loki/dashboard-health.yaml
   - loki/dashboard-logs-explorer.yaml
   - traefik/dashboard.yaml
+  - crowdsec/dashboard.yaml
   - alloy/helmrelease.yaml
   - alloy/helmrelease-events.yaml
