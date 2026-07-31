@@ -5,5 +5,6 @@ resources:
   - namespace.yaml
   - helmrepository.yaml
   - secret.sops.yaml
+  - enroll-secret.sops.yaml
   - helmrelease.yaml
   - middleware.yaml
