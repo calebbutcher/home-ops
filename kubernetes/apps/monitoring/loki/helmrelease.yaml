@@ -80,6 +80,27 @@ spec:
       querier:
         max_concurrent: 4
 
+      # Ruler: evaluate LogQL alerting rules and push firing alerts to the
+      # kube-prometheus-stack Alertmanager, which routes them to Discord via the
+      # same catch-all `discord` AlertmanagerConfig as the Prometheus rules — so a
+      # TrueNAS kernel NIC-hang message pages the same #cluster-alerts channel.
+      # Rules are mounted from the loki-alerting-rules ConfigMap at
+      # /etc/loki/rules/<tenant>; with auth_enabled:false the tenant is `fake`.
+      # rule_path + wal live on the node-local PVC (/var/loki) so they're writable.
+      # In SingleBinary all 3 replicas run a ruler and each may fire; Alertmanager
+      # de-duplicates identical alerts, so at most one Discord message results.
+      rulerConfig:
+        wal:
+          dir: /var/loki/ruler-wal
+        rule_path: /var/loki/rules-temp
+        storage:
+          type: local
+          local:
+            directory: /etc/loki/rules
+        alertmanager_url: http://kube-prometheus-stack-alertmanager.monitoring.svc:9093
+        enable_alertmanager_v2: true
+        enable_api: true
+
     singleBinary:
       replicas: 3
       # -config.expand-env=true lets the ${LOKI_S3_*} placeholders in the config
@@ -90,6 +111,16 @@ spec:
       extraEnvFrom:
         - secretRef:
             name: loki-s3
+      # Mount the LogQL alerting rules (loki-alerting-rules ConfigMap) where the
+      # ruler's local storage expects them: <directory>/<tenant>/. tenant = fake.
+      extraVolumes:
+        - name: loki-rules
+          configMap:
+            name: loki-alerting-rules
+      extraVolumeMounts:
+        - name: loki-rules
+          mountPath: /etc/loki/rules/fake
+          readOnly: true
       # Durable node-local WAL/head buffer. local-path pins each replica to a node;
       # RF3 makes the WAL redundant across nodes.
       persistence:

@@ -1,0 +1,36 @@
+---
+# LogQL alerting rule for the Loki ruler (enabled in loki/helmrelease.yaml).
+# Mounted into the SingleBinary pods at /etc/loki/rules/fake/ (tenant `fake`,
+# since auth_enabled:false). When a NIC-hang kernel message appears in the TrueNAS
+# syslog stream, the ruler fires an alert to the kube-prometheus-stack Alertmanager,
+# which routes it to Discord (#cluster-alerts) via the catch-all `discord`
+# AlertmanagerConfig — the earliest, most specific signal of the mlx5/bond01 hang,
+# complementing the metric-based rules in prometheusrule-truenas.yaml.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-alerting-rules
+  namespace: monitoring
+data:
+  truenas-nic.yaml: |
+    groups:
+      - name: truenas-nic-kernel
+        rules:
+          - alert: TrueNASKernelNICHang
+            # Match the classic driver-hang kernel signatures (any driver) plus
+            # Mellanox mlx5-specific health/timeout messages, case-insensitive, in
+            # the TrueNAS syslog over the last 10m.
+            expr: |
+              sum(count_over_time({job="syslog", host="truenas"} |~ `(?i)NETDEV WATCHDOG|transmit queue [0-9]+ timed out|Detected Hardware Unit Hang|Reset adapter|tx timeout|Link is Down|mlx5_core.*(Command timeout|health compromised|assert|reset requested|Fatal error)` [10m])) > 0
+            for: 0m
+            labels:
+              severity: critical
+              host: truenas
+              component: nic
+            annotations:
+              summary: "TrueNAS kernel NIC-hang message detected"
+              description: >-
+                A NIC driver-hang kernel message appeared in the TrueNAS syslog in
+                the last 10m — likely the intermittent mlx5/bond01 hang starting.
+                Inspect Loki ({job="syslog", host="truenas"}) for the exact line and
+                check the host on iDRAC; a reboot may be imminent.
