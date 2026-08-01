@@ -19,6 +19,8 @@ resources:
   - loki/helmrelease.yaml
   - loki/rules-truenas.yaml
   - loki/dashboard-health.yaml
+  - truenas/dashboard-system.yaml
+  - truenas/dashboard-zfs.yaml
   - loki/dashboard-logs-explorer.yaml
   - traefik/dashboard.yaml
   - crowdsec/dashboard.yaml
