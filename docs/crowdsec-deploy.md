@@ -183,11 +183,29 @@ hand-authored:
 > detect-only on seerr today, so `cs_appsec_reqs_total` / `cs_appsec_block_total` /
 > `cs_appsec_rule_hits` register only once real WAF traffic flows (see the smoke test below).
 
-To confirm AppSec metrics after some traffic:
+### AppSec stats from the CLI
+
+`scripts/appsec-stats.sh` is a one-shot helper — it runs the right `cscli` command against the right
+pod (see the gotcha below) and prints Processed/Blocked + per-rule triggers, recent `waf` detections,
+and active bans in one go:
 
 ```sh
-kubectl -n crowdsec exec deploy/crowdsec-lapi -- cscli metrics show appsec   # non-empty once traffic hits
-# smoke-test from an external vantage (detect-only → logs/counts, won't block):
+scripts/appsec-stats.sh          # default: 20 recent alerts
+scripts/appsec-stats.sh 50       # more alerts;  NS=crowdsec to override the namespace
+```
+
+> **Gotcha:** AppSec **metrics** live on the **appsec pod**, but **alerts** and **decisions** live on
+> the **LAPI**. `cscli metrics show appsec` run against the LAPI returns an **empty table** — it must
+> target the appsec pod. The underlying commands:
+
+```sh
+# metrics (Processed / Blocked + per-rule) — APPSEC POD, not the LAPI:
+kubectl -n crowdsec exec deploy/crowdsec-appsec -- cscli metrics show appsec
+# detections + bans — LAPI:
+kubectl -n crowdsec exec deploy/crowdsec-lapi -- cscli alerts list --limit 20    # kind "waf" = appsec
+kubectl -n crowdsec exec deploy/crowdsec-lapi -- cscli alerts inspect <ID> -d    # matched rules + request
+kubectl -n crowdsec exec deploy/crowdsec-lapi -- cscli decisions list            # active bans (add -a for CAPI)
+# smoke-test a detection from an external vantage (a generic SQLi is CRS out-of-band = alert-only):
 #   curl -s -o /dev/null 'https://seerr.nerdbox.dev/?id=1%20OR%201=1'
 ```
 
