@@ -14,6 +14,7 @@ resources:
   - grafana-ingress.yaml
   - kube-prometheus-stack/helmrelease.yaml
   - kube-prometheus-stack/alertmanagerconfig.yaml
+  - kube-prometheus-stack/prometheusrule-truenas.yaml
   - thanos/helmrelease.yaml
   - loki/helmrelease.yaml
   - loki/dashboard-health.yaml
@@ -26,3 +27,4 @@ resources:
   - crowdsec/dashboard-appsec.yaml
   - alloy/helmrelease.yaml
   - alloy/helmrelease-events.yaml
+  - alloy/helmrelease-syslog.yaml

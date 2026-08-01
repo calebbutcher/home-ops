@@ -1,0 +1,96 @@
+---
+# Early-warning alerts for the TrueNAS host's intermittent NIC hang.
+#
+# The NAS (10.2.40.10) periodically drops off the LAN — OS alive on iDRAC but
+# unreachable over the network, recoverable only by reboot. That matches a NIC
+# driver hang, which ramps up (rising tx/rx errors, drops, carrier flaps) in the
+# minutes before a full stall. These rules catch that ramp-up — plus a fast
+# host-down — so we're paged before Uptime Kuma sees it down.
+#
+# Topology (from node_exporter on the NAS, confirmed 2026-08-01):
+#   * bond01 — LACP bond, the real uplink; slaves enp65s0f0np0 + enp65s0f1np1,
+#     a dual-port Mellanox card (mlx5 driver — the `np` netdev suffix). All share
+#     MAC b0:26:28:2e:ce:c0.
+#   * eno1-eno4 — onboard, UNUSED (eno1 cabled-but-down, eno2-4 admin-down). These
+#     sit at node_network_up==0 permanently, so the link-down rule MUST exclude
+#     them or it false-fires. Hence the device=~ pins below.
+#   * br-*/veth* — Docker bridge/veth from the node_exporter app; ignored.
+# If the uplink is ever recabled/renamed, update the `truenasnic` device regex.
+#
+# Fed by the `truenas-node` scrape job (node_exporter on the NAS; see
+# kube-prometheus-stack/helmrelease.yaml additionalScrapeConfigs). No `release:`
+# label needed — ruleSelectorNilUsesHelmValues: false — and the `severity` labels
+# route via the catch-all Discord AlertmanagerConfig. Thresholds start sensitive;
+# tune (esp. the drop rule) once a few days of baseline are in Grafana.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: truenas-node
+  namespace: monitoring
+spec:
+  groups:
+    - name: truenas-node.rules
+      rules:
+        - alert: TrueNASNodeDown
+          expr: up{job="truenas-node"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS node_exporter unreachable"
+            description: >-
+              Prometheus can't scrape node_exporter on the TrueNAS host
+              (10.2.40.10:9100) for >2m. Likely the NIC hang (verify on iDRAC) or
+              the exporter app stopped. This fires ahead of / alongside Uptime Kuma.
+
+        - alert: TrueNASNICErrors
+          expr: |
+            rate(node_network_receive_errs_total{job="truenas-node", device=~"bond01|enp65s0f.*"}[5m])
+            + rate(node_network_transmit_errs_total{job="truenas-node", device=~"bond01|enp65s0f.*"}[5m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS NIC reporting errors ({{ $labels.device }})"
+            description: >-
+              Uplink {{ $labels.device }} on TrueNAS has a sustained rx/tx error
+              rate (>0/s for 5m). On a healthy wired NIC this is abnormal and often
+              precedes a driver hang — check kernel logs in Loki ({job="syslog"}).
+
+        - alert: TrueNASNICDrops
+          expr: |
+            rate(node_network_receive_drop_total{job="truenas-node", device=~"bond01|enp65s0f.*"}[5m])
+            + rate(node_network_transmit_drop_total{job="truenas-node", device=~"bond01|enp65s0f.*"}[5m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS NIC dropping packets ({{ $labels.device }})"
+            description: >-
+              Uplink {{ $labels.device }} on TrueNAS has a sustained rx/tx drop rate
+              (>0/s for 5m) — a common precursor to the NIC stall. NOTE: some benign
+              drops are normal under load; raise this threshold after baselining.
+
+        - alert: TrueNASNICCarrierFlapping
+          expr: rate(node_network_carrier_changes_total{job="truenas-node", device=~"bond01|enp65s0f.*"}[10m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS NIC link flapping ({{ $labels.device }})"
+            description: >-
+              Uplink {{ $labels.device }} on TrueNAS is changing carrier state (link
+              up/down) over the last 10m — a classic pre-hang tell, and on a bonded
+              slave it also means lost redundancy.
+
+        - alert: TrueNASNICLinkDown
+          expr: node_network_up{job="truenas-node", device=~"bond01|enp65s0f.*"} == 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS uplink down ({{ $labels.device }})"
+            description: >-
+              Uplink {{ $labels.device }} on TrueNAS reports operstate down while the
+              host is still scrapeable — the earliest catch of a NIC problem. A single
+              bond slave = degraded redundancy; bond01 itself = full uplink loss.

@@ -1,0 +1,79 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: alloy-syslog
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: alloy
+      version: "1.11.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # Remote-syslog receiver for the TrueNAS host (10.2.40.10). TrueNAS forwards its
+    # journal (incl. kernel messages) here so the NIC-hang smoking gun — NETDEV
+    # WATCHDOG / "Detected Hardware Unit Hang" / transmit-queue-timed-out — lands in
+    # Loki for root-cause + a searchable record. Single Deployment replica (like
+    # alloy-events): the listener is a singleton with a stable LoadBalancer IP, and
+    # with no host mounts it reschedules freely.
+    controller:
+      type: deployment
+      replicas: 1
+    alloy:
+      # Add the syslog listener port to the container + Service. The Alloy debug UI
+      # (12345) is also exposed on the LB IP — harmless on the trusted LAN.
+      extraPorts:
+        - name: syslog-tcp
+          port: 1514
+          targetPort: 1514
+          protocol: TCP
+      configMap:
+        content: |-
+          // Listen for RFC5424 syslog over TCP and ship to Loki. Static labels tag
+          // the stream as the NAS regardless of source IP (so no need to preserve
+          // the client IP through the LoadBalancer). If lines don't appear in Loki
+          // after pointing TrueNAS here, the sender is RFC3164 — switch syslog_format
+          // to "rfc3164" (TrueNAS transport must match this listener).
+          loki.source.syslog "truenas" {
+            listener {
+              address       = "0.0.0.0:1514"
+              protocol      = "tcp"
+              syslog_format = "rfc5424"
+              labels        = { job = "syslog", host = "truenas" }
+            }
+            forward_to = [loki.write.default.receiver]
+          }
+
+          loki.write "default" {
+            endpoint {
+              url = "http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push"
+            }
+          }
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          memory: 128Mi
+    # Expose the listener on a stable MetalLB IP the external NAS can reach.
+    # first-pool is 10.2.169.80-.90; .81 Traefik, .82 Gitea SSH, so .83 is free.
+    service:
+      enabled: true
+      type: LoadBalancer
+      annotations:
+        metallb.universe.tf/loadBalancerIPs: 10.2.169.83
+    # No Kubernetes discovery/API access needed — this only listens on a socket.
+    rbac:
+      create: false

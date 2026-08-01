@@ -69,6 +69,21 @@ spec:
         ruleSelectorNilUsesHelmValues: false
         probeSelectorNilUsesHelmValues: false
 
+        # Scrape node_exporter running on the TrueNAS host (10.2.40.10:9100). The
+        # NAS is deliberately outside the cluster but holds all backups + Loki/
+        # Thanos object storage, so we watch its NIC/disk/ZFS health here. Paired
+        # with prometheusrule-truenas.yaml, whose rules give early warning of the
+        # intermittent NIC hang (rising errors/drops/carrier flaps) before the host
+        # goes fully unreachable. Inline (not a ScrapeConfig CR) so it needs no
+        # selector opt-in and no Secret — it's a single static, non-secret target.
+        additionalScrapeConfigs:
+          - job_name: truenas-node
+            static_configs:
+              - targets: ["10.2.40.10:9100"]
+                labels:
+                  instance: truenas
+                  host: truenas
+
         # Thanos sidecar: uploads 2h TSDB blocks to RustFS S3. Object store
         # config comes from the SOPS-managed thanos-objstore Secret (key
         # objstore.yml), reused by the Thanos Store Gateway / Compactor.
