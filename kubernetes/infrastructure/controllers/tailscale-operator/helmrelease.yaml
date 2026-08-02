@@ -1,0 +1,34 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tailscale-operator
+  namespace: tailscale
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: tailscale-operator
+      version: "1.98.9"
+      sourceRef:
+        kind: HelmRepository
+        name: tailscale-operator
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # OAuth credentials are supplied via the pre-created, SOPS-encrypted
+    # `operator-oauth` Secret in this namespace (keys client_id / client_secret).
+    # Leaving this block empty tells the chart NOT to create its own secret and
+    # to mount `operator-oauth` instead. Avoids the buggy oauthSecretVolume path
+    # (tailscale/tailscale#18244).
+    oauth: {}
+    # installCRDs defaults to true → the tailscale.com CRDs (incl. Connector)
+    # are installed with the chart. No in-process kube-apiserver proxy needed.
+    apiServerProxyConfig:
+      mode: "false"
