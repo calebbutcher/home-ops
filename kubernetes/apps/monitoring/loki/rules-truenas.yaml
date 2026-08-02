@@ -1,11 +1,15 @@
 ---
-# LogQL alerting rule for the Loki ruler (enabled in loki/helmrelease.yaml).
+# LogQL alerting rules for the Loki ruler (enabled in loki/helmrelease.yaml).
 # Mounted into the SingleBinary pods at /etc/loki/rules/fake/ (tenant `fake`,
-# since auth_enabled:false). When a NIC-hang kernel message appears in the TrueNAS
-# syslog stream, the ruler fires an alert to the kube-prometheus-stack Alertmanager,
-# which routes it to Discord (#cluster-alerts) via the catch-all `discord`
-# AlertmanagerConfig — the earliest, most specific signal of the mlx5/bond01 hang,
-# complementing the metric-based rules in prometheusrule-truenas.yaml.
+# since auth_enabled:false); each data key below becomes a rule file the ruler
+# loads. Firing alerts go to the kube-prometheus-stack Alertmanager, which routes
+# them to Discord (#cluster-alerts) via the catch-all `discord` AlertmanagerConfig.
+# Two rule files:
+#   * truenas-nic.yaml — kernel NIC-hang signatures (the mlx5/bond01 stall).
+#   * truenas-zfs.yaml — real-time ZFS events from ZED (checksum/IO/data errors,
+#     vdev state changes, scrub completion). These complement the metric-based
+#     rules in prometheusrule-truenas{,-zfs}.yaml, catching point-in-time events a
+#     5-minute metric scrape can miss.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -34,3 +38,60 @@ data:
                 the last 10m — likely the intermittent mlx5/bond01 hang starting.
                 Inspect Loki ({job="syslog", host="truenas"}) for the exact line and
                 check the host on iDRAC; a reboot may be imminent.
+  truenas-zfs.yaml: |
+    # Real-time ZFS pool events from the ZFS Event Daemon (zed), which writes to
+    # the host journal and reaches Loki via the existing syslog forwarder. These
+    # catch corruption/state changes the instant ZFS reports them.
+    # NOTE: ZED's exact line format varies by OpenZFS version — verify events land
+    # first (`{job="syslog", host="truenas"} |= "zed"` in Grafana Explore) and pin
+    # these regexes against a real captured line if they don't match.
+    groups:
+      - name: truenas-zfs-events
+        rules:
+          - alert: TrueNASZFSDataError
+            # Checksum / IO / data ereports = ZFS caught corruption on a vdev.
+            expr: |
+              sum(count_over_time({job="syslog", host="truenas"} |~ `(?i)zed.*(ereport\.fs\.zfs\.(checksum|io|data)|class=(checksum|io|data))` [10m])) > 0
+            for: 0m
+            labels:
+              severity: critical
+              host: truenas
+              component: zfs
+            annotations:
+              summary: "TrueNAS ZFS data/checksum/IO error event (ZED)"
+              description: >-
+                ZED reported a checksum/IO/data error on a pool in the last 10m —
+                ZFS detected corruption. Run `zpool status -v` on the host to find
+                the affected vdev/files and check that disk's SMART data.
+
+          - alert: TrueNASZFSPoolStateChange
+            # A vdev/pool transitioned to a non-healthy state.
+            expr: |
+              sum(count_over_time({job="syslog", host="truenas"} |~ `(?i)zed.*statechange` |~ `DEGRADED|FAULTED|UNAVAIL|REMOVED` [10m])) > 0
+            for: 0m
+            labels:
+              severity: critical
+              host: truenas
+              component: zfs
+            annotations:
+              summary: "TrueNAS ZFS vdev state change (ZED)"
+              description: >-
+                ZED reported a vdev/pool state change to DEGRADED/FAULTED/UNAVAIL/
+                REMOVED in the last 10m — a disk likely dropped out. Check `zpool
+                status`; redundancy may be lost until it's resilvered/replaced.
+
+          - alert: TrueNASZFSScrubFinished
+            # Informational: a scrub completed. Drop this rule if it's too chatty.
+            expr: |
+              sum(count_over_time({job="syslog", host="truenas"} |~ `(?i)zed.*(scrub\.finish|scrub_finish)` [10m])) > 0
+            for: 0m
+            labels:
+              severity: warning
+              host: truenas
+              component: zfs
+            annotations:
+              summary: "TrueNAS ZFS scrub finished (ZED)"
+              description: >-
+                A ZFS scrub completed on the TrueNAS host. Informational — confirm it
+                finished with 0 errors in `zpool status` (the TrueNASZFSScrubErrors
+                metric alert fires separately if it didn't).

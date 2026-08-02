@@ -1,7 +1,7 @@
 ---
 # Auto-provisioned Grafana dashboard for the TrueNAS host (job=truenas-node).
 # Imported by the kube-prometheus-stack Grafana sidecar via the
-# grafana_dashboard label. Generated from scratchpad/gen_dashboards.py.
+# grafana_dashboard label. Generated from scripts/monitoring/gen_truenas_dashboards.py.
 apiVersion: v1
 kind: ConfigMap
 metadata:

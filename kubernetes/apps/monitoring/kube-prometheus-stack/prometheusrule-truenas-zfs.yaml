@@ -1,0 +1,127 @@
+---
+# ZFS pool-health alerts for the TrueNAS host.
+#
+# Two data sources feed these:
+#   * node_zfs_zpool_state — from node_exporter's built-in zfs collector (already
+#     scraped); backs the pool-degraded rule, so THAT rule works even before the
+#     textfile collector is installed.
+#   * zfs_zpool_* — from the node_exporter textfile collector installed on the NAS
+#     (scripts/truenas/zfs-textfile-collector.sh, run every 5m via a TrueNAS cron
+#     job). These cover what node_exporter can't: capacity %, fragmentation %,
+#     scrub state/recency, and per-vdev read/write/checksum errors.
+#
+# Same wiring as prometheusrule-truenas.yaml: fed by the `truenas-node` scrape job,
+# no `release:` label needed (ruleSelectorNilUsesHelmValues: false), and the
+# `severity` labels route via the catch-all Discord AlertmanagerConfig. Thresholds
+# (80/90% capacity, 50% frag, 35-day scrub) are starting points — tune after a few
+# days of baseline in the TrueNAS / ZFS dashboard.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: truenas-zfs
+  namespace: monitoring
+spec:
+  groups:
+    - name: truenas-zfs.rules
+      rules:
+        - alert: TrueNASZFSPoolDegraded
+          expr: node_zfs_zpool_state{job="truenas-node", state=~"degraded|faulted|unavail|removed|suspended"} == 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS ZFS pool not healthy ({{ $labels.zpool }} = {{ $labels.state }})"
+            description: >-
+              Pool {{ $labels.zpool }} on TrueNAS is {{ $labels.state }} (not
+              ONLINE) for >5m. Check `zpool status` on the host — a disk may have
+              faulted. This NAS holds the backups/Loki/Thanos data, so treat as urgent.
+
+        - alert: TrueNASZFSVdevErrors
+          expr: |
+            sum by (pool, vdev) (
+              increase(zfs_zpool_vdev_read_errors{job="truenas-node"}[1h])
+              + increase(zfs_zpool_vdev_write_errors{job="truenas-node"}[1h])
+              + increase(zfs_zpool_vdev_checksum_errors{job="truenas-node"}[1h])
+            ) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS ZFS vdev errors ({{ $labels.pool }}/{{ $labels.vdev }})"
+            description: >-
+              New read/write/checksum errors on vdev {{ $labels.vdev }} in pool
+              {{ $labels.pool }} within the last hour. Checksum errors mean ZFS
+              caught (and likely repaired) corruption — inspect `zpool status -v`
+              and the disk's SMART data before it worsens.
+
+        - alert: TrueNASZFSPoolCapacityHigh
+          expr: zfs_zpool_capacity_ratio{job="truenas-node"} > 0.80
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS ZFS pool {{ $labels.pool }} over 80% full"
+            description: >-
+              Pool {{ $labels.pool }} is above 80% capacity. ZFS write performance
+              degrades as pools fill (copy-on-write fragmentation); plan cleanup or
+              expansion before it reaches 90%.
+
+        - alert: TrueNASZFSPoolCapacityCritical
+          expr: zfs_zpool_capacity_ratio{job="truenas-node"} > 0.90
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS ZFS pool {{ $labels.pool }} over 90% full"
+            description: >-
+              Pool {{ $labels.pool }} is above 90% capacity — ZFS performance falls
+              off sharply near-full and a full pool can block writes (backups,
+              snapshots). Free space or expand urgently.
+
+        - alert: TrueNASZFSHighFragmentation
+          expr: zfs_zpool_fragmentation_ratio{job="truenas-node"} > 0.50
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS ZFS pool {{ $labels.pool }} fragmentation over 50%"
+            description: >-
+              Free-space fragmentation on pool {{ $labels.pool }} exceeds 50%, which
+              hurts allocation performance. Often correlates with a full/aging pool —
+              review capacity and consider freeing space. Informational; tune threshold.
+
+        - alert: TrueNASZFSScrubOverdue
+          expr: time() - zfs_zpool_scrub_last_finish_timestamp{job="truenas-node"} > 35 * 24 * 3600
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS ZFS scrub overdue on {{ $labels.pool }}"
+            description: >-
+              Pool {{ $labels.pool }} hasn't completed a scrub in over 35 days.
+              Scrubs surface latent bit-rot before it becomes unrecoverable — check
+              the scheduled scrub task in TrueNAS (Data Protection).
+
+        - alert: TrueNASZFSScrubErrors
+          expr: zfs_zpool_scrub_errors{job="truenas-node"} > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS ZFS scrub found errors on {{ $labels.pool }}"
+            description: >-
+              The last scrub of pool {{ $labels.pool }} reported unrepaired errors —
+              ZFS found corruption it could not fix. Run `zpool status -v` to see the
+              affected files and restore them from backup.
+
+        - alert: TrueNASZFSCollectorStale
+          expr: time() - zfs_zpool_collector_last_run_timestamp{job="truenas-node"} > 1800
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS ZFS textfile collector stale"
+            description: >-
+              The zfs-textfile-collector on TrueNAS hasn't written fresh metrics in
+              >30m, so the ZFS health rules above are blind. Check the cron job and
+              the node_exporter --collector.textfile.directory mount on the host.
