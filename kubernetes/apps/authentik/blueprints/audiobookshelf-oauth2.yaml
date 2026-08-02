@@ -40,8 +40,14 @@ entries:
       signing_key:
         !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
       # ABS is served on both FQDNs; register the web callback for each plus the mobile
-      # app's custom scheme.
+      # app's custom scheme. NOTE: the ABS web client emits the callback with an extra
+      # "/audiobookshelf/" path segment (observed in the authorize request), so register
+      # both the prefixed and plain forms — strict matching requires an exact match.
       redirect_uris:
+        - matching_mode: strict
+          url: https://audiobookshelf.int.nerdbox.dev/audiobookshelf/auth/openid/callback
+        - matching_mode: strict
+          url: https://audiobookshelf.nerdbox.dev/audiobookshelf/auth/openid/callback
         - matching_mode: strict
           url: https://audiobookshelf.int.nerdbox.dev/auth/openid/callback
         - matching_mode: strict
