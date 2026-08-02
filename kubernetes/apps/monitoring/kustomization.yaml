@@ -18,6 +18,9 @@ resources:
   - kube-prometheus-stack/prometheusrule-truenas-zfs.yaml
   - kube-prometheus-stack/prometheusrule-tailscale.yaml
   - thanos/helmrelease.yaml
+  - thanos/dashboard-overview.yaml
+  - thanos/dashboard-store.yaml
+  - thanos/dashboard-compact.yaml
   - loki/helmrelease.yaml
   - loki/rules-truenas.yaml
   - loki/dashboard-health.yaml
