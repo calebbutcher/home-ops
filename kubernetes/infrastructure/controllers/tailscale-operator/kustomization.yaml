@@ -9,4 +9,7 @@ resources:
   - secret.sops.yaml
   - helmrepository.yaml
   - helmrelease.yaml
-  - connector.yaml
+# connector.yaml lives in ./config and is applied by the `tailscale-connector`
+# Flux Kustomization (dependsOn infrastructure) — its CRD is installed by the
+# HelmRelease above, so it can't be in this same dry-run/apply. See
+# kubernetes/flux/cluster/tailscale-connector.yaml.

@@ -1,6 +1,11 @@
 ---
 # Cluster-scoped resource. The operator provisions one tailscale proxy pod in
 # the `tailscale` namespace with NET_ADMIN + net.ipv4.ip_forward set for it.
+#
+# Applied by the `tailscale-connector` Flux Kustomization (dependsOn:
+# infrastructure), NOT the infrastructure Kustomization — the Connector CRD is
+# installed by the operator's HelmRelease, so a CR in the same reconcile fails
+# the dry-run ("no matches for kind Connector") and aborts the whole apply.
 apiVersion: tailscale.com/v1alpha1
 kind: Connector
 metadata:
