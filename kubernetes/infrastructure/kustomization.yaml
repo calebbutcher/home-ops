@@ -11,4 +11,5 @@ resources:
   - controllers/cnpg-barman-plugin
   - controllers/mariadb-operator
   - controllers/system-upgrade-controller
+  - controllers/tailscale-operator
   - configs

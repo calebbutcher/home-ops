@@ -1,0 +1,18 @@
+---
+# Cluster-scoped resource. The operator provisions one tailscale proxy pod in
+# the `tailscale` namespace with NET_ADMIN + net.ipv4.ip_forward set for it.
+apiVersion: tailscale.com/v1alpha1
+kind: Connector
+metadata:
+  name: k3s-gateway
+spec:
+  hostname: k3s-gateway
+  # Route tailnet devices' public internet egress through home.
+  exitNode: true
+  # Advertise the LAN so remote tailnet devices reach internal services
+  # (nodes .30-.45, MetalLB .80-.90, API VIP .10, Traefik .81, Proxmox, TrueNAS)
+  # without public ingress. Requires route approval in the tailnet (autoApprovers
+  # or a one-time manual approve).
+  subnetRouter:
+    advertiseRoutes:
+      - "10.2.169.0/24"
