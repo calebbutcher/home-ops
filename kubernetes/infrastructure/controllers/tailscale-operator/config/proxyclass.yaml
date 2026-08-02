@@ -1,0 +1,17 @@
+---
+# Cluster-scoped. Referenced by the Connector (spec.proxyClass) to turn on
+# tailscaled Prometheus metrics on the gateway's proxy pod:
+#   - metrics.enable → serves metrics on the pod's `metrics` port (:9002/metrics)
+#     and creates a `<name>-metrics` Service in the tailscale namespace.
+#   - serviceMonitor.enable → the operator also creates a Prometheus
+#     ServiceMonitor; kube-prometheus-stack auto-discovers it (all selectors {}).
+# Scraped series carry ts_proxy_type="connector", ts_proxy_parent_name="k3s-gateway".
+apiVersion: tailscale.com/v1alpha1
+kind: ProxyClass
+metadata:
+  name: gateway-metrics
+spec:
+  metrics:
+    enable: true
+    serviceMonitor:
+      enable: true

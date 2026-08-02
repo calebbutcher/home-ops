@@ -1,0 +1,114 @@
+---
+# Auto-provisioned Grafana dashboard for the Tailscale gateway (Connector
+# k3s-gateway). Imported by the kube-prometheus-stack Grafana sidecar via the
+# grafana_dashboard label. Fed by tailscaled metrics exposed through the
+# `gateway-metrics` ProxyClass; series filtered on ts_proxy_parent_name.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tailscale-gateway-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  tailscale-gateway.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "graphTooltip": 1,
+      "schemaVersion": 39,
+      "version": 1,
+      "uid": "tailscale-gateway",
+      "title": "Tailscale / Gateway",
+      "tags": ["tailscale", "network"],
+      "time": { "from": "now-6h", "to": "now" },
+      "refresh": "30s",
+      "templating": { "list": [] },
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "Advertised routes",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(tailscaled_advertised_routes{ts_proxy_parent_name=\"k3s-gateway\"})" }
+          ]
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Approved routes",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(tailscaled_approved_routes{ts_proxy_parent_name=\"k3s-gateway\"})" }
+          ]
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Health messages",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }, "color": { "mode": "thresholds" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(tailscaled_health_messages{ts_proxy_parent_name=\"k3s-gateway\"}) or vector(0)" }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Home DERP region",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "purple" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(tailscaled_home_derp_region_id{ts_proxy_parent_name=\"k3s-gateway\"})" }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Routes: advertised vs approved",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(tailscaled_advertised_routes{ts_proxy_parent_name=\"k3s-gateway\"})", "legendFormat": "advertised" },
+            { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(tailscaled_approved_routes{ts_proxy_parent_name=\"k3s-gateway\"})", "legendFormat": "approved" }
+          ]
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Outbound throughput by path",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "Bps", "custom": { "drawStyle": "line", "fillOpacity": 15, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (path) (rate(tailscaled_outbound_bytes_total{ts_proxy_parent_name=\"k3s-gateway\"}[$__rate_interval]))", "legendFormat": "{{path}}" }
+          ]
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "Inbound throughput by path",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "Bps", "custom": { "drawStyle": "line", "fillOpacity": 15, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (path) (rate(tailscaled_inbound_bytes_total{ts_proxy_parent_name=\"k3s-gateway\"}[$__rate_interval]))", "legendFormat": "{{path}}" }
+          ]
+        }
+      ]
+    }
