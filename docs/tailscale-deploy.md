@@ -39,11 +39,19 @@ Both roles live on one `Connector` CR. The operator provisions a tailscale proxy
    },
    "autoApprovers": {                       // optional: self-approve both roles
      "exitNode": ["tag:k8s"],
-     "routes": { "10.2.169.0/24": ["tag:k8s"] }
+     "routes": {                            // one entry per advertised route
+       "10.2.169.0/24": ["tag:k8s"],
+       "10.0.0.0/23":   ["tag:k8s"],
+       "10.1.30.0/24":  ["tag:k8s"],
+       "10.1.50.0/24":  ["tag:k8s"],
+       "10.2.30.0/24":  ["tag:k8s"],
+       "10.2.50.0/24":  ["tag:k8s"]
+     }
    }
    ```
-   Without `autoApprovers`, approve the exit node + route once in **Machines → k3s-gateway →
-   Edit route settings**.
+   Without `autoApprovers`, approve the exit node + each route once in **Machines → k3s-gateway →
+   Edit route settings**. `autoApprovers.routes` is per-CIDR — any route not listed still needs a
+   manual approve (or add it here), so keep this list in sync with `config/connector.yaml`.
 
 ## What's in `kubernetes/infrastructure/controllers/tailscale-operator/`
 
@@ -53,7 +61,7 @@ Both roles live on one `Connector` CR. The operator provisions a tailscale proxy
 | `helmrepository.yaml` | `tailscale-operator` HelmRepository (`https://pkgs.tailscale.com/helmcharts`). |
 | `secret.sops.yaml` | `operator-oauth` Secret (`tailscale` ns), keys `client_id` / `client_secret`. Pre-created so the chart mounts it instead of creating its own — leave `oauth: {}` in the HelmRelease. |
 | `helmrelease.yaml` | `tailscale-operator` chart `1.98.9`; `oauth: {}` (uses the pre-created secret); `installCRDs: true` (default) ships the `Connector`/`ProxyClass`/`DNSConfig` CRDs; API-server proxy off. |
-| `config/connector.yaml` | Cluster-scoped `Connector` `k3s-gateway` — `exitNode: true` + `subnetRouter.advertiseRoutes: [10.2.169.0/24]`. Applied by a **separate** Flux Kustomization, not the infrastructure set (see below). |
+| `config/connector.yaml` | Cluster-scoped `Connector` `k3s-gateway` — `exitNode: true` + `subnetRouter.advertiseRoutes` (k3s LAN `10.2.169.0/24` plus `10.0.0.0/23`, `10.1.30.0/24`, `10.1.50.0/24`, `10.2.30.0/24`, `10.2.50.0/24`). Applied by a **separate** Flux Kustomization, not the infrastructure set (see below). |
 | `config/kustomization.yaml` | Kustomize entry for the `config/` path. |
 
 The operator is registered in `kubernetes/infrastructure/kustomization.yaml`

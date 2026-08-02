@@ -14,10 +14,16 @@ spec:
   hostname: k3s-gateway
   # Route tailnet devices' public internet egress through home.
   exitNode: true
-  # Advertise the LAN so remote tailnet devices reach internal services
-  # (nodes .30-.45, MetalLB .80-.90, API VIP .10, Traefik .81, Proxmox, TrueNAS)
-  # without public ingress. Requires route approval in the tailnet (autoApprovers
-  # or a one-time manual approve).
+  # Advertise LAN/VLAN subnets so remote tailnet devices reach internal services
+  # (k3s LAN: nodes .30-.45, MetalLB .80-.90, API VIP .10, Traefik .81, Proxmox,
+  # TrueNAS) without public ingress. The Connector's node must be able to route to
+  # each subnet for the route to be useful. Each route needs approval in the
+  # tailnet (autoApprovers or a one-time manual approve).
   subnetRouter:
     advertiseRoutes:
-      - "10.2.169.0/24"
+      - "10.2.169.0/24" # k3s LAN
+      - "10.0.0.0/23"
+      - "10.1.30.0/24"
+      - "10.1.50.0/24"
+      - "10.2.30.0/24"
+      - "10.2.50.0/24"
