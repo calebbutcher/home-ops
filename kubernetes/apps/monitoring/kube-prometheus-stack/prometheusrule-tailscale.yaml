@@ -1,0 +1,63 @@
+---
+# Alerts for the Tailscale gateway (Connector k3s-gateway — exit node + subnet
+# router). Fed by tailscaled metrics from the proxy pod, exposed via the
+# `gateway-metrics` ProxyClass (metrics.enable + serviceMonitor.enable) and
+# auto-discovered by Prometheus. Series carry ts_proxy_parent_name="k3s-gateway".
+#
+# No `release:` label needed — ruleSelectorNilUsesHelmValues: false — and the
+# `severity` labels route via the catch-all Discord AlertmanagerConfig.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tailscale-gateway
+  namespace: monitoring
+spec:
+  groups:
+    - name: tailscale-gateway.rules
+      rules:
+        # Target stopped being scraped → proxy pod down / not reporting. The
+        # gateway always advertises routes, so this gauge is always present when
+        # healthy; its absence for 10m means the gateway is down or unscraped.
+        - alert: TailscaleGatewayDown
+          expr: absent(tailscaled_advertised_routes{ts_proxy_parent_name="k3s-gateway"})
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Tailscale gateway k3s-gateway is down / unscraped"
+            description: >-
+              No tailscaled metrics from the k3s-gateway proxy pod for >10m. The
+              exit node and subnet routes (10.x) are likely offline. Check
+              `kubectl -n tailscale get pods` and `kubectl get connector k3s-gateway`.
+
+        # Advertised but not approved → a subnet is announced yet unusable. With
+        # autoApprovers (10.0.0.0/8 → tag:k8s) this should self-heal, so a
+        # sustained gap means approval failed or was revoked.
+        - alert: TailscaleRouteApprovalDrift
+          expr: |
+            tailscaled_approved_routes{ts_proxy_parent_name="k3s-gateway"}
+            < tailscaled_advertised_routes{ts_proxy_parent_name="k3s-gateway"}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Tailscale gateway has unapproved advertised routes"
+            description: >-
+              approved_routes ({{ $value }}) < advertised_routes on k3s-gateway for
+              >15m — a subnet is advertised but not approved in the tailnet. Check
+              autoApprovers in the ACL, or approve under Machines → k3s-gateway →
+              Edit route settings.
+
+        # tailscaled's own self-diagnosis (key expiry, no direct path, clock skew,
+        # etc.). type label identifies the class of warning.
+        - alert: TailscaleGatewayHealthWarning
+          expr: tailscaled_health_messages{ts_proxy_parent_name="k3s-gateway"} > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Tailscale gateway reporting health warnings ({{ $labels.type }})"
+            description: >-
+              tailscaled on k3s-gateway reports {{ $value }} health message(s) of
+              type {{ $labels.type }} for >15m. Inspect with
+              `kubectl -n tailscale exec sts/ts-k3s-gateway-... -- tailscale status`.

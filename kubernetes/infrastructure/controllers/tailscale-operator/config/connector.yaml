@@ -12,6 +12,8 @@ metadata:
   name: k3s-gateway
 spec:
   hostname: k3s-gateway
+  # Enable tailscaled Prometheus metrics on the proxy pod (see proxyclass.yaml).
+  proxyClass: gateway-metrics
   # Route tailnet devices' public internet egress through home.
   exitNode: true
   # Advertise LAN/VLAN subnets so remote tailnet devices reach internal services

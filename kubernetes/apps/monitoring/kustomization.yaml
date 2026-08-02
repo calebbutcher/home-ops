@@ -16,12 +16,14 @@ resources:
   - kube-prometheus-stack/alertmanagerconfig.yaml
   - kube-prometheus-stack/prometheusrule-truenas.yaml
   - kube-prometheus-stack/prometheusrule-truenas-zfs.yaml
+  - kube-prometheus-stack/prometheusrule-tailscale.yaml
   - thanos/helmrelease.yaml
   - loki/helmrelease.yaml
   - loki/rules-truenas.yaml
   - loki/dashboard-health.yaml
   - truenas/dashboard-system.yaml
   - truenas/dashboard-zfs.yaml
+  - tailscale/dashboard.yaml
   - loki/dashboard-logs-explorer.yaml
   - traefik/dashboard.yaml
   - crowdsec/dashboard.yaml
