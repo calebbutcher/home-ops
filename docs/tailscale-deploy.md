@@ -53,9 +53,20 @@ Both roles live on one `Connector` CR. The operator provisions a tailscale proxy
 | `helmrepository.yaml` | `tailscale-operator` HelmRepository (`https://pkgs.tailscale.com/helmcharts`). |
 | `secret.sops.yaml` | `operator-oauth` Secret (`tailscale` ns), keys `client_id` / `client_secret`. Pre-created so the chart mounts it instead of creating its own — leave `oauth: {}` in the HelmRelease. |
 | `helmrelease.yaml` | `tailscale-operator` chart `1.98.9`; `oauth: {}` (uses the pre-created secret); `installCRDs: true` (default) ships the `Connector`/`ProxyClass`/`DNSConfig` CRDs; API-server proxy off. |
-| `connector.yaml` | Cluster-scoped `Connector` `k3s-gateway` — `exitNode: true` + `subnetRouter.advertiseRoutes: [10.2.169.0/24]`. |
+| `config/connector.yaml` | Cluster-scoped `Connector` `k3s-gateway` — `exitNode: true` + `subnetRouter.advertiseRoutes: [10.2.169.0/24]`. Applied by a **separate** Flux Kustomization, not the infrastructure set (see below). |
+| `config/kustomization.yaml` | Kustomize entry for the `config/` path. |
 
-Registered in `kubernetes/infrastructure/kustomization.yaml` (`- controllers/tailscale-operator`).
+The operator is registered in `kubernetes/infrastructure/kustomization.yaml`
+(`- controllers/tailscale-operator`). The `Connector` is applied by a dedicated Flux Kustomization
+`kubernetes/flux/cluster/tailscale-connector.yaml` (`dependsOn: infrastructure`, `retryInterval: 2m`).
+
+> **Why the Connector is split out (load-bearing):** its CRD is installed by the operator's
+> HelmRelease. If the `Connector` CR sits in the **same** kustomization as the HelmRelease, Flux's
+> pre-apply dry-run fails with `no matches for kind "Connector"` and **aborts the entire apply** —
+> the operator never installs, so the CRD never appears: a deadlock that also fails `infrastructure`
+> and blocks the `apps` Kustomization (which `dependsOn` it). Isolating the CR behind
+> `dependsOn: infrastructure` lets the operator install first; the Connector Kustomization then
+> converges on its own (`retryInterval`) and can never re-block `apps`.
 
 > **OAuth credentials**: the chart mounts a Secret **named exactly `operator-oauth`** with files
 > `client_id`/`client_secret`. This is the documented pre-create path (chart values.yaml: *"If
@@ -103,15 +114,17 @@ Then in the admin console → **Machines**: `k3s-gateway` appears, tagged `tag:k
 
 ## Rollback
 
-Remove `- controllers/tailscale-operator` from `kubernetes/infrastructure/kustomization.yaml`
-(Flux prunes the release, proxy pod, and Connector) and delete the device in the admin console.
-To keep the operator but drop the gateway, delete `connector.yaml` only.
+Delete `kubernetes/flux/cluster/tailscale-connector.yaml` (prunes the `Connector`/proxy pod) and
+remove `- controllers/tailscale-operator` from `kubernetes/infrastructure/kustomization.yaml`
+(prunes the operator + release), then delete the device in the admin console. To keep the operator
+but drop the gateway, delete `config/connector.yaml` only (its Kustomization prunes it).
 
 ## Notes / optional follow-ups
 
-- **Ordering**: `connector.yaml` needs the `Connector` CRD the operator installs at runtime. On the
-  first reconcile the CR may briefly error `no matches for kind "Connector"` — **Flux retries** and
-  it applies once the CRD registers. No manual split needed.
+- **Ordering** (see the split-out note above): the `Connector` CR lives in its own
+  `tailscale-connector` Flux Kustomization (`dependsOn: infrastructure`) precisely because putting
+  it in the infrastructure set deadlocks the dry-run against a CRD the operator hasn't installed yet.
+  After the operator is up, `flux reconcile kustomization tailscale-connector` applies the gateway.
 - **Remote DNS for `*.int.nerdbox.dev`**: IP access works immediately once the route is approved.
   To resolve internal **hostnames** remotely, add a **split-DNS nameserver** for `int.nerdbox.dev`
   → your LAN DNS in the tailnet **DNS** settings.
