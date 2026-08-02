@@ -1,0 +1,106 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: audiobookshelf
+  namespace: audiobookshelf
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "3.7.3"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # Run as a fixed non-root uid/gid so a fresh TrueNAS export can be chowned 1000:1000
+    # (see the app README / deploy notes). fsGroup makes the local-path config/metadata
+    # PVCs group-writable on first mount. Drop this block only if you switch the image
+    # back to running as root with a maproot/no_root_squash NFS export.
+    defaultPodOptions:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+    controllers:
+      audiobookshelf:
+        # Config is a single RWO PVC — the new pod must not overlap the old on rollout.
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/advplyr/audiobookshelf
+              tag: "2.36.0"
+            env:
+              TZ: UTC
+              # ABS defaults to :80; run on an unprivileged port so it can start as
+              # non-root. CONFIG_PATH=/config and METADATA_PATH=/metadata are the
+              # image defaults — left unset and matched by the mounts below.
+              PORT: "13378"
+            probes:
+              # All probes hit ABS's /healthcheck (returns 200). Generous startup window
+              # covers the first-boot SQLite migration.
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthcheck
+                    port: 13378
+                  periodSeconds: 10
+                  failureThreshold: 30
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthcheck
+                    port: 13378
+                  periodSeconds: 30
+                  failureThreshold: 5
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthcheck
+                    port: 13378
+                  periodSeconds: 15
+                  failureThreshold: 3
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                # Headroom for on-the-fly ffmpeg transcoding of audio streams.
+                memory: 2Gi
+    service:
+      app:               # controller == release name ⇒ Service "audiobookshelf"
+        controller: audiobookshelf
+        ports:
+          http:
+            port: 13378
+    persistence:
+      config:
+        existingClaim: audiobookshelf-config
+        globalMounts:
+          - path: /config
+      metadata:
+        existingClaim: audiobookshelf-metadata
+        globalMounts:
+          - path: /metadata
+      # Audiobook/podcast library on the TrueNAS NFS export (RWX, mounted in-place).
+      library:
+        existingClaim: audiobookshelf-library
+        globalMounts:
+          - path: /audiobooks

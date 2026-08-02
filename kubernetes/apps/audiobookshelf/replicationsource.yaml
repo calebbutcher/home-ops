@@ -1,0 +1,25 @@
+---
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationSource
+metadata:
+  name: audiobookshelf-config
+  namespace: audiobookshelf
+spec:
+  sourcePVC: audiobookshelf-config
+  trigger:
+    schedule: "20 6 * * *"
+  restic:
+    repository: audiobookshelf-restic-secret
+    copyMethod: Direct
+    cacheCapacity: 1Gi
+    pruneIntervalDays: 7
+    retain:
+      daily: 7
+      weekly: 4
+      monthly: 3
+    # The config PVC is owned by uid/gid 1000 (the app runs as 1000). Match it so the
+    # mover can read every file. Use 0/0/0 if you switch the app back to running as root.
+    moverSecurityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000

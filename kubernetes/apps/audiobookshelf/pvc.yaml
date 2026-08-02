@@ -1,0 +1,32 @@
+---
+# /config holds the SQLite DB (absdatabase.sqlite) plus users, libraries, settings and
+# server config — the entire non-rebuildable state. Backed up by VolSync (see
+# replicationsource.yaml). RWO, so the controller uses strategy: Recreate.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: audiobookshelf-config
+  namespace: audiobookshelf
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+# /metadata holds cached item covers, author images, transcode/stream cache and ABS's
+# own scheduled backups. Regenerable (covers re-fetch, cache rebuilds), so it is NOT
+# VolSync-backed — kept on its own PVC to keep the backed-up config volume small.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: audiobookshelf-metadata
+  namespace: audiobookshelf
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
