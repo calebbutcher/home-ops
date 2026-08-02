@@ -15,6 +15,7 @@ resources:
   - kube-prometheus-stack/helmrelease.yaml
   - kube-prometheus-stack/alertmanagerconfig.yaml
   - kube-prometheus-stack/prometheusrule-truenas.yaml
+  - kube-prometheus-stack/prometheusrule-truenas-zfs.yaml
   - thanos/helmrelease.yaml
   - loki/helmrelease.yaml
   - loki/rules-truenas.yaml
