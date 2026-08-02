@@ -1,0 +1,19 @@
+---
+# The audiobook/podcast library on TrueNAS, mounted in-place (no copy). Cluster-scoped
+# PV bound by name to the namespaced PVC below. Same static-NFS pattern as
+# immich/library-pv.yaml and media/nfs-pv.yaml. Durability is the NAS's job, so this
+# volume is not VolSync-backed.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: audiobookshelf-library
+spec:
+  capacity:
+    storage: 5Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  nfs:
+    server: 10.2.40.10
+    path: /mnt/mainPool/audiobooks

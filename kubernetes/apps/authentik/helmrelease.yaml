@@ -109,6 +109,11 @@ spec:
             secretKeyRef:
               name: authentik-secret
               key: TANDOOR_OAUTH2_CLIENT_SECRET
+        - name: AUDIOBOOKSHELF_OAUTH2_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: AUDIOBOOKSHELF_OAUTH2_CLIENT_SECRET
       resources:
         requests:
           cpu: 100m
