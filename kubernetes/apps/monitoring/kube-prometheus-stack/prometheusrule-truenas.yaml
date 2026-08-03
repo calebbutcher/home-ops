@@ -122,12 +122,17 @@ spec:
               host on iDRAC; the fatal LAN-drop hang tends to follow these.
 
         - alert: TrueNASNICDriverErrors
-          # Sustained climb in bnxt_en error/discard/oob/missed-irq counters. Starts
-          # sensitive (>0 over 30m, held 15m) — RAISE the threshold once a healthy
-          # baseline is in Grafana, since some fw_discards are normal under load.
+          # Hard bnxt_en error / resource-stress counters that sit at 0 on a healthy
+          # wired link: physical-layer errors (fcs/align/mtu/pcs_symbol), tx/rx
+          # errors, l4-csum/buf errors, ring/oom/netpoll discards, fifo underruns,
+          # missed IRQs. Matches `err` (NOT `error`) so the BCM57412's *_err and
+          # *_err_frames counters are covered. Deliberately EXCLUDES the soft QoS
+          # discards (rx_stat_discard, rx_discard_*_cos*), which are nonzero-but-flat
+          # at baseline and tick under normal load. Baselined 2026-08-03: every
+          # matched counter == 0, so alert on any increase (held 15m to skip blips).
           expr: |
             sum by (device, stat) (
-              increase(bnxt_stat{job="truenas-node", stat=~".*(error|discard|oob|no_buf|missed|fifo|crc).*"}[30m])
+              increase(bnxt_stat{job="truenas-node", stat=~".*(err|ring_discard|oom_discard|netpoll_discard|fifo_underrun|missed).*"}[30m])
             ) > 0
           for: 15m
           labels:
