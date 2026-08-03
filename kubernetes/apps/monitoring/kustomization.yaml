@@ -29,6 +29,7 @@ resources:
   - tailscale/dashboard.yaml
   - loki/dashboard-logs-explorer.yaml
   - traefik/dashboard.yaml
+  - unpackerr/dashboard.yaml
   - crowdsec/dashboard.yaml
   - crowdsec/dashboard-insight.yaml
   - crowdsec/dashboard-details.yaml
