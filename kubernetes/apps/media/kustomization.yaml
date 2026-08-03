@@ -34,6 +34,8 @@ resources:
   - tracearr/pvc.yaml
   - tracearr/helmrelease.yaml
   - tracearr/ingress.yaml
+  - unpackerr/secret.sops.yaml
+  - unpackerr/helmrelease.yaml
   - backup/s3-secret.sops.yaml
   - backup/sonarr-replicationsource.yaml
   - backup/radarr-replicationsource.yaml
