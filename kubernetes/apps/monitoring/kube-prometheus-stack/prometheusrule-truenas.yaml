@@ -7,10 +7,10 @@
 # minutes before a full stall. These rules catch that ramp-up — plus a fast
 # host-down — so we're paged before Uptime Kuma sees it down.
 #
-# Topology (from node_exporter on the NAS, confirmed 2026-08-01):
+# Topology (from node_exporter on the NAS; NIC identity corrected 2026-08-02):
 #   * bond01 — LACP bond, the real uplink; slaves enp65s0f0np0 + enp65s0f1np1,
-#     a dual-port Mellanox card (mlx5 driver — the `np` netdev suffix). All share
-#     MAC b0:26:28:2e:ce:c0.
+#     a dual-port Broadcom NetXtreme card (driver bnxt_en — NOT Mellanox/mlx5; the
+#     `np` suffix is not driver-specific). All share MAC b0:26:28:2e:ce:c0.
 #   * eno1-eno4 — onboard, UNUSED (eno1 cabled-but-down, eno2-4 admin-down). These
 #     sit at node_network_up==0 permanently, so the link-down rule MUST exclude
 #     them or it false-fires. Hence the device=~ pins below.
@@ -94,3 +94,89 @@ spec:
               Uplink {{ $labels.device }} on TrueNAS reports operstate down while the
               host is still scrapeable — the earliest catch of a NIC problem. A single
               bond slave = degraded redundancy; bond01 itself = full uplink loss.
+
+    - name: truenas-nic-driver.rules
+      # Driver/firmware-level NIC health that node_exporter's /proc network stats
+      # do NOT expose — from the Broadcom bnxt_en `ethtool -S` counters shipped by
+      # scripts/truenas/nic-textfile-collector.sh (host cron → node_exporter
+      # textfile collector → metric `bnxt_stat{device,stat}`). This is the primary
+      # net for the SILENT wedge: the 2026-08-02 hang logged nothing and moved no
+      # node_network_*_errs, but firmware resets/discards surface here. These series
+      # only exist once that collector is deployed on the host; until then these
+      # rules simply never fire (same pattern as the zfs textfile collector).
+      rules:
+        - alert: TrueNASNICFirmwareReset
+          # A bnxt_en firmware/adapter reset (fw_reset_cnt, resets, hw_resets, ...).
+          # Even a self-recovered reset is the clearest precursor we have to the
+          # fatal hang, so alert on any increase.
+          expr: increase(bnxt_stat{job="truenas-node", stat=~".*reset.*"}[15m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS NIC firmware reset ({{ $labels.device }} {{ $labels.stat }})"
+            description: >-
+              The Broadcom bnxt_en driver on {{ $labels.device }} recorded a
+              firmware/adapter reset ({{ $labels.stat }}) in the last 15m — a
+              silent-wedge precursor (no kernel log, no carrier change). Watch the
+              host on iDRAC; the fatal LAN-drop hang tends to follow these.
+
+        - alert: TrueNASNICDriverErrors
+          # Sustained climb in bnxt_en error/discard/oob/missed-irq counters. Starts
+          # sensitive (>0 over 30m, held 15m) — RAISE the threshold once a healthy
+          # baseline is in Grafana, since some fw_discards are normal under load.
+          expr: |
+            sum by (device, stat) (
+              increase(bnxt_stat{job="truenas-node", stat=~".*(error|discard|oob|no_buf|missed|fifo|crc).*"}[30m])
+            ) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS NIC driver errors climbing ({{ $labels.device }} {{ $labels.stat }})"
+            description: >-
+              bnxt_en counter {{ $labels.stat }} on {{ $labels.device }} has been
+              incrementing for 15m — abnormal on a healthy wired NIC and a common
+              lead-in to the stall. Tune this threshold after baselining.
+
+        - alert: TrueNASBondSlaveStall
+          # A bond slave whose carrier is still UP but passing ~no RX while the bond
+          # as a whole IS busy — a member that silently stopped forwarding (dead/hung
+          # slave = lost LACP redundancy). Catches a FULLY-stalled member; it will
+          # NOT catch a partial ramp-down like 2026-08-02 (f1np1 fell ~200x, not to
+          # zero). LACP L3+4 hashing can idle a slave legitimately, so require a busy
+          # bond01 (>1000 pkt/s) and a 10m hold to avoid false positives.
+          expr: |
+            (
+              node_network_carrier{job="truenas-node", device=~"enp65s0f.*"} == 1
+              and on(instance, device)
+              rate(node_network_receive_packets_total{job="truenas-node", device=~"enp65s0f.*"}[5m]) < 1
+            )
+            and on()
+            rate(node_network_receive_packets_total{job="truenas-node", device="bond01"}[5m]) > 1000
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS bond slave stalled ({{ $labels.device }})"
+            description: >-
+              Bond slave {{ $labels.device }} has carrier UP but ~zero received
+              packets for 10m while bond01 is actively receiving — the member likely
+              hung or dropped out of the LACP bond (lost redundancy). Check
+              `cat /proc/net/bonding/bond01` on the host.
+
+        - alert: TrueNASNICCollectorStale
+          # The bnxt ethtool collector stopped updating (cron died, host issue, or it
+          # hit an unreadable interface and refused to publish a false "all clear").
+          # A dead detection pipeline must never read as healthy.
+          expr: time() - bnxt_collector_last_run_timestamp{job="truenas-node"} > 1800
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS NIC (bnxt) textfile collector stale"
+            description: >-
+              bnxt_collector_last_run_timestamp on TrueNAS is >30m old — the
+              nic-textfile-collector.sh cron isn't publishing, so the firmware-reset
+              and driver-error alerts are blind. Check the Cron Job and the script on
+              the host.

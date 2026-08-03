@@ -5,7 +5,7 @@
 # loads. Firing alerts go to the kube-prometheus-stack Alertmanager, which routes
 # them to Discord (#cluster-alerts) via the catch-all `discord` AlertmanagerConfig.
 # Two rule files:
-#   * truenas-nic.yaml — kernel NIC-hang signatures (the mlx5/bond01 stall).
+#   * truenas-nic.yaml — kernel NIC-hang signatures (the bnxt_en/bond01 stall).
 #   * truenas-zfs.yaml — real-time ZFS events from ZED (checksum/IO/data errors,
 #     vdev state changes, scrub completion). These complement the metric-based
 #     rules in prometheusrule-truenas{,-zfs}.yaml, catching point-in-time events a
@@ -21,11 +21,15 @@ data:
       - name: truenas-nic-kernel
         rules:
           - alert: TrueNASKernelNICHang
-            # Match the classic driver-hang kernel signatures (any driver) plus
-            # Mellanox mlx5-specific health/timeout messages, case-insensitive, in
-            # the TrueNAS syslog over the last 10m.
+            # Match generic driver-hang kernel signatures (any driver) plus the
+            # Broadcom bnxt_en-specific fatal / firmware-reset / hwrm-timeout lines,
+            # case-insensitive, in the TrueNAS syslog over the last 10m.
+            # NB the 2026-08-02 hang emitted NONE of these — it was a silent wedge
+            # (kernel alive, carrier "up", no driver log). This rule only catches
+            # hangs where bnxt_en DOES trip its own watchdog; the metric rules
+            # (bnxt fw_reset_cnt increase, bond-slave stall) are the primary net.
             expr: |
-              sum(count_over_time({job="syslog", host="truenas"} |~ `(?i)NETDEV WATCHDOG|transmit queue [0-9]+ timed out|Detected Hardware Unit Hang|Reset adapter|tx timeout|Link is Down|mlx5_core.*(Command timeout|health compromised|assert|reset requested|Fatal error)` [10m])) > 0
+              sum(count_over_time({job="syslog", host="truenas"} |~ `(?i)NETDEV WATCHDOG|transmit queue [0-9]+ timed out|tx timeout|bnxt_en.*(fatal firmware error|firmware error|fw reset|firmware reset|error \(timeout\)|hwrm.*(timeout|error)|device disconnected|failed to reserve|resource allocation)` [10m])) > 0
             for: 0m
             labels:
               severity: critical
@@ -34,8 +38,8 @@ data:
             annotations:
               summary: "TrueNAS kernel NIC-hang message detected"
               description: >-
-                A NIC driver-hang kernel message appeared in the TrueNAS syslog in
-                the last 10m — likely the intermittent mlx5/bond01 hang starting.
+                A bnxt_en driver-hang / firmware-error kernel message appeared in the
+                TrueNAS syslog in the last 10m — the intermittent bnxt_en/bond01 hang.
                 Inspect Loki ({job="syslog", host="truenas"}) for the exact line and
                 check the host on iDRAC; a reboot may be imminent.
   truenas-zfs.yaml: |
