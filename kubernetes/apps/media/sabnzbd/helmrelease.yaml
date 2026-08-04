@@ -117,11 +117,16 @@ spec:
               - path: /config
       downloads:
         existingClaim: downloads-nfs
+        # Shares qBittorrent's downloads root so the *arrs (which already mount
+        # subPath qbittorrent/data at /data) see SABnzbd's completed downloads too —
+        # no second mount or layout change needed. SAB writes to its own /data/incomplete
+        # + /data/complete subfolders, alongside qBittorrent's, matching the prior
+        # single-downloads-dir setup.
         advancedMounts:
           sabnzbd:
             app:
               - path: /data
-                subPath: sabnzbd/data
+                subPath: qbittorrent/data
       # Userspace wireguard-go device (ignored when the host kernel WG module is used)
       dev-tun:
         type: hostPath
