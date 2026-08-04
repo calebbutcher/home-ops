@@ -30,6 +30,8 @@ resources:
   - loki/dashboard-logs-explorer.yaml
   - traefik/dashboard.yaml
   - unpackerr/dashboard.yaml
+  - exportarr/dashboard.yaml
+  - qbittorrent/dashboard.yaml
   - crowdsec/dashboard.yaml
   - crowdsec/dashboard-insight.yaml
   - crowdsec/dashboard-details.yaml
