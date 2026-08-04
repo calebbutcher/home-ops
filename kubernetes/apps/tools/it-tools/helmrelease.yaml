@@ -21,12 +21,6 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 3
-      # One-time: app-template v3->v5 renames the immutable controller
-      # selector label, so Helm cannot patch the Deployment in place.
-      # 'uninstall' lets Flux delete the old release + reinstall fresh
-      # (existingClaim PVCs are not Helm-managed, so data is untouched).
-      # Revert to the default 'rollback' once every app is on v5.
-      strategy: uninstall
   values:
     controllers:
       it-tools:
