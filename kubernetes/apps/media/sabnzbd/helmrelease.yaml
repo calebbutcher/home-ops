@@ -1,0 +1,138 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: sabnzbd
+  namespace: media
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "3.7.3"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      sabnzbd:
+        initContainers:
+          # --- VPN native sidecar: owns the pod netns, brings up the PIA WireGuard tunnel
+          # + fail-closed kill-switch. restartPolicy Always => runs for the pod's lifetime and
+          # starts BEFORE the app; the startup probe gates SABnzbd until the wg0 interface is up.
+          # NOTE: Usenet is outbound-only, so PORT_FORWARDING is OFF (no inbound peers, no
+          # port-sync sidecar, and any PIA region works — not just PF-capable ones).
+          wireguard:
+            restartPolicy: Always
+            image:
+              repository: docker.io/thrnz/docker-wireguard-pia
+              tag: 20260801_master_9e89d10
+            env:
+              # PIA region ID. PF not needed for Usenet, so any region is valid; kept on the
+              # same region as qBittorrent for consistency. Leave empty to print valid IDs.
+              LOC: ca_toronto
+              # Internal nets that reach the WebUI (user-specified) + k3s pod/service CIDRs.
+              # The cluster CIDRs are REQUIRED: ingress proxies via the Traefik pod IP
+              # (pod CIDR 10.42/16 — the live k3s default, NOT ansible's 10.52 cluster_cidr)
+              # and the *arr apps hit the ClusterIP (service CIDR 10.43/16); without them the
+              # kill-switch drops the WebUI/API return path from pods on OTHER nodes.
+              LOCAL_NETWORK: 10.1.20.0/24,10.10.10.0/23,10.2.30.0/24,10.2.169.0/24,10.42.0.0/16,10.43.0.0/16
+              PORT_FORWARDING: "0"
+              FIREWALL: "1"
+              # No VPNDNS: leave thrnz to use PIA's own DNS (from the addKey response).
+              # VPNDNS expects DNS IPs, not a boolean — setting "1" wrote `nameserver 1`.
+              KEEPALIVE: "25"
+              RECONNECT: "1"
+            envFrom:
+              - secretRef:
+                  name: sabnzbd-secret
+            securityContext:
+              capabilities:
+                add: ["NET_ADMIN"]
+            probes:
+              liveness:
+                enabled: false
+              readiness:
+                enabled: false
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command: ["/bin/sh", "-c", "ip link show wg0"]
+                  initialDelaySeconds: 5
+                  periodSeconds: 5
+                  failureThreshold: 60
+            resources:
+              requests:
+                cpu: 25m
+                memory: 64Mi
+              limits:
+                memory: 128Mi
+        containers:
+          # --- SABnzbd: VPN-agnostic, shares the netns brought up by the sidecar ---
+          app:
+            image:
+              repository: lscr.io/linuxserver/sabnzbd
+              tag: 5.0.4-ls264
+            env:
+              PUID: "1000"
+              PGID: "1000"
+              TZ: "UTC"
+            probes:
+              liveness:
+                enabled: true
+              readiness:
+                enabled: true
+              startup:
+                enabled: false
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                # par2 repair / unrar are CPU-heavy; allow a burst.
+                cpu: "2"
+                memory: 2Gi
+    service:
+      app:
+        controller: sabnzbd
+        ports:
+          http:
+            port: 8080
+    persistence:
+      config:
+        existingClaim: sabnzbd-config
+        advancedMounts:
+          sabnzbd:
+            app:
+              - path: /config
+      downloads:
+        existingClaim: downloads-nfs
+        # Shares qBittorrent's downloads root so the *arrs (which already mount
+        # subPath qbittorrent/data at /data) see SABnzbd's completed downloads too —
+        # no second mount or layout change needed. SAB writes to its own /data/incomplete
+        # + /data/complete subfolders, alongside qBittorrent's, matching the prior
+        # single-downloads-dir setup.
+        advancedMounts:
+          sabnzbd:
+            app:
+              - path: /data
+                subPath: qbittorrent/data
+      # Userspace wireguard-go device (ignored when the host kernel WG module is used)
+      dev-tun:
+        type: hostPath
+        hostPath: /dev/net/tun
+        hostPathType: CharDevice
+        advancedMounts:
+          sabnzbd:
+            wireguard:
+              - path: /dev/net/tun
