@@ -6,6 +6,7 @@ resources:
   - helmrepository.yaml
   - helmrepository-thanos-community.yaml
   - helmrepository-grafana.yaml
+  - helmrepository-grafana-community.yaml
   - grafana-admin.sops.yaml
   - grafana-oauth-secret.sops.yaml
   - thanos-objstore.sops.yaml
