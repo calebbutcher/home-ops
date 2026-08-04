@@ -3,8 +3,9 @@
 # (grafana/dashboard.json), vendored as a GitOps ConfigMap and auto-imported by the
 # kube-prometheus-stack Grafana sidecar via the grafana_dashboard label. Fed by the
 # qbittorrent-exporter sidecar in the qBittorrent pod (:8090/metrics) scraped through
-# its ServiceMonitor. Upstream JSON with __inputs/__requires stripped and the
-# ${DS_PROMETHEUS} datasource pinned to this cluster's "prometheus" uid.
+# its ServiceMonitor. Upstream JSON with __inputs/__requires stripped and every
+# panel/target datasource pinned to this cluster's "prometheus" uid. The dashboard's
+# own uid is kept unique (qbittorrent) — do NOT pin it to "prometheus".
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -1854,7 +1855,7 @@ data:
       "timepicker": {},
       "timezone": "",
       "title": "qBittorrent",
-      "uid": "prometheus",
+      "uid": "qbittorrent",
       "version": 24,
       "weekStart": ""
     }
