@@ -59,4 +59,4 @@ spec:
         existingClaim: downloads-nfs
         globalMounts:
           - path: /data
-            subPath: delugevpn/data
+            subPath: qbittorrent/data
