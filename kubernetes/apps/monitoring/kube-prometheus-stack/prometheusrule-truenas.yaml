@@ -58,18 +58,27 @@ spec:
               precedes a driver hang — check kernel logs in Loki ({job="syslog"}).
 
         - alert: TrueNASNICDrops
+          # node rx_dropped/tx_dropped. On this bond the RX drop is the SAME benign
+          # signal as bnxt rx_total_ring_discards (node maps ring discards into
+          # rx_dropped): RX-ring starvation on the slave that's saturated egressing
+          # the iSCSI read stream — it scales with load (~0.7/s idle-ish, ~1.7/s under
+          # 85k pps TX) and never stopped, which is what flapped this rule at `>0` all
+          # night. Baselined 2026-08-03 at ≤~2/s under normal iSCSI, so alert only on a
+          # real drop storm: >50/s sustained 15m (≈30x the benign ceiling, still far
+          # below anything a genuine fault produces).
           expr: |
             rate(node_network_receive_drop_total{job="truenas-node", device=~"bond01|enp65s0f.*"}[5m])
-            + rate(node_network_transmit_drop_total{job="truenas-node", device=~"bond01|enp65s0f.*"}[5m]) > 0
-          for: 5m
+            + rate(node_network_transmit_drop_total{job="truenas-node", device=~"bond01|enp65s0f.*"}[5m]) > 50
+          for: 15m
           labels:
             severity: warning
           annotations:
             summary: "TrueNAS NIC dropping packets ({{ $labels.device }})"
             description: >-
               Uplink {{ $labels.device }} on TrueNAS has a sustained rx/tx drop rate
-              (>0/s for 5m) — a common precursor to the NIC stall. NOTE: some benign
-              drops are normal under load; raise this threshold after baselining.
+              >50/s for 15m — well above the benign iSCSI-load ring discards, so this
+              is a real drop storm. Check `ethtool -S {{ $labels.device }}` and Loki
+              ({job="syslog", host="truenas"}).
 
         - alert: TrueNASNICCarrierFlapping
           expr: rate(node_network_carrier_changes_total{job="truenas-node", device=~"bond01|enp65s0f.*"}[10m]) > 0
@@ -122,27 +131,35 @@ spec:
               host on iDRAC; the fatal LAN-drop hang tends to follow these.
 
         - alert: TrueNASNICDriverErrors
-          # Hard bnxt_en error / resource-stress counters that sit at 0 on a healthy
-          # wired link: physical-layer errors (fcs/align/mtu/pcs_symbol), tx/rx
-          # errors, l4-csum/buf errors, ring/oom/netpoll discards, fifo underruns,
+          # Hard bnxt_en error / resource-stress counters that should sit at (or near)
+          # 0 on a healthy wired link: physical-layer errors (fcs/align/mtu/pcs_symbol),
+          # tx/rx errors, l4-csum/buf errors, oom/netpoll discards, fifo underruns,
           # missed IRQs. Matches `err` (NOT `error`) so the BCM57412's *_err and
           # *_err_frames counters are covered. Deliberately EXCLUDES the soft QoS
-          # discards (rx_stat_discard, rx_discard_*_cos*), which are nonzero-but-flat
-          # at baseline and tick under normal load. Baselined 2026-08-03: every
-          # matched counter == 0, so alert on any increase (held 15m to skip blips).
+          # discards (rx_stat_discard, rx_discard_*_cos*) AND rx_total_ring_discards:
+          # the 2026-08-03 baseline proved ring discards are a BENIGN load artifact —
+          # RX-ring starvation on whichever bond slave is saturated egressing the
+          # iSCSI-target read stream (bnxt shares TX/RX completion rings per queue), so
+          # they scale with iSCSI TX (~19k/day, dropped inbound ACKs = harmless) and
+          # are NOT a hang precursor. That same baseline showed rx_stat_err trickles
+          # ~10/day, so the threshold is >10 per counter over 30m (well above the
+          # trickle, well below any real PHY storm) instead of >0 — this is what was
+          # flapping all night. oom/netpoll/fifo/missed stay at 0 and burst hard when
+          # real, so >10 catches them too.
           expr: |
             sum by (device, stat) (
-              increase(bnxt_stat{job="truenas-node", stat=~".*(err|ring_discard|oom_discard|netpoll_discard|fifo_underrun|missed).*"}[30m])
-            ) > 0
+              increase(bnxt_stat{job="truenas-node", stat=~".*(err|oom_discard|netpoll_discard|fifo_underrun|missed).*"}[30m])
+            ) > 10
           for: 15m
           labels:
             severity: warning
           annotations:
             summary: "TrueNAS NIC driver errors climbing ({{ $labels.device }} {{ $labels.stat }})"
             description: >-
-              bnxt_en counter {{ $labels.stat }} on {{ $labels.device }} has been
-              incrementing for 15m — abnormal on a healthy wired NIC and a common
-              lead-in to the stall. Tune this threshold after baselining.
+              bnxt_en counter {{ $labels.stat }} on {{ $labels.device }} rose by >10 in
+              30m and stayed elevated for 15m — abnormal on a healthy wired NIC (the
+              benign iSCSI-load ring discards are excluded) and a possible lead-in to
+              the silent wedge. Check `ethtool -S` deltas and the host on iDRAC.
 
         - alert: TrueNASBondSlaveStall
           # A bond slave whose carrier is still UP but passing ~no RX while the bond
