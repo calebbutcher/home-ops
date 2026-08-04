@@ -1,0 +1,169 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: qbittorrent
+  namespace: media
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "3.7.3"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      qbittorrent:
+        initContainers:
+          # --- VPN native sidecar: owns the pod netns, does all PIA rotation + PF +
+          # kill-switch. restartPolicy Always => runs for the pod's lifetime and starts
+          # BEFORE the main containers; the startup probe gates qBittorrent until the
+          # tunnel + port-forward are up (port file written), so it never races the VPN.
+          wireguard:
+            restartPolicy: Always
+            image:
+              repository: docker.io/thrnz/docker-wireguard-pia
+              tag: 20260801_master_9e89d10
+            env:
+              # PIA region ID — MUST be a port-forward-capable (non-US) region.
+              # Leave empty to make the container print the valid location IDs and exit.
+              LOC: ca_toronto
+              # Internal nets that reach the WebUI (user-specified) + k3s pod/service CIDRs.
+              # The cluster CIDRs are REQUIRED: ingress proxies via the Traefik pod IP
+              # (10.52/16) and the *arr apps hit the ClusterIP (10.43/16); without them the
+              # kill-switch drops the WebUI/API return path and the UI appears unreachable.
+              LOCAL_NETWORK: 10.1.20.0/24,10.10.10.0/23,10.2.30.0/24,10.2.169.0/24,10.52.0.0/16,10.43.0.0/16
+              PORT_FORWARDING: "1"
+              PORT_FILE: /pia-shared/port.dat
+              FIREWALL: "1"
+              VPNDNS: "1"
+              KEEPALIVE: "25"
+              RECONNECT: "1"
+            envFrom:
+              - secretRef:
+                  name: qbittorrent-secret
+            securityContext:
+              capabilities:
+                add: ["NET_ADMIN"]
+            probes:
+              liveness:
+                enabled: false
+              readiness:
+                enabled: false
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command: ["/bin/sh", "-c", "test -s /pia-shared/port.dat"]
+                  initialDelaySeconds: 5
+                  periodSeconds: 5
+                  failureThreshold: 60
+            resources:
+              requests:
+                cpu: 25m
+                memory: 64Mi
+              limits:
+                memory: 128Mi
+        containers:
+          # --- qBittorrent: VPN-agnostic, shares the netns brought up by the sidecar ---
+          app:
+            image:
+              repository: lscr.io/linuxserver/qbittorrent
+              tag: 5.2.3_v2.0.13-ls469
+            env:
+              PUID: "1000"
+              PGID: "1000"
+              TZ: "UTC"
+              WEBUI_PORT: "8080"
+            probes:
+              liveness:
+                enabled: true
+              readiness:
+                enabled: true
+              startup:
+                enabled: false
+            resources:
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                cpu: "2"
+                memory: 2Gi
+          # --- Port-sync: push the PIA-forwarded port into qBittorrent's listen setting.
+          # Retries on a loop, so it needs no strict ordering vs. the app container. ---
+          port-sync:
+            image:
+              repository: docker.io/curlimages/curl
+              tag: 8.21.0
+            command: ["/bin/sh", "-c"]
+            args:
+              - |
+                LAST=""
+                while true; do
+                  if [ -s /pia-shared/port.dat ]; then
+                    P=$(cat /pia-shared/port.dat)
+                    if [ -n "$P" ] && [ "$P" != "$LAST" ]; then
+                      if curl -fsS -X POST "http://127.0.0.1:8080/api/v2/app/setPreferences" \
+                          --data-urlencode "json={\"listen_port\":$P}"; then
+                        LAST="$P"
+                        echo "set qBittorrent listen_port=$P"
+                      fi
+                    fi
+                  fi
+                  sleep 60
+                done
+            resources:
+              requests:
+                cpu: 10m
+                memory: 16Mi
+              limits:
+                memory: 32Mi
+    service:
+      app:
+        controller: qbittorrent
+        ports:
+          http:
+            port: 8080
+    persistence:
+      config:
+        existingClaim: qbittorrent-config
+        advancedMounts:
+          qbittorrent:
+            app:
+              - path: /config
+      downloads:
+        existingClaim: downloads-nfs
+        advancedMounts:
+          qbittorrent:
+            app:
+              - path: /data
+                subPath: qbittorrent/data
+      # Forwarded-port handoff between the wireguard sidecar and port-sync
+      pia-shared:
+        type: emptyDir
+        advancedMounts:
+          qbittorrent:
+            wireguard:
+              - path: /pia-shared
+            port-sync:
+              - path: /pia-shared
+      # Userspace wireguard-go device (ignored when the host kernel WG module is used)
+      dev-tun:
+        type: hostPath
+        hostPath: /dev/net/tun
+        hostPathType: CharDevice
+        advancedMounts:
+          qbittorrent:
+            wireguard:
+              - path: /dev/net/tun
