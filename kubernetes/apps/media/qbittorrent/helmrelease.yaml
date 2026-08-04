@@ -131,12 +131,46 @@ spec:
                 memory: 16Mi
               limits:
                 memory: 32Mi
+          # --- Prometheus exporter (martabal/qbittorrent-exporter): talks to qBittorrent
+          # over localhost (shared VPN pod netns). qBittorrent's "bypass auth for clients
+          # on localhost" is on (the port-sync sidecar relies on it too), so no WebUI
+          # credentials are needed. Serves metrics on :8090, scraped via the ServiceMonitor.
+          metrics:
+            image:
+              repository: ghcr.io/martabal/qbittorrent-exporter
+              tag: v2.0.1
+            env:
+              QBITTORRENT_BASE_URL: http://localhost:8080
+              EXPORTER_PORT: "8090"
+            probes:
+              liveness:
+                enabled: false
+              readiness:
+                enabled: false
+              startup:
+                enabled: false
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 64Mi
     service:
       app:
         controller: qbittorrent
         ports:
           http:
             port: 8080
+          metrics:
+            port: 8090
+    serviceMonitor:
+      app:
+        serviceName: qbittorrent
+        endpoints:
+          - port: metrics
+            scheme: http
+            path: /metrics
+            interval: 1m
     persistence:
       config:
         existingClaim: qbittorrent-config

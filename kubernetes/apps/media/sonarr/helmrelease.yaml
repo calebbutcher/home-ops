@@ -40,12 +40,54 @@ spec:
               limits:
                 cpu: "1"
                 memory: 512Mi
+          # --- Prometheus exporter (exportarr): reads Sonarr's API over localhost
+          # (shared pod netns) and serves metrics on :9707, scraped via the
+          # ServiceMonitor below. ENABLE_ADDITIONAL_METRICS powers the quality/history
+          # panels on the combined Exportarr dashboard (slower scrape → 4m interval).
+          metrics:
+            image:
+              repository: ghcr.io/onedr0p/exportarr
+              tag: v2.3.0
+            args: ["sonarr"]
+            env:
+              PORT: "9707"
+              URL: http://localhost:8989
+              ENABLE_ADDITIONAL_METRICS: "true"
+              API_KEY:
+                valueFrom:
+                  secretKeyRef:
+                    name: sonarr-exporter-secret
+                    key: API_KEY
+            probes:
+              liveness:
+                enabled: false
+              readiness:
+                enabled: false
+              startup:
+                enabled: false
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 128Mi
     service:
       app:
         controller: sonarr
         ports:
           http:
             port: 8989
+          metrics:
+            port: 9707
+    serviceMonitor:
+      app:
+        serviceName: sonarr
+        endpoints:
+          - port: metrics
+            scheme: http
+            path: /metrics
+            interval: 4m
+            scrapeTimeout: 90s
     persistence:
       config:
         existingClaim: sonarr-config

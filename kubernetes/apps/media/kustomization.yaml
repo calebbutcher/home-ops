@@ -11,12 +11,15 @@ resources:
   - sonarr/helmrelease.yaml
   - sonarr/pvc.yaml
   - sonarr/ingress.yaml
+  - sonarr/exporter-secret.sops.yaml
   - radarr/helmrelease.yaml
   - radarr/pvc.yaml
   - radarr/ingress.yaml
+  - radarr/exporter-secret.sops.yaml
   - prowlarr/helmrelease.yaml
   - prowlarr/pvc.yaml
   - prowlarr/ingress.yaml
+  - prowlarr/exporter-secret.sops.yaml
   - seerr/helmrelease.yaml
   - seerr/pvc.yaml
   - seerr/ingress.yaml
@@ -44,6 +47,7 @@ resources:
   - sabnzbd/pvc.yaml
   - sabnzbd/helmrelease.yaml
   - sabnzbd/ingress.yaml
+  - sabnzbd/exporter-secret.sops.yaml
   - backup/s3-secret.sops.yaml
   - backup/sonarr-replicationsource.yaml
   - backup/radarr-replicationsource.yaml
