@@ -9,10 +9,13 @@ spec:
   chart:
     spec:
       chart: loki
-      version: "6.55.0"
+      # Community chart. 7.0.0 is a clean fork of grafana/loki 6.55.0 (the last
+      # OSS release on grafana.github.io) — same appVersion 3.6.7, only change is
+      # dropping deprecated Kubernetes APIs. Renovate walks 8.x+ forward from here.
+      version: "7.0.0"
       sourceRef:
         kind: HelmRepository
-        name: grafana
+        name: grafana-community
         namespace: flux-system
   install:
     remediation:

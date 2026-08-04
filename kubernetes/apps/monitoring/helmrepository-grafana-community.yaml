@@ -1,0 +1,13 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: grafana-community
+  namespace: flux-system
+spec:
+  interval: 24h
+  # New OSS home for the Loki chart. grafana/loki chart 6.55.0 was the last OSS
+  # release on grafana.github.io/helm-charts; that repo's 7.x is now Grafana
+  # Enterprise Logs (GEL) only, so OSS users moved here. The `grafana` repo
+  # stays for Alloy. See loki/helmrelease.yaml.
+  url: https://grafana-community.github.io/helm-charts
