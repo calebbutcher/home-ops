@@ -111,6 +111,19 @@ spec:
           value: home-ops
         - name: ENROLL_TAGS
           value: "k3s homelab"
+        # mTLS allow-lists — REQUIRED with tls.enabled. The chart's Certificate templates
+        # hardcode the client-cert OUs (agent→agent-ou, appsec→appsec-ou, bouncer→bouncer-ou),
+        # but the LAPI does NOT set agents_allowed_ou / bouncers_allowed_ou unless these envs
+        # are provided (docker_start only runs `conf_set_if $AGENTS_ALLOWED_OU ...`). Without
+        # them the LAPI serves HTTPS but rejects every agent cert with
+        # "client certificate OU [agent-ou] doesn't match expected OU []" → LAPI crashloops on
+        # its own embedded watcher. appsec-ou MUST be included (the appsec component connects to
+        # LAPI as a watcher with the appsec-ou cert). Bouncers use API-key auth, not certs, so
+        # bouncer-ou is only for completeness/future cert-auth bouncers.
+        - name: AGENTS_ALLOWED_OU
+          value: "agent-ou,appsec-ou"
+        - name: BOUNCERS_ALLOWED_OU
+          value: "bouncer-ou"
       # Persist the decision DB + machine/CAPI credentials. Tiny + low-churn, so local-path
       # (which pins the pod to a node) is fine here — the bouncer re-registers from the env
       # key on any fresh volume regardless.
