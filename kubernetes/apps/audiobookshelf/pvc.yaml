@@ -10,7 +10,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: local-path
+  storageClassName: longhorn
   resources:
     requests:
       storage: 5Gi
@@ -26,7 +26,9 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: local-path
+  # Regenerable cache (covers/transcode/ABS backups) — 1-replica avoids wasteful
+  # 2x replication; recreated empty at cutover (not VolSync-backed).
+  storageClassName: longhorn-single
   resources:
     requests:
       storage: 20Gi
