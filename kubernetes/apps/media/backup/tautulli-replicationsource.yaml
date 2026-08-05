@@ -12,6 +12,7 @@ spec:
     repository: tautulli-restic-secret
     copyMethod: Direct
     cacheCapacity: 1Gi
+    cacheStorageClassName: longhorn-single
     pruneIntervalDays: 7
     retain:
       daily: 7
