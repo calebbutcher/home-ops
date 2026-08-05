@@ -1,0 +1,16 @@
+---
+# Prepare the dedicated Longhorn data disk and iSCSI/NFS client packages on the
+# worker nodes. Standalone on purpose — run it explicitly, never via a full
+# site.yml re-run (which would also touch k3s):
+#
+#   ansible-playbook longhorn-prereq.yml
+#
+# Idempotent: skips (re)formatting if the data disk already carries the expected
+# ext4, and refuses to touch a device that holds foreign data.
+- name: Prepare Longhorn prerequisites on worker nodes
+  hosts: node
+  gather_facts: true
+  become: true
+  environment: "{{ proxy_env | default({}) }}"
+  roles:
+    - role: longhorn

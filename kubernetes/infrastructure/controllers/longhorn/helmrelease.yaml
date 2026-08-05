@@ -1,0 +1,58 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: longhorn
+  namespace: longhorn-system
+spec:
+  interval: 30m
+  dependsOn:
+    # Longhorn's CSI snapshot support uses the external snapshot-controller CRDs.
+    - name: snapshot-controller
+      namespace: snapshot-controller
+  chart:
+    spec:
+      chart: longhorn
+      version: "1.12.0"
+      sourceRef:
+        kind: HelmRepository
+        name: longhorn
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    persistence:
+      # `longhorn` is the cluster-default StorageClass (2 replicas). local-path is
+      # demoted to opt-in once every workload has migrated off it.
+      defaultClass: true
+      defaultClassReplicaCount: 2
+      reclaimPolicy: Delete
+    # Longhorn recommends disabling the pre-upgrade checker under GitOps (Flux/Argo).
+    preUpgradeChecker:
+      jobEnabled: false
+    # Back up to RustFS (S3) on the TrueNAS — same object store as VolSync/barman.
+    # In Longhorn 1.9+ the backup target moved out of defaultSettings into its own
+    # BackupTarget CR, populated from defaultBackupStore.
+    defaultBackupStore:
+      backupTarget: s3://longhorn-backups@us-east-1/
+      backupTargetCredentialSecret: longhorn-s3-backup
+      pollInterval: 300
+    defaultSettings:
+      # Replicas live on the dedicated /dev/sdb data disk mounted here by the
+      # `longhorn` Ansible role — NOT the OS root disk (avoids DiskPressure).
+      defaultDataPath: /var/lib/longhorn
+      defaultReplicaCount: 2
+      # Leave headroom on the 100G data disk.
+      storageMinimalAvailablePercentage: 15
+      # Rebuild a lost replica promptly (5 min) rather than the 1h default.
+      replicaReplenishmentWaitInterval: 300
+    longhornUI:
+      replicas: 1
+    # UI stays internal; expose via the existing Traefik ingress in a later PR.
+    ingress:
+      enabled: false

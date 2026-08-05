@@ -1,0 +1,20 @@
+---
+# For workloads that already replicate at the app layer (CNPG Postgres) or whose
+# local data is disposable / already in S3 (monitoring TSDBs): a single Longhorn
+# replica gives node-independent, snapshottable volumes without triple-writing on
+# top of the host Ceph pool. dataLocality best-effort keeps that one replica on the
+# pod's node for local-disk performance; it rebuilds elsewhere if the pod moves.
+# The 2-replica default class `longhorn` is created by the HelmRelease.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-single
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "1"
+  staleReplicaTimeout: "30"
+  dataLocality: best-effort
+  fsType: ext4
