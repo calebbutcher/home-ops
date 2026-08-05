@@ -48,13 +48,18 @@ spec:
       certManager:
         enabled: true
         # issuerRef intentionally omitted → the chart creates its own self-signed root issuer + CA.
-        # REQUIRED workaround: the agent/appsec/bouncer Certificate templates emit `secretTemplate:`
-        # unconditionally but only fill it when annotations/labels are set, so with both empty the
-        # field renders as `null` and cert-manager's CRD rejects it ("spec.secretTemplate ... must be
-        # of type object") — which aborts the whole Helm upgrade (`helm template` doesn't catch it;
-        # only server-side apply does). Setting a label makes the block a valid object. The lapi cert
-        # guards the whole block so it was unaffected. Remove once the chart guards these templates.
+        # REQUIRED workaround for buggy chart cert templates that render null and get rejected by
+        # cert-manager's CRD ("must be of type object"), aborting the whole Helm upgrade. NOTE:
+        # `helm template` does NOT catch this — only server-side apply does, so validate with
+        # `kubectl apply --dry-run=server` on the RAW helm output (a YAML round-trip normalizes the
+        # nulls away and hides it). Two distinct template bugs, hence BOTH keys must be non-empty:
+        #   - agent/bouncer/lapi guard the whole `secretTemplate:` block → need a non-empty LABEL.
+        #   - appsec-client/appsec-server emit `secretTemplate.annotations:` UNCONDITIONALLY →
+        #     need a non-empty ANNOTATION too, else annotations renders null.
+        # Remove once the chart guards these templates.
         secretTemplate:
+          annotations:
+            app.kubernetes.io/part-of: crowdsec
           labels:
             app.kubernetes.io/part-of: crowdsec
       agent:
