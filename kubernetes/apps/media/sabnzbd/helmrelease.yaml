@@ -101,7 +101,7 @@ spec:
               limits:
                 # par2 repair / unrar are CPU-heavy; allow a burst.
                 cpu: "2"
-                memory: 2Gi
+                memory: 4Gi
           # --- Prometheus exporter (exportarr): reads SABnzbd's API over localhost
           # (shared VPN pod netns, so it bypasses host_whitelist) and serves metrics on
           # :9707, scraped via the ServiceMonitor below. Feeds the SABnzbd panels on the
