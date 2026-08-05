@@ -100,8 +100,8 @@ spec:
                 cpu: 100m
                 memory: 512Mi
               limits:
-                cpu: "2"
-                memory: 2Gi
+                cpu: "4"
+                memory: 4Gi
           # --- Port-sync: push the PIA-forwarded port into qBittorrent's listen setting.
           # Retries on a loop, so it needs no strict ordering vs. the app container. ---
           port-sync:
