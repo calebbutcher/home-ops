@@ -1,0 +1,44 @@
+---
+# One-off, on-demand logical backup taken immediately before the MariaDB
+# 11.8 -> 12.3 in-place upgrade. A Backup with no `schedule` runs once to
+# completion. MariaDB does not support downgrades, so this is the rollback
+# artifact if 12.3 fails: restore this dump into a fresh 11.8 instance.
+#
+# ORDERING: trigger + verify this backup BEFORE the image bump reconciles
+# (see the merge runbook), otherwise the Job may race the pod restart and
+# dump the already-upgraded 12.3 server instead of pre-upgrade 11.8.
+apiVersion: k8s.mariadb.com/v1alpha1
+kind: Backup
+metadata:
+  name: uptime-kuma-mariadb-pre-12
+  namespace: uptime-kuma
+spec:
+  mariaDbRef:
+    name: uptime-kuma-mariadb
+  maxRetention: 720h # 30 days - keep well past the upgrade window
+  compression: gzip
+  storage:
+    s3:
+      bucket: mariadb-backups
+      prefix: uptime-kuma/pre-12-upgrade
+      endpoint: 10.2.40.10:30292
+      region: us-east-1
+      accessKeyIdSecretKeyRef:
+        name: mariadb-rustfs-creds
+        key: access-key-id
+      secretAccessKeySecretKeyRef:
+        name: mariadb-rustfs-creds
+        key: secret-access-key
+      tls:
+        enabled: false
+  stagingStorage:
+    persistentVolumeClaim:
+      storageClassName: local-path
+      resources:
+        requests:
+          storage: 2Gi
+      accessModes:
+        - ReadWriteOnce
+  args:
+    - --single-transaction
+    - --verbose
