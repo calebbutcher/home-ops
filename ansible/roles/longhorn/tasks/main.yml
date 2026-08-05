@@ -1,0 +1,83 @@
+---
+- name: Install Longhorn node packages (open-iscsi, nfs-common)
+  ansible.builtin.apt:
+    name:
+      - open-iscsi
+      - nfs-common
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+
+- name: Ensure the iscsi_tcp kernel module loads at boot
+  ansible.builtin.copy:
+    content: "iscsi_tcp\n"
+    dest: /etc/modules-load.d/iscsi_tcp.conf
+    mode: u=rw,g=r,o=r
+
+- name: Load the iscsi_tcp kernel module now
+  community.general.modprobe:
+    name: iscsi_tcp
+    state: present
+
+- name: Ensure iscsid is enabled and running
+  ansible.builtin.service:
+    name: iscsid
+    enabled: true
+    state: started
+
+- name: Resolve short device name
+  ansible.builtin.set_fact:
+    longhorn_data_device_short: "{{ longhorn_data_device | basename }}"
+
+- name: Assert the dedicated data device exists
+  ansible.builtin.assert:
+    that:
+      - longhorn_data_device_short in ansible_devices
+    fail_msg: >-
+      {{ longhorn_data_device }} not found on {{ inventory_hostname }}.
+      Attach the dedicated Longhorn data disk before running this play.
+
+- name: Read any existing filesystem signature on the data device
+  ansible.builtin.command: "blkid -o value -s TYPE {{ longhorn_data_device }}"
+  register: longhorn_data_blkid
+  changed_when: false
+  failed_when: false
+
+- name: Refuse to touch a device that holds foreign data
+  ansible.builtin.assert:
+    that:
+      - ansible_devices[longhorn_data_device_short].partitions | length == 0
+      - (longhorn_data_blkid.stdout | trim) in ["", longhorn_data_fstype]
+    fail_msg: >-
+      Refusing to format {{ longhorn_data_device }} on {{ inventory_hostname }}:
+      partitions={{ ansible_devices[longhorn_data_device_short].partitions.keys() | list }},
+      fs='{{ longhorn_data_blkid.stdout | trim }}'. Expected an empty disk or an
+      existing {{ longhorn_data_fstype }}. Investigate manually.
+
+- name: Sanity-check the device size (guards against the wrong disk)
+  ansible.builtin.assert:
+    that:
+      - (ansible_devices[longhorn_data_device_short].size | regex_replace(' GB$', '') | float) >= (longhorn_data_min_gb | float)
+      - (ansible_devices[longhorn_data_device_short].size | regex_replace(' GB$', '') | float) <= (longhorn_data_max_gb | float)
+    fail_msg: >-
+      {{ longhorn_data_device }} is {{ ansible_devices[longhorn_data_device_short].size }},
+      outside the expected {{ longhorn_data_min_gb }}-{{ longhorn_data_max_gb }} GB window.
+
+- name: Create the filesystem on the Longhorn data device (idempotent, never forced)
+  community.general.filesystem:
+    fstype: "{{ longhorn_data_fstype }}"
+    dev: "{{ longhorn_data_device }}"
+    force: false
+
+- name: Read the filesystem UUID
+  ansible.builtin.command: "blkid -o value -s UUID {{ longhorn_data_device }}"
+  register: longhorn_data_uuid
+  changed_when: false
+
+- name: Mount the Longhorn data disk by UUID (persistent)
+  ansible.posix.mount:
+    path: "{{ longhorn_data_mount }}"
+    src: "UUID={{ longhorn_data_uuid.stdout | trim }}"
+    fstype: "{{ longhorn_data_fstype }}"
+    opts: defaults,discard
+    state: mounted

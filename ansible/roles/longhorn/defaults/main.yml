@@ -1,0 +1,10 @@
+---
+# Dedicated block device for Longhorn, formatted and mounted at longhorn_data_mount.
+# A 100G /dev/sdb was attached to every worker; override per-host if one differs.
+longhorn_data_device: /dev/sdb
+longhorn_data_mount: /var/lib/longhorn
+longhorn_data_fstype: ext4
+# Guard rails: the data disk must fall inside this size window before we format it,
+# so a misnamed device (e.g. the OS root disk) is never wiped by accident.
+longhorn_data_min_gb: 90
+longhorn_data_max_gb: 110

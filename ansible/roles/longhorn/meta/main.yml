@@ -1,0 +1,14 @@
+---
+argument_specs:
+  main:
+    short_description: Longhorn node prerequisites (data disk, iSCSI, NFS client)
+    options:
+      longhorn_data_device:
+        description: Block device dedicated to Longhorn storage
+        default: /dev/sdb
+      longhorn_data_mount:
+        description: Mount point for the Longhorn data disk
+        default: /var/lib/longhorn
+      longhorn_data_fstype:
+        description: Filesystem created on the Longhorn data disk
+        default: ext4

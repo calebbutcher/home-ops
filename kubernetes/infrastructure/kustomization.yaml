@@ -6,6 +6,7 @@ resources:
   - controllers/traefik
   - controllers/crowdsec
   - controllers/snapshot-controller
+  - controllers/longhorn
   - controllers/volsync
   - controllers/cloudnative-pg
   - controllers/cnpg-barman-plugin
