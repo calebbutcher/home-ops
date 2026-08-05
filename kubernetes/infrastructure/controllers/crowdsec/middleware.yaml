@@ -21,7 +21,15 @@ spec:
       # stream mode: the plugin caches the full decision list from LAPI and refreshes it
       # periodically, so per-request checks are a local cache lookup (no LAPI round-trip).
       crowdsecMode: stream
-      crowdsecLapiScheme: http
+      # LAPI now serves HTTPS (chart tls.enabled — see the crowdsec HelmRelease). The bouncer
+      # still authenticates with the API key over TLS (LAPI accepts API-key bouncers alongside
+      # cert-auth'd agents). We skip server-cert verification: the CA is a cluster-internal
+      # self-signed root that cert-manager auto-rotates, so pinning/reflecting it cross-namespace
+      # into Traefik is churn for little gain on pod-to-pod cluster traffic that the API key
+      # already authenticates. (Future hardening: reflect the CA and set
+      # crowdsecLapiTlsCertificateAuthority instead of skipping verify.)
+      crowdsecLapiScheme: https
+      crowdsecLapiTlsInsecureVerify: true
       crowdsecLapiHost: crowdsec-service.crowdsec.svc.cluster.local:8080
       # Bouncer API key read from the file mounted into Traefik (traefik-ns secret).
       crowdsecLapiKeyFile: /var/run/secrets/crowdsec/bouncer-key
@@ -47,7 +55,13 @@ spec:
       enabled: true
       logLevel: INFO
       crowdsecMode: appsec
-      crowdsecLapiScheme: http
+      # LAPI is HTTPS now (chart tls.enabled); skip verify + keep API-key auth (see the
+      # crowdsec-bouncer middleware above for the rationale). The AppSec :7422 WAF listener is
+      # a SEPARATE connection that stays HTTP — the chart does not put a cert on the appsec
+      # acquisition, and crowdsecAppsecScheme is set explicitly below so it does NOT inherit
+      # crowdsecLapiScheme (the plugin only defaults appsecScheme←lapiScheme when it is empty).
+      crowdsecLapiScheme: https
+      crowdsecLapiTlsInsecureVerify: true
       crowdsecLapiHost: crowdsec-service.crowdsec.svc.cluster.local:8080
       crowdsecLapiKeyFile: /var/run/secrets/crowdsec/bouncer-key
       crowdsecAppsecEnabled: true

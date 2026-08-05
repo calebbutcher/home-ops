@@ -26,6 +26,33 @@ spec:
     # (renders the /var/log/containers/*_traefik_*.log acquisition path).
     container_runtime: containerd
 
+    # mTLS between the agents/appsec and LAPI, provisioned by cert-manager. This REPLACES
+    # password-based machine registration: with tls.<component>.tlsClientAuth the agent init
+    # container drops the `cscli lapi register` step entirely and each agent authenticates to
+    # LAPI with a shared client cert (OU=agent-ou) mounted from a Secret. That removes the
+    # reboot failure mode — the agent's LAPI credentials used to live in an EmptyDir that is
+    # wiped when the pod sandbox is recreated (node reboot), after which re-registration under
+    # the same pod name was rejected by LAPI with "user already exist" (403) and the init
+    # container looped in BackOff forever. There is no per-pod registration anymore, so a
+    # reboot just re-mounts the same cert. See the crowdsec platform memory note for history.
+    #
+    # cert-manager (already installed) generates a self-signed ClusterIssuer (crowdsec-root-issuer)
+    # + CA + a namespaced Issuer that signs the lapi/agent/appsec/bouncer certs. LAPI now serves
+    # HTTPS on :8080; the Traefik bouncer reaches it over https with API-key auth (LAPI accepts
+    # API-key bouncers alongside cert-auth'd agents). The AppSec :7422 WAF listener stays HTTP —
+    # the chart does not inject cert_file/key_file into the appsec acquisition. See middleware.yaml.
+    tls:
+      enabled: true
+      # Inject the generated CA into the agents/appsec so they trust LAPI's server cert.
+      caBundle: true
+      certManager:
+        enabled: true
+        # issuerRef intentionally omitted → the chart creates its own self-signed root issuer + CA.
+      agent:
+        tlsClientAuth: true
+      appsec:
+        tlsClientAuth: true
+
     # Detection-side whitelist: never raise decisions for RFC1918 / LAN clients, so
     # internal *.int.nerdbox.dev traffic and cluster health checks can't get us banned.
     # The bouncer trusts the same ranges on the enforcement side (see middleware.yaml).
