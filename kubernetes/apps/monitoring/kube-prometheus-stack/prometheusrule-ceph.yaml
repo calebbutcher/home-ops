@@ -103,8 +103,12 @@ spec:
               the nearfull/full ratios, which throttle then block writes cluster-wide.
 
         - alert: CephPoolNearFull
+          # Use Ceph's own %USED (this is what `ceph df` reports). Do NOT hand-roll
+          # bytes_used/(bytes_used+max_avail): ceph_pool_bytes_used is RAW (post-
+          # replication) while max_avail is LOGICAL, so mixing them overstates
+          # fullness — a 71%-full replica:3 pool reads as 88% and false-fires.
           expr: |
-            (ceph_pool_bytes_used / (ceph_pool_bytes_used + ceph_pool_max_avail)) * 100 > 85
+            ceph_pool_percent_used * 100 > 85
           for: 15m
           labels:
             severity: warning
