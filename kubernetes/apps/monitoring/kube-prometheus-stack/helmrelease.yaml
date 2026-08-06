@@ -84,6 +84,46 @@ spec:
                   instance: truenas
                   host: truenas
 
+          # Proxmox VE — prometheus-pve-exporter (in-cluster HelmRelease, monitoring/
+          # proxmox). It's a MULTI-TARGET exporter: one scrape per node at
+          # /pve?target=<host>, so relabeling rewrites __address__ to the exporter
+          # Service while __param_target carries the PVE host to query. All 4 cluster
+          # members are listed so per-node API reachability is a signal and metrics
+          # survive any single node being down; cluster-wide pve_* series duplicate per
+          # instance (dashboards filter by the instance var, alerts aggregate by (id)).
+          - job_name: proxmox-ve
+            metrics_path: /pve
+            params:
+              module: [default]
+              cluster: ["1"]
+              node: ["1"]
+            static_configs:
+              - targets:
+                  - 10.1.50.21   # pve-m900
+                  - 10.2.50.23   # pve-r630-01
+                  - 10.2.50.24   # pve-r630-02
+                  - 10.2.50.25   # pve-r630-03
+            relabel_configs:
+              - source_labels: [__address__]
+                target_label: __param_target
+              - source_labels: [__param_target]
+                target_label: instance
+              - target_label: __address__
+                replacement: pve-exporter.monitoring.svc.cluster.local:9221
+
+          # Ceph — the ceph-mgr Prometheus module (enabled on the PVE nodes) serves
+          # cluster-wide metrics on the ACTIVE mgr only (:9283). Standby mgrs refuse
+          # the port, so up to 3 of these targets sit at up==0 BY DESIGN. We therefore
+          # do NOT alert on ceph target `up`; Ceph health comes from ceph_health_status
+          # + absent() (see prometheusrule-ceph.yaml).
+          - job_name: ceph
+            static_configs:
+              - targets:
+                  - 10.1.50.21:9283   # pve-m900
+                  - 10.2.50.23:9283   # pve-r630-01
+                  - 10.2.50.24:9283   # pve-r630-02
+                  - 10.2.50.25:9283   # pve-r630-03
+
         # Thanos sidecar: uploads 2h TSDB blocks to RustFS S3. Object store
         # config comes from the SOPS-managed thanos-objstore Secret (key
         # objstore.yml), reused by the Thanos Store Gateway / Compactor.

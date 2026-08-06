@@ -22,12 +22,14 @@ spec:
     remediation:
       retries: 3
   values:
-    # Remote-syslog receiver for the TrueNAS host (10.2.40.10). TrueNAS forwards its
-    # journal (incl. kernel messages) here so the NIC-hang smoking gun — NETDEV
+    # Remote-syslog receiver for external hosts that can't run the in-cluster pod-log
+    # Alloy: the TrueNAS NAS (10.2.40.10, :1514) and the 4-node Proxmox VE cluster
+    # (:1515). TrueNAS forwards its journal here so the NIC-hang smoking gun — NETDEV
     # WATCHDOG / "Detected Hardware Unit Hang" / transmit-queue-timed-out — lands in
-    # Loki for root-cause + a searchable record. Single Deployment replica (like
-    # alloy-events): the listener is a singleton with a stable LoadBalancer IP, and
-    # with no host mounts it reschedules freely.
+    # Loki; the PVE nodes forward their journals (incl. Ceph + corosync) for the same
+    # root-cause + searchable-record reasons. Single Deployment replica (like
+    # alloy-events): the listeners are singletons with a stable LoadBalancer IP, and
+    # with no host mounts they reschedule freely.
     controller:
       type: deployment
       replicas: 1
@@ -38,6 +40,14 @@ spec:
         - name: syslog-tcp
           port: 1514
           targetPort: 1514
+          protocol: TCP
+        # Second listener for the 4-node Proxmox VE cluster (pve-m900 + 3x r630).
+        # Each PVE node forwards its journal (incl. ceph-mon/osd/mgr + corosync) here
+        # via rsyslog. Same LB IP (10.2.169.83), different port so the TrueNAS stream
+        # and its host="truenas" labels stay untouched.
+        - name: syslog-proxmox
+          port: 1515
+          targetPort: 1515
           protocol: TCP
       configMap:
         content: |-
@@ -54,6 +64,33 @@ spec:
               labels        = { job = "syslog", host = "truenas" }
             }
             forward_to = [loki.write.default.receiver]
+          }
+
+          // Proxmox VE cluster listener. Unlike TrueNAS (one host, static label), the
+          // 4 PVE nodes share this listener, so we derive a per-node `host` label from
+          // the RFC5424 HOSTNAME field (exposed as __syslog_message_hostname) via the
+          // loki.relabel below. `cluster="proxmox"` tags the whole stream; the Loki
+          // ruler rules query {job="syslog", cluster="proxmox"}.
+          loki.source.syslog "proxmox" {
+            listener {
+              address       = "0.0.0.0:1515"
+              protocol      = "tcp"
+              syslog_format = "rfc5424"
+              labels        = { job = "syslog", cluster = "proxmox" }
+            }
+            relabel_rules = loki.relabel.proxmox_host.rules
+            forward_to    = [loki.write.default.receiver]
+          }
+
+          // Promote the syslog sender hostname to a real `host` label so each PVE node
+          // is distinguishable in Loki. forward_to is empty — this component only
+          // exports its .rules for the syslog source above.
+          loki.relabel "proxmox_host" {
+            forward_to = []
+            rule {
+              source_labels = ["__syslog_message_hostname"]
+              target_label  = "host"
+            }
           }
 
           loki.write "default" {

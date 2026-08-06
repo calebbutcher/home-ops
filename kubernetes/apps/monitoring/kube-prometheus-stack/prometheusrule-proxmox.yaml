@@ -1,0 +1,92 @@
+---
+# Metric-based alerts for the 4-node Proxmox VE cluster, fed by the `proxmox-ve`
+# scrape job (prometheus-pve-exporter; see kube-prometheus-stack/helmrelease.yaml
+# additionalScrapeConfigs). No `release:` label needed — ruleSelectorNilUsesHelmValues:
+# false — and the `severity` labels route to Discord via the catch-all `discord`
+# AlertmanagerConfig.
+#
+# Dedup note: every cluster member returns the same cluster-wide pve_* series (one set
+# per scraped `instance`), so node/storage rules aggregate with min/max by (id) to
+# collapse the duplicates. `id` is the PVE object path, e.g. node/pve-r630-01,
+# storage/pve-r630-01/local, qemu/100, lxc/101.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: proxmox-ve
+  namespace: monitoring
+spec:
+  groups:
+    - name: proxmox-ve.rules
+      rules:
+        - alert: ProxmoxVEExporterDown
+          # pve-exporter couldn't be scraped for this node's API view. If ALL targets
+          # are down the whole cluster view is blind; a single one usually means that
+          # node's API is unreachable (node down / network) — a useful early signal.
+          expr: up{job="proxmox-ve"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Proxmox pve-exporter target down ({{ $labels.instance }})"
+            description: >-
+              Prometheus can't scrape the Proxmox API view for {{ $labels.instance }}
+              via pve-exporter for >5m — the node's API is unreachable or the exporter
+              is down. If every proxmox-ve target is down, all Proxmox metrics are blind.
+
+        - alert: ProxmoxNodeDown
+          # A PVE node reports offline in the cluster (pve_up id=node/*). min by (id)
+          # collapses the per-instance duplicates: if any answering member says the
+          # node is down, fire.
+          expr: min by (id) (pve_up{job="proxmox-ve", id=~"node/.*"}) == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Proxmox node offline ({{ $labels.id }})"
+            description: >-
+              PVE reports {{ $labels.id }} as offline for >5m. VMs/CTs on it are down
+              and Ceph likely lost a host — check the node on iDRAC / the PVE web UI.
+
+        - alert: ProxmoxStorageNearFull
+          # Guard against disabled storages (size==0 → divide-by-zero) by keeping only
+          # size>0 series before dividing; max by (id) dedups across members.
+          expr: |
+            max by (id) (
+              pve_disk_usage_bytes{job="proxmox-ve", id=~"storage/.*"}
+                / (pve_disk_size_bytes{job="proxmox-ve", id=~"storage/.*"} > 0)
+            ) > 0.85
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Proxmox storage near full ({{ $labels.id }})"
+            description: >-
+              PVE storage {{ $labels.id }} is >85% full for 15m. Free space or expand
+              it before guests/backups start failing writes.
+
+        - alert: ProxmoxNodeMemoryPressure
+          expr: |
+            max by (id) (
+              pve_memory_usage_bytes{job="proxmox-ve", id=~"node/.*"}
+                / pve_memory_size_bytes{job="proxmox-ve", id=~"node/.*"}
+            ) > 0.9
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Proxmox node memory pressure ({{ $labels.id }})"
+            description: >-
+              {{ $labels.id }} is using >90% of RAM for 15m — risk of KSM thrash / OOM
+              of guests. Check for a runaway VM or rebalance guests.
+
+        # ProxmoxGuestStopped — a VM/CT that PVE reports as stopped. Left disabled by
+        # default: intentional shutdowns would page constantly. Enable + scope to
+        # specific guests if you want power-state alerting.
+        # - alert: ProxmoxGuestStopped
+        #   expr: min by (id) (pve_up{job="proxmox-ve", id=~"(qemu|lxc)/.*"}) == 0
+        #   for: 10m
+        #   labels:
+        #     severity: warning
+        #   annotations:
+        #     summary: "Proxmox guest stopped ({{ $labels.id }})"
+        #     description: "Guest {{ $labels.id }} has been stopped for 10m."

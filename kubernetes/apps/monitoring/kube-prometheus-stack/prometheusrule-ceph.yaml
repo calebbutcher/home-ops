@@ -1,0 +1,139 @@
+---
+# Metric-based alerts for the Proxmox-hyperconverged Ceph cluster, fed by the `ceph`
+# scrape job (the ceph-mgr Prometheus module on :9283; see
+# kube-prometheus-stack/helmrelease.yaml additionalScrapeConfigs). Adapted from Ceph's
+# official prometheus_alerts.yml. `severity` labels route to Discord via the catch-all
+# `discord` AlertmanagerConfig.
+#
+# Only the ACTIVE mgr serves metrics, so all ceph_* series arrive from a single
+# instance — no per-instance dedup needed here (unlike the pve_* rules). We do NOT
+# alert on up{job="ceph"}: standby-mgr targets are down BY DESIGN. CephMgrModuleAbsent
+# (absent()) is what catches "no mgr scrapeable / module disabled".
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ceph
+  namespace: monitoring
+spec:
+  groups:
+    - name: ceph-health.rules
+      rules:
+        - alert: CephHealthError
+          # ceph_health_status: 0=HEALTH_OK, 1=HEALTH_WARN, 2=HEALTH_ERR.
+          expr: ceph_health_status == 2
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Ceph cluster in HEALTH_ERR"
+            description: >-
+              Ceph has been in HEALTH_ERR for >5m — data availability or integrity is
+              at risk. Run `ceph health detail` on a PVE node and check the Ceph
+              dashboards + Loki ({job="syslog", cluster="proxmox"} |= "HEALTH_ERR").
+
+        - alert: CephHealthWarning
+          expr: ceph_health_status == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Ceph cluster in HEALTH_WARN"
+            description: >-
+              Ceph has been in HEALTH_WARN for >15m. Run `ceph health detail` to see
+              the specific check (OSD near-full, PGs degraded, clock skew, etc.).
+
+        - alert: CephMgrModuleAbsent
+          # No active mgr is being scraped — the prometheus module is disabled, both/all
+          # mgrs are down, or the scrape can't reach :9283. A dead monitoring pipeline
+          # must never read as healthy.
+          expr: absent(ceph_health_status)
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Ceph metrics absent (no active mgr scrapeable)"
+            description: >-
+              No ceph_health_status series for >10m — the ceph-mgr prometheus module is
+              disabled, every mgr is down, or Prometheus can't reach any :9283. Ceph
+              alerting is BLIND. Verify `ceph mgr module ls` and mgr daemons.
+
+    - name: ceph-mon.rules
+      rules:
+        - alert: CephMonQuorumAtRisk
+          # Fewer mons in quorum than exist — quorum still holds but redundancy is lost;
+          # one more mon failure could halt the cluster.
+          expr: sum(ceph_mon_quorum_status) < count(ceph_mon_metadata)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Ceph mon quorum degraded"
+            description: >-
+              {{ $value }} fewer monitors are in quorum than exist. Quorum is at risk —
+              check the mon daemons on the PVE nodes (`ceph mon stat`).
+
+    - name: ceph-osd.rules
+      rules:
+        - alert: CephOSDDown
+          expr: ceph_osd_up == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Ceph OSD down ({{ $labels.ceph_daemon }})"
+            description: >-
+              {{ $labels.ceph_daemon }} has been down for >5m — capacity and redundancy
+              are reduced and recovery I/O may be running. Check the disk / host.
+
+    - name: ceph-capacity-pg.rules
+      rules:
+        - alert: CephClusterNearFull
+          # Cluster raw capacity. The mgr prometheus module exposes NO per-OSD
+          # used-bytes metric (OSD_STATS is latency-only), so a single near-full OSD is
+          # caught instead via Ceph's OSD_NEARFULL health check → HEALTH_WARN
+          # (CephHealthWarning). This alert tracks the aggregate raw-capacity trend.
+          expr: (ceph_cluster_total_used_bytes / ceph_cluster_total_bytes) * 100 > 85
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Ceph cluster raw capacity near full"
+            description: >-
+              Ceph raw used capacity is >85% for 15m. Add OSDs / capacity before hitting
+              the nearfull/full ratios, which throttle then block writes cluster-wide.
+
+        - alert: CephPoolNearFull
+          expr: |
+            (ceph_pool_bytes_used / (ceph_pool_bytes_used + ceph_pool_max_avail)) * 100 > 85
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Ceph pool near full (pool_id {{ $labels.pool_id }})"
+            description: >-
+              Pool {{ $labels.pool_id }} is >85% of its usable capacity for 15m. Free
+              space or add OSDs before it hits the full ratio and blocks writes.
+
+        - alert: CephPGsUnclean
+          # PGs not in active+clean for a sustained period (recovery/backfill stuck).
+          expr: (ceph_pg_total - ceph_pg_clean) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Ceph PGs not active+clean"
+            description: >-
+              {{ $value }} PGs have been outside active+clean for >30m — recovery or
+              backfill may be stuck. Check `ceph pg stat` / `ceph health detail`.
+
+        - alert: CephPGsInactive
+          # Inactive PGs = data in them is unavailable for I/O. More urgent than unclean.
+          expr: (ceph_pg_total - ceph_pg_active) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Ceph PGs inactive"
+            description: >-
+              {{ $value }} PGs are inactive for >5m — I/O to the data they hold is
+              blocked. Investigate immediately (`ceph pg dump_stuck inactive`).
