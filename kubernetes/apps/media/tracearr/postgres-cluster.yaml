@@ -36,6 +36,18 @@ spec:
   postgresql:
     shared_preload_libraries:
       - timescaledb
+    parameters:
+      # TimescaleDB locks one relation per chunk a query touches, and with
+      # compression enabled a scan locks BOTH the chunk and its compressed twin.
+      # library_snapshots alone is ~2,215 chunks (2,212 compressed) → a single
+      # history query grabs ~4,400+ locks. The lock pool is
+      # max_locks_per_transaction * max_connections; the CNPG default (64 * 100 =
+      # 6,400) is exhausted under any concurrency → "out of shared memory"
+      # (SQLSTATE 53200) failing history queries AND unrelated collateral writes.
+      # 1024 * 100 = 102,400 slots gives ~20x headroom for a heavy query and room
+      # as the snapshot hypertable keeps growing. Cost is ~27MB shared memory
+      # (well within the 1Gi limit). PGC_POSTMASTER GUC → CNPG rolls instances.
+      max_locks_per_transaction: "1024"
   bootstrap:
     initdb:
       database: tracearr
