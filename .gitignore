@@ -137,6 +137,7 @@ build/
 
 hosts.ini
 .claude/
+home-ops.code-workspace
 
 # Plaintext secret templates — encrypt with sops before committing
 cloudflare-token.yaml
