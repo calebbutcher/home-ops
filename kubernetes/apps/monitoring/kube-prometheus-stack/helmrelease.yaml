@@ -314,7 +314,10 @@ spec:
           cpu: 50m
         limits:
           memory: 128Mi
-          cpu: 200m
+          # No CPU limit: node-exporter briefly spikes above any low cap every
+          # time it's scraped (reads all of /proc/sys), so a CFS quota just
+          # throttles it (~30% of periods here) and fires CPUThrottlingHigh for
+          # no real benefit. The 50m request keeps its scheduling floor.
 
     # -------------------------------------------------------------------------
     # kube-state-metrics — emits metrics about Kubernetes object state
