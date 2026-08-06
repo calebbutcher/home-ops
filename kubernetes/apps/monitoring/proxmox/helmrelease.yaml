@@ -1,0 +1,84 @@
+---
+# prometheus-pve-exporter — queries the Proxmox VE API and exposes cluster / node /
+# guest / storage metrics for Prometheus. Runs in-cluster (nothing installed on the
+# PVE hosts) and reads a read-only API token from the SOPS-managed pve-exporter-secret.
+#
+# This is a MULTI-TARGET exporter: Prometheus scrapes it at /pve?target=<pve-host>
+# (one request per node), so the scrape job + relabeling lives in the
+# kube-prometheus-stack HelmRelease additionalScrapeConfigs — NOT a ServiceMonitor here.
+# Config is env-only (like media/unpackerr): when PVE_USER is set the exporter ignores
+# the pve.yml file and reads PVE_* from the environment.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: pve-exporter
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "5.0.1"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      pve-exporter:
+        pod:
+          securityContext:
+            runAsUser: 65534
+            runAsGroup: 65534
+            runAsNonRoot: true
+        containers:
+          app:
+            image:
+              repository: prompve/prometheus-pve-exporter
+              tag: "3.9.0"
+            env:
+              TZ: "UTC"
+              # Proxmox uses a self-signed cert on the API (8006) — don't verify.
+              PVE_VERIFY_SSL: "false"
+            # PVE_USER / PVE_TOKEN_NAME / PVE_TOKEN_VALUE come from the SOPS secret.
+            # PVE_USER being present is what switches the exporter to env-only config.
+            envFrom:
+              - secretRef:
+                  name: pve-exporter-secret
+            probes:
+              # The exporter's / and /pve routes need a ?target= param, so probe the
+              # TCP socket rather than an HTTP path that would 404.
+              liveness: &probe
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: 9221
+                  initialDelaySeconds: 10
+                  periodSeconds: 30
+                  failureThreshold: 3
+              readiness: *probe
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+              limits:
+                memory: 128Mi
+    service:
+      app:
+        controller: pve-exporter
+        ports:
+          http:
+            port: 9221

@@ -18,6 +18,8 @@ resources:
   - kube-prometheus-stack/prometheusrule-truenas.yaml
   - kube-prometheus-stack/prometheusrule-truenas-zfs.yaml
   - kube-prometheus-stack/prometheusrule-tailscale.yaml
+  - kube-prometheus-stack/prometheusrule-proxmox.yaml
+  - kube-prometheus-stack/prometheusrule-ceph.yaml
   - thanos/helmrelease.yaml
   - thanos/dashboard-overview.yaml
   - thanos/dashboard-store.yaml
@@ -27,6 +29,11 @@ resources:
   - loki/dashboard-health.yaml
   - truenas/dashboard-system.yaml
   - truenas/dashboard-zfs.yaml
+  - proxmox/secret.sops.yaml
+  - proxmox/helmrelease.yaml
+  - proxmox/dashboard.yaml
+  - ceph/dashboard-cluster.yaml
+  - ceph/dashboard-osd.yaml
   - tailscale/dashboard.yaml
   - loki/dashboard-logs-explorer.yaml
   - traefik/dashboard.yaml

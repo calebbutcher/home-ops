@@ -99,3 +99,156 @@ data:
                 A ZFS scrub completed on the TrueNAS host. Informational — confirm it
                 finished with 0 errors in `zpool status` (the TrueNASZFSScrubErrors
                 metric alert fires separately if it didn't).
+  proxmox.yaml: |
+    # Kernel / cluster-stack log signatures from the Proxmox VE nodes, shipped via the
+    # alloy-syslog :1515 listener (see alloy/helmrelease-syslog.yaml) and queried by
+    # {job="syslog", cluster="proxmox"}. These complement the metric rules in
+    # prometheusrule-proxmox.yaml, catching point-in-time events a scrape can miss.
+    # NB: exact line formats vary by version — verify events land first
+    # (`{job="syslog", cluster="proxmox"} |= "corosync"` in Grafana Explore) and pin
+    # the regexes against real captured lines if they don't match.
+    groups:
+      - name: proxmox-cluster-log
+        rules:
+          - alert: ProxmoxCorosyncLinkDown
+            # A corosync/knet link or peer went down, or the ring re-formed — a node
+            # is dropping out of the cluster membership (fencing / quorum risk).
+            expr: |
+              sum by (host) (count_over_time({job="syslog", cluster="proxmox"} |~ `(?i)(corosync|knet).*(link.*(is )?down|host.*(down|dead)|A processor (failed|left)|forming new configuration|FAILED TO RECEIVE)` [10m])) > 0
+            for: 0m
+            labels:
+              severity: warning
+              cluster: proxmox
+              component: corosync
+            annotations:
+              summary: "Proxmox corosync/knet link or membership change ({{ $labels.host }})"
+              description: >-
+                A corosync/knet link-down or ring-reconfiguration message appeared on
+                {{ $labels.host }} in the last 10m — a node is dropping out of cluster
+                membership. Sustained flaps risk HA fencing. Check `pvecm status` /
+                `corosync-cfgtool -s`.
+
+          - alert: ProxmoxFencingOrWatchdog
+            expr: |
+              sum by (host) (count_over_time({job="syslog", cluster="proxmox"} |~ `(?i)(watchdog.*(expired|timed out|fired|reset)|self.?fenc|fencing node|node.*fenced|ha-manager.*fence)` [10m])) > 0
+            for: 0m
+            labels:
+              severity: critical
+              cluster: proxmox
+              component: ha
+            annotations:
+              summary: "Proxmox HA fencing / watchdog event ({{ $labels.host }})"
+              description: >-
+                A watchdog-expiry or HA-fencing message appeared on {{ $labels.host }}
+                in the last 10m — a node was (or is about to be) reset by the HA stack.
+                Expect a reboot; check `ha-manager status` and the node on iDRAC.
+
+          - alert: ProxmoxKernelHardwareError
+            expr: |
+              sum by (host) (count_over_time({job="syslog", cluster="proxmox"} |~ `(?i)(mce:|machine check|hardware error|uncorrected error|kernel panic)` [10m])) > 0
+            for: 0m
+            labels:
+              severity: critical
+              cluster: proxmox
+              component: kernel
+            annotations:
+              summary: "Proxmox kernel/hardware error ({{ $labels.host }})"
+              description: >-
+                An MCE / machine-check / hardware-error / kernel-panic message appeared
+                on {{ $labels.host }} in the last 10m. Inspect the exact line in Loki
+                and check the host's IPMI/iDRAC hardware log — a DIMM/CPU/PCIe fault.
+
+          - alert: ProxmoxKernelError
+            expr: |
+              sum by (host) (count_over_time({job="syslog", cluster="proxmox"} |~ `(?i)(EXT4-fs error|XFS.*(error|corrupt|metadata)|blocked for more than|hung_task|Out of memory|oom-kill)` [10m])) > 0
+            for: 0m
+            labels:
+              severity: warning
+              cluster: proxmox
+              component: kernel
+            annotations:
+              summary: "Proxmox kernel error ({{ $labels.host }})"
+              description: >-
+                A filesystem error / hung-task / OOM-kill message appeared on
+                {{ $labels.host }} in the last 10m. Check the exact line in Loki
+                ({job="syslog", cluster="proxmox", host="{{ $labels.host }}"}).
+  ceph.yaml: |
+    # Real-time Ceph log signatures from the PVE nodes (ceph-mon/osd/mgr journal via
+    # the same :1515 syslog forwarder). These catch point-in-time events the 30s
+    # metric scrape can miss (OSD flaps, scrub errors, slow ops). Verify against real
+    # lines: `{job="syslog", cluster="proxmox"} |= "osd."` in Grafana Explore.
+    groups:
+      - name: ceph-log
+        rules:
+          - alert: CephHealthErrLog
+            expr: |
+              sum(count_over_time({job="syslog", cluster="proxmox"} |~ `HEALTH_ERR` [10m])) > 0
+            for: 0m
+            labels:
+              severity: critical
+              cluster: proxmox
+              component: ceph
+            annotations:
+              summary: "Ceph HEALTH_ERR in logs"
+              description: >-
+                A HEALTH_ERR line appeared in the Proxmox/Ceph logs in the last 10m.
+                Cross-check the CephHealthError metric alert and run `ceph health detail`.
+
+          - alert: CephOSDFlap
+            expr: |
+              sum(count_over_time({job="syslog", cluster="proxmox"} |~ `(?i)osd\.[0-9]+ .*(marked (down|out)|reported failed|failed \()` [10m])) > 0
+            for: 0m
+            labels:
+              severity: warning
+              cluster: proxmox
+              component: ceph
+            annotations:
+              summary: "Ceph OSD marked down/out or reported failed"
+              description: >-
+                An OSD was marked down/out or reported failed in the last 10m — a disk,
+                host, or network issue, or recovery churn. Check `ceph osd tree` and the
+                exact line in Loki.
+
+          - alert: CephSlowRequests
+            expr: |
+              sum(count_over_time({job="syslog", cluster="proxmox"} |~ `(?i)(slow request|slow ops|SLOW_OPS|oldest one blocked)` [10m])) > 0
+            for: 0m
+            labels:
+              severity: warning
+              cluster: proxmox
+              component: ceph
+            annotations:
+              summary: "Ceph slow requests / slow ops"
+              description: >-
+                Ceph logged slow requests / slow ops in the last 10m — I/O is stalling on
+                one or more OSDs. Check `ceph health detail` for the blocked OSD/disk.
+
+          - alert: CephScrubError
+            expr: |
+              sum(count_over_time({job="syslog", cluster="proxmox"} |~ `(?i)(scrub error|deep-scrub.*(error|mismatch)|inconsistent|PG_DAMAGED)` [10m])) > 0
+            for: 0m
+            labels:
+              severity: critical
+              cluster: proxmox
+              component: ceph
+            annotations:
+              summary: "Ceph scrub error / inconsistent PG"
+              description: >-
+                A scrub error / inconsistent-PG message appeared in the last 10m — Ceph
+                found data inconsistency on a PG. Run `ceph health detail`; a `ceph pg
+                repair <pgid>` may be needed after confirming the authoritative copy.
+
+          - alert: CephClockSkew
+            expr: |
+              sum(count_over_time({job="syslog", cluster="proxmox"} |~ `(?i)(clock skew|MON_CLOCK_SKEW)` [10m])) > 0
+            for: 0m
+            labels:
+              severity: warning
+              cluster: proxmox
+              component: ceph
+            annotations:
+              summary: "Ceph mon clock skew"
+              description: >-
+                A mon clock-skew warning appeared in the last 10m — NTP drift between
+                mon hosts can destabilise quorum. Check `chrony`/`timedatectl` on the
+                PVE nodes.
