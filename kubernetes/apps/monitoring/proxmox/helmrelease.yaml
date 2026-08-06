@@ -82,3 +82,11 @@ spec:
         ports:
           http:
             port: 9221
+    persistence:
+      # readOnlyRootFilesystem makes /tmp unwritable, but gunicorn needs a writable
+      # temp dir for each worker's heartbeat file — without this the exporter dies
+      # on boot: "No usable temporary directory found in ['/tmp', ...]".
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp
