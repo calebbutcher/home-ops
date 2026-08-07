@@ -27,3 +27,15 @@ spec:
     extraArgs:
       - --dns01-recursive-nameservers-only
       - --dns01-recursive-nameservers=8.8.8.8:53,1.1.1.1:53
+    # Scrape cert-manager's own metrics. Without this there was no cert-expiry and
+    # no ACME-failure signal at all across ~29 certificates, every one of them
+    # issued through a single Cloudflare DNS-01 token — a revoked or expired token
+    # would have stayed silent until certificates actually expired and browsers
+    # broke. Alerts live in
+    # kubernetes/apps/monitoring/kube-prometheus-stack/prometheusrule-certificates.yaml.
+    # NOTE: podmonitor and servicemonitor are mutually exclusive in this chart;
+    # enabling both makes the chart render fail.
+    prometheus:
+      enabled: true
+      servicemonitor:
+        enabled: true

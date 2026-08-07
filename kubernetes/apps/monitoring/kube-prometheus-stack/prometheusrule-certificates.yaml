@@ -1,0 +1,135 @@
+---
+# Alerts for cert-manager. Until these existed there was no certificate-expiry and
+# no ACME-failure signal anywhere: ~29 Certificates across every namespace, all
+# issued through a single Cloudflare DNS-01 token. A revoked, rotated or
+# rate-limited token would have been completely silent right up until certificates
+# expired and every browser and API client started refusing to connect.
+#
+# Fed by the ServiceMonitor enabled in
+# kubernetes/infrastructure/controllers/cert-manager/helmrelease.yaml.
+#
+# ⚠️ Metric shape gotcha, verified against the live :9402 endpoint: the *_ready_status
+# gauges are ONE-HOT on a `condition` label, e.g.
+#   certmanager_certificate_ready_status{condition="True",...}  1
+#   certmanager_certificate_ready_status{condition="False",...} 0
+# so the predicate is {condition="False"} == 1, not == 0.
+#
+# Layering: the renewal-overdue rule is the earliest signal (cert-manager renews at
+# ~2/3 of lifetime, so ~30d before expiry on a 90d Let's Encrypt cert), expiry
+# thresholds are the backstop, and the absent() guard makes sure a broken exporter
+# does not masquerade as "no certificates have problems".
+#
+# No `release:` label needed — ruleSelectorNilUsesHelmValues: false — and the
+# `severity` labels route via the catch-all Discord AlertmanagerConfig.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: certificates
+  namespace: monitoring
+spec:
+  groups:
+    - name: cert-manager.rules
+      rules:
+        # The guard. Without it, every rule below silently evaluates to "nothing
+        # wrong" if cert-manager stops being scraped.
+        - alert: CertManagerNotReporting
+          expr: absent(certmanager_certificate_expiration_timestamp_seconds)
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "cert-manager is not reporting — certificate expiry is unmonitored"
+            description: >-
+              No certmanager_certificate_expiration_timestamp_seconds series for >15m.
+              cert-manager is down or unscraped, and every other certificate alert is
+              inert while this is firing.
+
+        # Earliest actionable signal: cert-manager wanted to renew and hasn't managed
+        # to. Fires ~9 days before the 21d expiry rule below would.
+        - alert: CertificateRenewalOverdue
+          expr: |
+            certmanager_certificate_renewal_timestamp_seconds > 0
+              and
+            (time() - certmanager_certificate_renewal_timestamp_seconds) > 86400
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate {{ $labels.namespace }}/{{ $labels.name }} is overdue for renewal"
+            description: >-
+              cert-manager scheduled renewal of {{ $labels.namespace }}/{{ $labels.name }}
+              (issuer {{ $labels.issuer_name }}) more than 24h ago and it still has not
+              completed. Usually the Cloudflare DNS-01 token or an ACME order is failing.
+              Check `kubectl -n {{ $labels.namespace }} describe certificate {{ $labels.name }}`.
+
+        - alert: CertificateNotReady
+          expr: certmanager_certificate_ready_status{condition="False"} == 1
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate {{ $labels.namespace }}/{{ $labels.name }} is not Ready"
+            description: >-
+              {{ $labels.namespace }}/{{ $labels.name }} has been in a not-Ready state
+              for >1h. The existing certificate may still be served until it expires,
+              so this is a warning now and becomes urgent via the expiry rules below.
+
+        # 21 days: a Let's Encrypt cert is 90d and renews at ~60d, so reaching 21d
+        # remaining means renewal has been failing for well over a week.
+        - alert: CertificateExpiringSoon
+          expr: |
+            (certmanager_certificate_expiration_timestamp_seconds - time()) < (21 * 24 * 3600)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate {{ $labels.namespace }}/{{ $labels.name }} expires in {{ $value | humanizeDuration }}"
+            description: >-
+              {{ $labels.namespace }}/{{ $labels.name }} (issuer {{ $labels.issuer_name }})
+              expires in under 21 days and has not renewed. Normal renewal happens ~30
+              days out, so something is wrong with the ACME flow.
+
+        - alert: CertificateExpiringCritical
+          expr: |
+            (certmanager_certificate_expiration_timestamp_seconds - time()) < (7 * 24 * 3600)
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "Certificate {{ $labels.namespace }}/{{ $labels.name }} expires in {{ $value | humanizeDuration }}"
+            description: >-
+              {{ $labels.namespace }}/{{ $labels.name }} expires in under 7 days.
+              When it does, clients will refuse the connection. Renew manually if the
+              automated flow cannot be fixed in time.
+
+        # A broken ClusterIssuer breaks every certificate that depends on it, so it
+        # gets its own alert rather than waiting for ~29 individual failures.
+        - alert: ClusterIssuerNotReady
+          expr: certmanager_clusterissuer_ready_status{condition="False"} == 1
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "ClusterIssuer {{ $labels.name }} is not Ready"
+            description: >-
+              ClusterIssuer {{ $labels.name }} has been not-Ready for >30m. No
+              certificate using it can be issued or renewed. For letsencrypt-prod this
+              usually means the Cloudflare API token in the cloudflare-token Secret is
+              invalid, expired, or lacks Zone:DNS:Edit.
+
+        # Catches ACME trouble (rate limits, auth failures, DNS-01 propagation) well
+        # before it shows up as an expiring certificate.
+        - alert: CertManagerACMErrors
+          expr: |
+            sum by (host, status) (
+              rate(certmanager_http_acme_client_request_count{status!~"2.."}[30m])
+            ) > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "cert-manager ACME requests to {{ $labels.host }} failing ({{ $labels.status }})"
+            description: >-
+              cert-manager has been getting HTTP {{ $labels.status }} from
+              {{ $labels.host }} for >1h. A sustained 429 means a Let's Encrypt rate
+              limit — stop forcing renewals and wait it out rather than retrying.

@@ -56,3 +56,11 @@ spec:
     # UI stays internal; expose via the existing Traefik ingress in a later PR.
     ingress:
       enabled: false
+    # Scrape longhorn-manager's metrics (:9500 on the longhorn-backend Service).
+    # Until this was enabled Longhorn was completely unmonitored despite being the
+    # default StorageClass for the whole cluster — degraded volumes, failed replica
+    # rebuilds and failed nightly backups to RustFS were all invisible. Alerts live
+    # in kubernetes/apps/monitoring/kube-prometheus-stack/prometheusrule-longhorn.yaml.
+    metrics:
+      serviceMonitor:
+        enabled: true

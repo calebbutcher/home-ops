@@ -1,0 +1,202 @@
+---
+# Alerts for Longhorn, the cluster-default StorageClass. Until these existed
+# Longhorn was completely unmonitored: no ServiceMonitor, no rules, no dashboard,
+# despite holding 25+ volumes including every Postgres replica that has migrated
+# off local-path. A degraded volume, a replica that never finished rebuilding, or
+# a node whose data disk filled up were all invisible.
+#
+# Fed by the longhorn-manager ServiceMonitor enabled in
+# kubernetes/infrastructure/controllers/longhorn/helmrelease.yaml (metrics.serviceMonitor).
+#
+# ⚠️ Metric shape gotcha, verified against the live :9500 endpoint rather than the
+# docs: longhorn_volume_robustness and longhorn_volume_state are NOT numeric enums.
+# They are ONE-HOT gauges carrying a `state` label, e.g.
+#   longhorn_volume_robustness{state="healthy",...}  1
+#   longhorn_volume_robustness{state="degraded",...} 0
+#   longhorn_volume_robustness{state="faulted",...}  0
+# so the correct predicate is {state="degraded"} == 1, never == 2. The same
+# applies to longhorn_node_status / longhorn_disk_status, which are one-hot on a
+# `condition` label.
+#
+# Volumes carry pvc / pvc_namespace labels, so alerts name the real workload
+# rather than an opaque pvc-<uuid>.
+#
+# No `release:` label needed — ruleSelectorNilUsesHelmValues: false — and the
+# `severity` labels route via the catch-all Discord AlertmanagerConfig.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: longhorn
+  namespace: monitoring
+spec:
+  groups:
+    - name: longhorn-volume.rules
+      rules:
+        # Faulted = every replica is unusable. The volume is down and the workload
+        # on top of it is almost certainly broken.
+        - alert: LonghornVolumeFaulted
+          expr: longhorn_volume_robustness{state="faulted"} == 1
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Longhorn volume for {{ $labels.pvc_namespace }}/{{ $labels.pvc }} is FAULTED"
+            description: >-
+              Volume {{ $labels.volume }} (PVC {{ $labels.pvc_namespace }}/{{ $labels.pvc }})
+              has no usable replicas. The workload using it cannot read or write.
+              Check `kubectl -n longhorn-system get volumes.longhorn.io {{ $labels.volume }}`
+              and the Longhorn UI for replica state.
+
+        # Degraded = running on fewer replicas than requested. Longhorn rebuilds
+        # automatically after replicaReplenishmentWaitInterval (300s), so anything
+        # still degraded after 20m means the rebuild is failing or has nowhere to go.
+        - alert: LonghornVolumeDegraded
+          expr: longhorn_volume_robustness{state="degraded"} == 1
+          for: 20m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn volume for {{ $labels.pvc_namespace }}/{{ $labels.pvc }} is degraded"
+            description: >-
+              Volume {{ $labels.volume }} has been degraded for >20m — it is running
+              on fewer replicas than requested and has not self-healed. Usually a
+              node is down, or no node has enough schedulable space for the rebuild.
+
+        # ⚠️ Must be qualified by state="attached". A DETACHED volume has no running
+        # engine, so Longhorn reports its robustness as "unknown" — that is normal,
+        # not a fault. 14 of the 32 volumes in this cluster are detached at any given
+        # time (VolSync caches, idle app PVCs), so an unqualified rule fires 14 false
+        # positives immediately. Only an ATTACHED volume whose robustness is unknown
+        # is actually a problem.
+        - alert: LonghornVolumeRobustnessUnknown
+          expr: |
+            longhorn_volume_robustness{state="unknown"} == 1
+              and on (volume)
+            longhorn_volume_state{state="attached"} == 1
+          for: 20m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn volume for {{ $labels.pvc_namespace }}/{{ $labels.pvc }} is in unknown state"
+            description: >-
+              Volume {{ $labels.volume }} is attached but Longhorn cannot determine its
+              robustness (>20m). Usually the engine or instance-manager for it is
+              unhealthy.
+
+        # A replica stuck in ERR mode is the precursor to a degraded volume; catching
+        # it here gives warning before redundancy is actually lost.
+        - alert: LonghornReplicaError
+          expr: longhorn_engine_replica_mode{mode="ERR"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn replica {{ $labels.replica }} is in ERR mode"
+            description: >-
+              Replica {{ $labels.replica }} of volume {{ $labels.volume }} has been in
+              ERR mode for >15m. Longhorn will normally rebuild it; if this persists
+              the underlying disk or node is likely at fault.
+
+    - name: longhorn-node.rules
+      rules:
+        # If every longhorn-manager stops reporting, the volume rules above go
+        # silent rather than firing — this is the guard for that.
+        - alert: LonghornManagerDown
+          expr: absent(longhorn_volume_robustness)
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Longhorn is not reporting metrics — storage is unmonitored"
+            description: >-
+              No longhorn_volume_robustness series for >10m. Either every
+              longhorn-manager pod is down or the ServiceMonitor has broken. All
+              other Longhorn alerts are inert while this is firing.
+
+        - alert: LonghornNodeNotReady
+          expr: longhorn_node_status{condition="ready"} == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Longhorn node {{ $labels.node }} is not ready"
+            description: >-
+              Longhorn reports node {{ $labels.node }} as not ready for >10m. Replicas
+              on it are unavailable and volumes with a replica there are degraded.
+
+        - alert: LonghornNodeUnschedulable
+          expr: longhorn_node_status{condition="schedulable"} == 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn node {{ $labels.node }} is unschedulable"
+            description: >-
+              Node {{ $labels.node }} has been unschedulable for >30m, so no new
+              replicas can be placed there. If several nodes are unschedulable,
+              rebuilds will stall and volumes will stay degraded.
+
+        - alert: LonghornDiskUnschedulable
+          expr: longhorn_disk_status{condition="schedulable"} == 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn disk {{ $labels.disk }} on {{ $labels.node }} is unschedulable"
+            description: >-
+              Disk {{ $labels.disk }} on node {{ $labels.node }} cannot accept new
+              replicas (>30m). Most often it has crossed
+              storageMinimalAvailablePercentage (15%).
+
+        # Threshold deliberately matches storageMinimalAvailablePercentage: 15 in the
+        # HelmRelease — at 85% used Longhorn stops scheduling replicas there, so this
+        # fires at the moment capacity starts constraining rebuilds rather than later.
+        - alert: LonghornNodeStorageHigh
+          expr: |
+            longhorn_node_storage_usage_bytes / longhorn_node_storage_capacity_bytes > 0.85
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn storage on {{ $labels.node }} is {{ $value | humanizePercentage }} full"
+            description: >-
+              The Longhorn data disk on {{ $labels.node }} is over 85% used, which is
+              the point at which storageMinimalAvailablePercentage stops new replica
+              scheduling on this node. Grow /dev/sdb or rebalance replicas.
+
+        - alert: LonghornNodeStorageCritical
+          expr: |
+            longhorn_node_storage_usage_bytes / longhorn_node_storage_capacity_bytes > 0.93
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Longhorn storage on {{ $labels.node }} is {{ $value | humanizePercentage }} full"
+            description: >-
+              The Longhorn data disk on {{ $labels.node }} is nearly full. Volumes with
+              replicas here risk write failure. Grow the disk urgently.
+
+    - name: longhorn-backup.rules
+      rules:
+        # Scoped to volumes that HAVE been backed up at least once (> 0), so this
+        # catches a regression — backups that used to work and stopped — without
+        # firing for every volume outside the daily-backup RecurringJob group.
+        #
+        # ⚠️ This deliberately does NOT detect volumes that have never been backed
+        # up at all; that is a coverage question rather than a failure, and is
+        # handled alongside the other backup tiers in prometheusrule-backups.yaml.
+        - alert: LonghornVolumeBackupStale
+          expr: |
+            longhorn_volume_last_backup_at > 0
+              and
+            (time() - longhorn_volume_last_backup_at) > 129600
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn backup for {{ $labels.pvc_namespace }}/{{ $labels.pvc }} is stale"
+            description: >-
+              Volume {{ $labels.volume }} was last backed up to RustFS more than 36h
+              ago, but the daily-backup RecurringJob runs at 04:00. Backups have been
+              failing silently. Check the RecurringJob and that
+              s3://longhorn-backups is reachable.
