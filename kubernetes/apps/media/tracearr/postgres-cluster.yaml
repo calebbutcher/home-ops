@@ -46,7 +46,7 @@ spec:
       # (SQLSTATE 53200) failing history queries AND unrelated collateral writes.
       # 1024 * 100 = 102,400 slots gives ~20x headroom for a heavy query and room
       # as the snapshot hypertable keeps growing. Cost is ~27MB shared memory
-      # (well within the 1Gi limit). PGC_POSTMASTER GUC → CNPG rolls instances.
+      # (see the resources block below). PGC_POSTMASTER GUC → CNPG rolls instances.
       max_locks_per_transaction: "1024"
   bootstrap:
     initdb:
@@ -57,9 +57,36 @@ spec:
         # version whose install script is not shipped, so pin to the highest
         # version actually present in the image.
         - CREATE EXTENSION IF NOT EXISTS timescaledb VERSION '2.19.3';
+  # The limit is sized for SCHEMA MIGRATIONS, not for steady state. Steady state is
+  # ~230-350Mi; the old 1Gi limit covered that with room to spare and was fine for
+  # nine months.
+  #
+  # What broke it: tracearr 2.0.0 (Renovate #246, merged 2026-08-07 00:22Z) ships a
+  # drizzle migration that dedups library_snapshots before adding a unique index.
+  # library_snapshots is a hypertable with ~2,220 chunks and the database holds
+  # ~15,965 _hyper_* relations in total. The migration's pre-check touches the
+  # hypertable with transparent decompression enabled, so a single backend builds
+  # relcache + lock entries across all of them at once — that alone blows past 1Gi.
+  #
+  # The failure mode is a self-sustaining loop, not a one-off: the postgres container
+  # is OOMKilled (exit 137) mid-migration → CNPG sees the primary die and fails over →
+  # tracearr's recovery loop reconnects to the new primary and re-runs the SAME
+  # migration → OOM again. It ran ~45 restarts in 24h, alternating instances -1 and -2
+  # (instance -3 never got promoted, hence 0 restarts). The app's /health stayed 200
+  # throughout, so nothing external noticed.
+  #
+  # 4Gi is deliberately generous — it is a ceiling, not a reservation, so the cost of
+  # over-sizing is nothing while the migration is not running. requests stays well
+  # below it (Burstable) so scheduling is unaffected; workers are 12Gi with 6-8Gi free
+  # and podAntiAffinity keeps one instance per node.
+  #
+  # ⚠️ The ~2,220 chunks on a 125MB hypertable is the underlying problem — that is
+  # tracearr's chunk_time_interval being far too small for this data volume, and it is
+  # what makes every schema change on this table expensive. Raising the limit buys
+  # headroom; it does not fix the chunk sprawl.
   resources:
     requests:
       cpu: 100m
       memory: 512Mi
     limits:
-      memory: 1Gi
+      memory: 4Gi
