@@ -20,6 +20,7 @@ resources:
   - kube-prometheus-stack/prometheusrule-tailscale.yaml
   - kube-prometheus-stack/prometheusrule-proxmox.yaml
   - kube-prometheus-stack/prometheusrule-ceph.yaml
+  - kube-prometheus-stack/prometheusrule-observability.yaml
   - thanos/helmrelease.yaml
   - thanos/dashboard-overview.yaml
   - thanos/dashboard-store.yaml

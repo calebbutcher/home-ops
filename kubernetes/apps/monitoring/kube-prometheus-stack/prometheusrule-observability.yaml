@@ -1,0 +1,236 @@
+---
+# Alerts for the observability pipeline itself — Alloy (log collection) and Loki
+# (log storage). Until this file existed, the entire logging path was unscraped:
+# collection could stop, or Loki could start rejecting writes, and the only
+# symptom was logs quietly going missing. Nothing fired.
+#
+# Fed by the ServiceMonitors enabled on all three Alloy releases
+# (alloy/helmrelease*.yaml → serviceMonitor.enabled) and by Loki's own chart
+# ServiceMonitor, which was already on.
+#
+# Metric names here were verified against the live /metrics endpoints rather than
+# from docs — Alloy renames things between versions, and a rule written against a
+# metric nobody exports is worse than no rule at all.
+#
+# Deliberately NOT covered here: Alertmanager notification failures. The chart's
+# stock alertmanager.rules group already ships AlertmanagerFailedToSendAlerts and
+# AlertmanagerClusterFailedToSendAlerts. Note those alerts can only reach you
+# *through* Alertmanager — the real backstop for that is the Watchdog heartbeat
+# route in alertmanagerconfig.yaml.
+#
+# No `release:` label needed — ruleSelectorNilUsesHelmValues: false — and the
+# `severity` labels route via the catch-all Discord AlertmanagerConfig.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: observability
+  namespace: monitoring
+spec:
+  groups:
+    - name: alloy.rules
+      rules:
+        # Each Alloy release is a separate failure domain with a distinct blast
+        # radius, so they get separate alerts rather than one job=~"alloy.*" rule.
+        # absent() rather than up==0: if the ServiceMonitor or the Service itself
+        # is deleted the targets vanish entirely, and up==0 would never fire.
+        - alert: AlloyPodLogsCollectorDown
+          expr: absent(alloy_build_info{job="alloy"})
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Alloy pod-log collector is down — no container logs reaching Loki"
+            description: >-
+              No metrics from the alloy DaemonSet for >10m. Container logs from
+              every namespace have stopped shipping to Loki; Grafana will look
+              healthy but empty. Check `kubectl -n monitoring get ds alloy` and
+              `kubectl -n monitoring logs -l app.kubernetes.io/name=alloy`.
+
+        - alert: AlloyEventsCollectorDown
+          expr: absent(alloy_build_info{job="alloy-events"})
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Alloy Kubernetes-events collector is down"
+            description: >-
+              No metrics from the alloy-events Deployment for >10m. Kubernetes
+              events (OOMKills, evictions, failed scheduling, probe failures) are
+              no longer being recorded in Loki.
+
+        # Critical rather than warning: this is the sole ingestion path for the
+        # TrueNAS and Proxmox syslog rules in loki/rules-truenas.yaml, including
+        # the NIC-hang detection this cluster was specifically built to catch. A
+        # dead listener is indistinguishable from "the NAS had nothing to say".
+        - alert: AlloySyslogCollectorDown
+          expr: absent(alloy_build_info{job="alloy-syslog"})
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Alloy syslog receiver is down — TrueNAS/Proxmox log alerts are blind"
+            description: >-
+              No metrics from the alloy-syslog Deployment for >10m. Every LogQL
+              rule in loki-alerting-rules (TrueNASKernelNICHang, ZFS pool state,
+              Proxmox fencing, Ceph health) silently stops evaluating against new
+              data. Check the LoadBalancer on 10.2.169.83 is still assigned.
+
+        # Individual DaemonSet pod down — the release as a whole is still up, so
+        # only that node's logs are missing. Warning, not critical.
+        - alert: AlloyInstanceDown
+          expr: up{job=~"alloy|alloy-events|alloy-syslog"} == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Alloy instance {{ $labels.pod }} is not scrapeable"
+            description: >-
+              Prometheus cannot scrape {{ $labels.pod }} ({{ $labels.job }}) for
+              >15m. If this is the DaemonSet, logs from that node are likely not
+              being collected.
+
+        # A bad config leaves Alloy running with the LAST GOOD config, so the pod
+        # stays Ready and nothing else notices. This is the only signal.
+        - alert: AlloyConfigReloadFailed
+          expr: alloy_config_last_load_successful == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Alloy config failed to load on {{ $labels.pod }}"
+            description: >-
+              alloy_config_last_load_successful == 0 for >10m on {{ $labels.pod }}
+              ({{ $labels.job }}). Alloy is still running the previously-loaded
+              config, so a recent change to the configMap has NOT taken effect.
+
+        - alert: AlloyComponentUnhealthy
+          expr: alloy_component_controller_running_components{health_type="unhealthy"} > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Alloy has {{ $value }} unhealthy component(s) on {{ $labels.pod }}"
+            description: >-
+              One or more Alloy components ({{ $labels.job }}) have been unhealthy
+              for >15m. Inspect the component graph at the Alloy UI on :12345 or
+              check the pod logs.
+
+        # Rate-based, not counter-based: loki_write_dropped_entries_total is
+        # cumulative and already carries ~19k historical drops from an earlier
+        # Loki upgrade. Only a *sustained new* drop rate is actionable.
+        - alert: AlloyDroppingLogEntries
+          expr: sum by (job, reason) (rate(loki_write_dropped_entries_total[10m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Alloy is dropping log entries ({{ $labels.reason }})"
+            description: >-
+              {{ $labels.job }} has been dropping log entries for >15m, reason
+              "{{ $labels.reason }}" ({{ printf "%.2f" $value }}/s). Logs are being
+              lost permanently. rate_limited/stream_limited means Loki's per-tenant
+              limits need raising; ingester_error means Loki is unhealthy.
+
+        # Distinguishes "Alloy is fine but Loki is rejecting" from a dead collector.
+        # status_code="-1" is Alloy's marker for a connection-level failure.
+        - alert: AlloyLogWriteFailing
+          expr: |
+            sum by (job) (rate(loki_write_request_duration_seconds_count{status_code!~"2.."}[10m]))
+              /
+            sum by (job) (rate(loki_write_request_duration_seconds_count[10m]))
+              > 0.1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Alloy log writes to Loki are failing ({{ $labels.job }})"
+            description: >-
+              >10% of {{ $labels.job }} push requests to loki-gateway have been
+              non-2xx for >15m ({{ printf "%.0f" $value }}% failing). Alloy retries
+              and buffers, but sustained failure ends in dropped entries.
+
+    - name: loki.rules
+      rules:
+        # The Loki chart's own rules are disabled (monitoring.rules.enabled: false)
+        # because the upstream mixin assumes a microservices deployment and mostly
+        # no-ops in Monolithic mode. These are the ones that actually matter here.
+
+        # Must come first and must be absent(), not a rate: if every Loki replica
+        # dies the series disappear, and the sum()==0 rules below silently evaluate
+        # to "no data" rather than firing. This is the rule that catches total loss.
+        - alert: LokiDown
+          expr: absent(loki_build_info)
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Loki is down — no log storage or LogQL alerting"
+            description: >-
+              No metrics from any Loki replica for >10m. Log ingestion has stopped,
+              Grafana log panels are dead, and every LogQL rule in
+              loki-alerting-rules has stopped evaluating. Check
+              `kubectl -n monitoring get pods -l app.kubernetes.io/name=loki`.
+
+        # The whole point of the pipeline. If nothing is arriving, either every
+        # collector is dead or the gateway is broken — and unlike the absent()
+        # rules above, this fires even if Alloy is happily reporting success.
+        - alert: LokiNotReceivingLogs
+          expr: sum(rate(loki_distributor_lines_received_total[15m])) == 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Loki has received no log lines for 15m"
+            description: >-
+              loki_distributor_lines_received_total is flat across all Loki
+              replicas. Nothing is being ingested from any source (pods, events,
+              or syslog). Every LogQL alerting rule is now evaluating on stale data.
+
+        - alert: LokiRequestErrors
+          expr: |
+            sum by (route) (rate(loki_request_duration_seconds_count{status_code=~"5.."}[10m]))
+              /
+            sum by (route) (rate(loki_request_duration_seconds_count[10m]))
+              > 0.05
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Loki route {{ $labels.route }} is returning 5xx"
+            description: >-
+              >5% of requests to {{ $labels.route }} have failed for >15m
+              ({{ printf "%.0f" $value }}%). Affects ingestion if this is a push
+              route, or Grafana/ruler queries if it is a query route.
+
+        # The ruler is what turns loki/rules-truenas.yaml into actual alerts. If it
+        # stops loading them, those 12 LogQL rules go silent with no other symptom.
+        #
+        # max() across replicas, not a bare == 0: in Monolithic mode all three Loki
+        # replicas run a ruler but the tenant is sharded to one of them via the
+        # ring, so the non-owning replicas legitimately report 0.
+        - alert: LokiRulerNoRuleManagers
+          expr: max(loki_ruler_managers_total) == 0
+          for: 20m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Loki ruler has no rule managers loaded"
+            description: >-
+              No Loki replica has a rule manager for >20m. The LogQL alerts in the
+              loki-alerting-rules ConfigMap (TrueNAS NIC/ZFS, Proxmox, Ceph) are no
+              longer being evaluated. Check
+              `kubectl -n monitoring logs -l app.kubernetes.io/name=loki -c loki`.
+
+        # Distinct failure from the above: the ruler is alive but the rules ConfigMap
+        # is malformed, so it keeps serving the last good rule set.
+        - alert: LokiRulerConfigReloadFailed
+          expr: loki_ruler_config_last_reload_successful == 0
+          for: 20m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Loki ruler failed to reload its rules (tenant {{ $labels.user }})"
+            description: >-
+              loki_ruler_config_last_reload_successful == 0 for >20m. A recent edit
+              to the loki-alerting-rules ConfigMap is invalid and has NOT been
+              applied — the ruler is still running the previous rule set.

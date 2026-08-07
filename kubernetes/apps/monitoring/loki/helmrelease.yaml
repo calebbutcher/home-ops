@@ -200,5 +200,10 @@ spec:
       # SingleBinary-tuned dashboard instead (loki/dashboard-health.yaml).
       dashboards:
         enabled: false
+      # Same reasoning for the mixin's alerting rules — they group by per-component
+      # job names that don't exist here, so most would never fire. The handful that
+      # actually matter in SingleBinary mode (Loki down, ingestion stalled, 5xx rate,
+      # ruler not loading rules) are hand-written in
+      # kube-prometheus-stack/prometheusrule-observability.yaml instead.
       rules:
         enabled: false

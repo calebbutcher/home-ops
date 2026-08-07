@@ -114,3 +114,8 @@ spec:
     # No Kubernetes discovery/API access needed — this only listens on a socket.
     rbac:
       create: false
+    # See alloy/helmrelease.yaml. Especially important here: this is the only
+    # ingestion path for TrueNAS and Proxmox syslog, and a dead listener looks
+    # exactly like "the NAS had nothing to say".
+    serviceMonitor:
+      enabled: true

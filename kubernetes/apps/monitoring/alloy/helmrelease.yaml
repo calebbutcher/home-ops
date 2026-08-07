@@ -110,3 +110,9 @@ spec:
           memory: 256Mi
     rbac:
       create: true
+    # Scrape Alloy's own metrics. Without this the log pipeline is invisible: if
+    # collection stops or Loki starts rejecting writes, nothing fires and the only
+    # symptom is logs quietly going missing. Alerts live in
+    # kube-prometheus-stack/prometheusrule-observability.yaml.
+    serviceMonitor:
+      enabled: true
