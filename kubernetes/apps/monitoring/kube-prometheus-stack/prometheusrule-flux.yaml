@@ -1,0 +1,171 @@
+---
+# Alerts for Flux itself.
+#
+# Flux is the mechanism by which every other change in this repository reaches the
+# cluster, and it was completely unmonitored: no scrape target, no rules. Its only
+# failure signal was the absence of Discord messages from the notification
+# controller — and "no messages" is exactly what a quiet, working day looks like.
+# A Kustomization can sit failed for weeks while every dashboard stays green.
+#
+# Two sources, and the split matters:
+#
+#   1. CONTROLLER health from the PodMonitor in podmonitor-flux.yaml —
+#      controller_runtime_* and gotk_reconcile_duration_*. These say the
+#      controllers are alive and how long reconciles take.
+#   2. PER-OBJECT readiness from kube-state-metrics customResourceState
+#      (gotk_resource_*, configured in helmrelease.yaml). Flux REMOVED
+#      `gotk_reconcile_condition`, so there is no controller-exported metric for
+#      "is this Kustomization Ready" — reading the CR status is the only way.
+#
+# ⚠️ kube-state-metrics adds `customresource_kind` to every gotk_resource_* series
+# automatically. That is what lets a single metric name cover Kustomizations,
+# HelmReleases, GitRepositories and HelmRepositories at once, and why the rules
+# below filter on it rather than on separate metric names.
+#
+# No `release:` label needed — ruleSelectorNilUsesHelmValues: false — and the
+# `severity` labels route via the catch-all Discord AlertmanagerConfig.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: flux
+  namespace: monitoring
+spec:
+  groups:
+    - name: flux-resources.rules
+      rules:
+        # The guard. Every per-object rule below depends on this collector, and a
+        # collector that stops reporting looks identical to "everything is Ready".
+        - alert: FluxResourceMetricsMissing
+          expr: absent(gotk_resource_condition)
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Flux resource status is not being collected — GitOps is unmonitored"
+            description: >-
+              No gotk_resource_condition series for >15m. kube-state-metrics has
+              stopped reading the Flux CRs. Every other Flux alert is inert while
+              this is firing, so a broken deployment would be completely silent.
+
+        # 15m is deliberately longer than a normal reconcile. Flux retries on its
+        # own interval, so anything still not-Ready after 15 minutes is a genuine
+        # failure — a bad manifest, a failed Helm upgrade, an unreachable chart
+        # repo — rather than a reconcile in progress.
+        - alert: FluxKustomizationNotReady
+          expr: |
+            gotk_resource_condition{customresource_kind="Kustomization", type="Ready"} == 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Flux Kustomization {{ $labels.namespace }}/{{ $labels.name }} is not Ready"
+            description: >-
+              Kustomization {{ $labels.namespace }}/{{ $labels.name }} has failed to
+              reconcile for >15m. Everything it manages is now drifting from git.
+              Check `flux get kustomizations` and
+              `kubectl -n {{ $labels.namespace }} describe kustomization {{ $labels.name }}`.
+
+        - alert: FluxHelmReleaseNotReady
+          expr: |
+            gotk_resource_condition{customresource_kind="HelmRelease", type="Ready"} == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Flux HelmRelease {{ $labels.namespace }}/{{ $labels.name }} is not Ready"
+            description: >-
+              HelmRelease {{ $labels.namespace }}/{{ $labels.name }} has been failing
+              for >15m. With `remediation.retries` exhausted it will stop retrying
+              and stay on the old release — the app keeps running, but no further
+              change reaches it. Check
+              `flux get helmreleases -A` and the Helm history.
+
+        # Sources are upstream of everything. A stalled GitRepository means Flux is
+        # happily reconciling an OLD commit and reporting success the whole time,
+        # which is the most deceptive failure mode in the stack.
+        - alert: FluxSourceNotReady
+          expr: |
+            gotk_resource_condition{customresource_kind=~"GitRepository|HelmRepository", type="Ready"} == 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Flux source {{ $labels.customresource_kind }} {{ $labels.namespace }}/{{ $labels.name }} is not Ready"
+            description: >-
+              Source {{ $labels.namespace }}/{{ $labels.name }} has been failing to
+              fetch for >15m. Anything depending on it is reconciling stale content
+              while still reporting Ready. For the flux-system GitRepository this
+              means NO new commits are being applied at all.
+
+        # ⚠️ Sparse metric — see the customResourceState comment in helmrelease.yaml.
+        # Flux does not write spec.suspend until something is actually suspended,
+        # and kube-state-metrics emits nothing for an unresolved path, so this
+        # series EXISTS ONLY while suspended. `== 1` is correct; `== 0` would never
+        # fire.
+        #
+        # 6h because suspending is a legitimate short-term operation (that is how
+        # the tracearr OOM loop was broken on 2026-08-07). What this catches is
+        # forgetting to resume, which silently freezes that resource forever.
+        - alert: FluxResourceSuspended
+          expr: gotk_resource_suspended == 1
+          for: 6h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Flux {{ $labels.customresource_kind }} {{ $labels.namespace }}/{{ $labels.name }} has been suspended for 6h"
+            description: >-
+              Reconciliation of {{ $labels.namespace }}/{{ $labels.name }} has been
+              suspended for over 6 hours. Changes committed to git are NOT being
+              applied to it and never will be until someone runs
+              `flux resume {{ $labels.customresource_kind | toLower }} -n {{ $labels.namespace }} {{ $labels.name }}`.
+
+    - name: flux-controllers.rules
+      rules:
+        # Fed by podmonitor-flux.yaml. Covers the case where the controller process
+        # is gone entirely — in which case the CR statuses above simply freeze at
+        # their last value and stay "Ready" forever.
+        - alert: FluxControllerDown
+          expr: |
+            up{job=~"(source|kustomize|helm|notification)-controller"} == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Flux controller {{ $labels.pod }} is down"
+            description: >-
+              {{ $labels.pod }} has been unreachable for >10m. While a controller is
+              down the resources it owns keep reporting their last known status, so
+              the per-object alerts above will NOT fire for anything that breaks in
+              the meantime.
+
+        - alert: FluxControllersNotScraped
+          expr: absent(up{job=~"(source|kustomize|helm|notification)-controller"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Flux controllers are not being scraped"
+            description: >-
+              No targets for the flux-controllers PodMonitor for >15m. Either the
+              controller pod labels changed (`app.kubernetes.io/part-of: flux`) or
+              the `http-prom` port was renamed by a Flux upgrade.
+
+        # Sustained reconcile errors at the controller level. This catches
+        # systemic problems — expired credentials, API server pressure, a
+        # webhook rejecting everything — that show up across many objects at once
+        # rather than as one broken Kustomization.
+        - alert: FluxReconcileErrors
+          expr: |
+            sum by (job, controller) (
+              rate(controller_runtime_reconcile_errors_total{job=~"(source|kustomize|helm|notification)-controller"}[15m])
+            ) > 0.1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Flux {{ $labels.controller }} is erroring on reconcile"
+            description: >-
+              The {{ $labels.controller }} controller has sustained a reconcile
+              error rate above 0.1/s for >30m. Individual object alerts may be
+              quiet if the failures are transient retries, but something systemic
+              is wrong.

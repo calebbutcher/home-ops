@@ -1,0 +1,50 @@
+---
+# Scrape the Flux controllers' own metrics.
+#
+# Flux was previously invisible to Prometheus. That matters more here than for a
+# typical workload: Flux is the thing that applies every other change in this
+# repo, and its only failure signal was the absence of Discord messages — which
+# is indistinguishable from "nothing changed today".
+#
+# All four controllers expose :8080/metrics under the port name `http-prom` and
+# carry the label `app.kubernetes.io/part-of: flux`, so one PodMonitor covers
+# source-, kustomize-, helm- and notification-controller.
+#
+# It lives here rather than in flux-system because that namespace is rendered
+# from the vendored gotk-components.yaml, which Flux manages itself. A PodMonitor
+# reaches across namespaces via namespaceSelector, and Prometheus picks it up
+# from anywhere (podMonitorSelectorNilUsesHelmValues: false).
+#
+# ⚠️ This gives controller *health* — reconcile duration, error counters, Go
+# runtime, workqueue depth. It does NOT give per-object readiness: Flux dropped
+# the `gotk_reconcile_condition` metric, so "is this Kustomization actually
+# Ready" comes from kube-state-metrics customResourceState instead (see the
+# kube-state-metrics block in helmrelease.yaml). The two are complementary and
+# prometheusrule-flux.yaml uses both.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: flux-controllers
+  namespace: monitoring
+spec:
+  # Pin the `job` label to the pod's `app` label, giving job="kustomize-controller",
+  # "helm-controller", "source-controller", "notification-controller".
+  #
+  # This is deliberate rather than cosmetic. ServiceMonitor and PodMonitor derive
+  # `job` differently — a ServiceMonitor defaults to the Service name (which is why
+  # every existing target here reads `alloy`, `cert-manager`, ...) while a
+  # PodMonitor defaults to "<namespace>/<name>". There are no other PodMonitors in
+  # this cluster to copy the convention from, so rather than write rules against a
+  # default nobody has observed, jobLabel fixes the value to something checked
+  # against the live pod labels. prometheusrule-flux.yaml matches on it.
+  jobLabel: app
+  namespaceSelector:
+    matchNames:
+      - flux-system
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: flux
+  podMetricsEndpoints:
+    - port: http-prom
+      path: /metrics
+      interval: 60s

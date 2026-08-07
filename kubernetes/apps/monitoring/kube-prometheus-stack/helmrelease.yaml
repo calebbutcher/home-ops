@@ -332,6 +332,209 @@ spec:
           memory: 256Mi
           cpu: 200m
 
+      # Permissions for the CRDs read by customResourceState below. Without these
+      # the collector silently produces no series for those kinds — it logs a
+      # forbidden error and carries on, so the failure looks exactly like "nothing
+      # is wrong".
+      rbac:
+        extraRules:
+          - apiGroups: ["postgresql.cnpg.io"]
+            resources: ["clusters"]
+            verbs: ["list", "watch"]
+          - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+            resources: ["kustomizations"]
+            verbs: ["list", "watch"]
+          - apiGroups: ["helm.toolkit.fluxcd.io"]
+            resources: ["helmreleases"]
+            verbs: ["list", "watch"]
+          - apiGroups: ["source.toolkit.fluxcd.io"]
+            resources:
+              ["gitrepositories", "helmrepositories", "helmcharts", "ocirepositories"]
+            verbs: ["list", "watch"]
+
+      # Turn CR status fields into metrics. This exists because two critical
+      # subsystems have no usable native readiness metric:
+      #
+      #   * Flux dropped `gotk_reconcile_condition`. Its controllers export only
+      #     `gotk_reconcile_duration_*` and `controller_runtime_reconcile_errors_total`,
+      #     which say how long reconciles took but never whether a given
+      #     Kustomization or HelmRelease is actually Ready. A HelmRelease can sit
+      #     failed indefinitely while the controller looks perfectly healthy.
+      #   * CNPG exposes plenty of per-instance metrics (see the PodMonitors
+      #     enabled on each Cluster CR) but nothing cluster-level — no
+      #     "readyInstances < instances", and no backup-succeeded condition.
+      #
+      # ⚠️ Two behaviours of this collector to keep in mind when writing rules:
+      #   1. kube-state-metrics automatically adds `customresource_group`,
+      #      `customresource_kind` and `customresource_version` labels to every
+      #      series here. That is what lets one `gotk_resource_condition` metric
+      #      cover Kustomizations, HelmReleases and sources at once — filter on
+      #      customresource_kind.
+      #   2. Gauge `valueFrom` runs through kube-state-metrics' string coercion:
+      #      "True"/"False" become 1/0, and an RFC3339 timestamp becomes Unix
+      #      seconds. Both behaviours are load-bearing below.
+      #
+      # Deliberately NOT included: `lastAppliedRevision` as a label. Flux's own
+      # example config carries it, but it changes on every commit, so every
+      # Renovate merge would churn the series and reset any `for:` timer mid-alert.
+      customResourceState:
+        enabled: true
+        config:
+          spec:
+            resources:
+              # --- CNPG -----------------------------------------------------
+              - groupVersionKind:
+                  group: postgresql.cnpg.io
+                  version: v1
+                  kind: Cluster
+                metricNamePrefix: cnpg_cluster
+                labelsFromPath:
+                  name: [metadata, name]
+                  namespace: [metadata, namespace]
+                metrics:
+                  # The condition set that matters: Ready, ContinuousArchiving,
+                  # LastBackupSucceeded. `LastBackupSucceeded` is the ONLY signal
+                  # for a failed backup on the plugin (CNPG-I) path — a
+                  # ScheduledBackup has no retry, so a failed run just waits for
+                  # the next cron slot with nothing else to show for it.
+                  - name: condition
+                    help: "CNPG Cluster status condition, 1 when True and 0 when False."
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, conditions]
+                        labelsFromPath:
+                          type: [type]
+                        valueFrom: [status]
+                  - name: instances_desired
+                    help: "Instances requested in the Cluster spec."
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [spec, instances]
+                  - name: instances
+                    help: "Instances the operator currently observes."
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, instances]
+                  - name: ready_instances
+                    help: "Instances currently Ready."
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, readyInstances]
+
+              # --- Flux -----------------------------------------------------
+              # One block per kind because groupVersionKind takes a single kind,
+              # but they all share the `gotk` prefix and the automatic
+              # customresource_kind label keeps them distinguishable.
+              - groupVersionKind:
+                  group: kustomize.toolkit.fluxcd.io
+                  version: v1
+                  kind: Kustomization
+                metricNamePrefix: gotk_resource
+                labelsFromPath:
+                  name: [metadata, name]
+                  namespace: [metadata, namespace]
+                metrics:
+                  - name: condition
+                    help: "Flux Kustomization condition, 1 when True and 0 when False."
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, conditions]
+                        labelsFromPath:
+                          type: [type]
+                        valueFrom: [status]
+                  # ⚠️ SPARSE BY DESIGN — verified against all 44 live Flux
+                  # objects, none of which carry spec.suspend at all. Flux only
+                  # materialises the field when something is actually suspended,
+                  # and kube-state-metrics emits nothing for a path that does not
+                  # resolve (nilIsZero only covers an explicit null, not a missing
+                  # key). So this series exists ONLY while suspended, with value 1.
+                  # Alert on `== 1`; a rule written as `== 0` would never fire.
+                  - name: suspended
+                    help: "Present with value 1 only while reconciliation is suspended."
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [spec, suspend]
+
+              - groupVersionKind:
+                  group: helm.toolkit.fluxcd.io
+                  version: v2
+                  kind: HelmRelease
+                metricNamePrefix: gotk_resource
+                labelsFromPath:
+                  name: [metadata, name]
+                  namespace: [metadata, namespace]
+                metrics:
+                  - name: condition
+                    help: "Flux HelmRelease condition, 1 when True and 0 when False."
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, conditions]
+                        labelsFromPath:
+                          type: [type]
+                        valueFrom: [status]
+                  # ⚠️ SPARSE BY DESIGN — verified against all 44 live Flux
+                  # objects, none of which carry spec.suspend at all. Flux only
+                  # materialises the field when something is actually suspended,
+                  # and kube-state-metrics emits nothing for a path that does not
+                  # resolve (nilIsZero only covers an explicit null, not a missing
+                  # key). So this series exists ONLY while suspended, with value 1.
+                  # Alert on `== 1`; a rule written as `== 0` would never fire.
+                  - name: suspended
+                    help: "Present with value 1 only while reconciliation is suspended."
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [spec, suspend]
+
+              # Sources are the upstream half: if a GitRepository or
+              # HelmRepository stops fetching, every Kustomization and
+              # HelmRelease downstream of it quietly serves stale desired state
+              # rather than failing.
+              - groupVersionKind:
+                  group: source.toolkit.fluxcd.io
+                  version: v1
+                  kind: GitRepository
+                metricNamePrefix: gotk_resource
+                labelsFromPath:
+                  name: [metadata, name]
+                  namespace: [metadata, namespace]
+                metrics:
+                  - name: condition
+                    help: "Flux GitRepository condition, 1 when True and 0 when False."
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, conditions]
+                        labelsFromPath:
+                          type: [type]
+                        valueFrom: [status]
+
+              - groupVersionKind:
+                  group: source.toolkit.fluxcd.io
+                  version: v1
+                  kind: HelmRepository
+                metricNamePrefix: gotk_resource
+                labelsFromPath:
+                  name: [metadata, name]
+                  namespace: [metadata, namespace]
+                metrics:
+                  - name: condition
+                    help: "Flux HelmRepository condition, 1 when True and 0 when False."
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, conditions]
+                        labelsFromPath:
+                          type: [type]
+                        valueFrom: [status]
+
     # -------------------------------------------------------------------------
     # Kubelet and CoreDNS — DO work in k3s
     # -------------------------------------------------------------------------

@@ -1,0 +1,246 @@
+---
+# Alerts for the seven CloudNativePG clusters (authentik, gitea, immich, media/
+# tracearr, n8n, paperless, tandoor). Until these existed Postgres was entirely
+# unmonitored — no PodMonitor on any Cluster CR — so replication lag, a replica
+# that never rejoined, WAL archiving backing up, and failed nightly backups to
+# RustFS were all invisible.
+#
+# That gap was not theoretical. On 2026-08-07 the tracearr cluster spent three
+# hours in an OOM-kill / failover loop (45 container restarts, primary flipping
+# every few minutes) and nothing fired, because the only external check was an
+# HTTP probe of the app, which kept returning 200 the whole time.
+#
+# Two independent sources feed these rules, and it matters which is which:
+#
+#   1. PER-INSTANCE metrics from the CNPG exporter on :9187, via the PodMonitor
+#      enabled by `monitoring.enablePodMonitor` on each Cluster CR. These are
+#      cnpg_collector_* / cnpg_pg_* / cnpg_backends_*. Every instance reports
+#      independently, so rules aggregate rather than assume one series.
+#   2. CLUSTER-LEVEL status conditions from kube-state-metrics customResourceState
+#      (cnpg_cluster_*, configured in helmrelease.yaml). CNPG publishes NO
+#      cluster-level metric of its own — `readyInstances < instances` and the
+#      backup-succeeded condition exist only on the Cluster CR's status.
+#
+# ⚠️ Backup coverage note. `LastBackupSucceeded` catches a backup that RAN and
+# FAILED. It does not catch a backup that never ran at all (ScheduledBackup
+# deleted or suspended, operator not creating Backup CRs) — the condition simply
+# keeps reporting the last outcome. Time-since-last-successful-backup alerting
+# lands with the other backup tiers in prometheusrule-backups.yaml, which is
+# where the barman_cloud_cloudnative_pg_io_last_available_backup_timestamp series
+# gets its cluster-label plumbing.
+#
+# ⚠️ `spec.monitoring.enablePodMonitor` is marked Deprecated in the CNPG CRD
+# ("will be removed in an upcoming release"). When that lands, these rules go
+# silent unless a hand-written PodMonitor replaces it. The absent() guard below
+# is what turns that from silence into an alert.
+#
+# No `release:` label needed — ruleSelectorNilUsesHelmValues: false — and the
+# `severity` labels route via the catch-all Discord AlertmanagerConfig.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: postgres
+  namespace: monitoring
+spec:
+  groups:
+    - name: cnpg-cluster.rules
+      rules:
+        # The guard for source 2. Without it, every cluster-level rule silently
+        # evaluates to "nothing wrong" if the customResourceState collector loses
+        # its RBAC or the CRD group changes.
+        - alert: CNPGClusterMetricsMissing
+          expr: absent(cnpg_cluster_condition)
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "CNPG cluster status is not being collected — Postgres health is unmonitored"
+            description: >-
+              No cnpg_cluster_condition series for >15m. kube-state-metrics has
+              stopped reading the CNPG Cluster CRs (RBAC, CRD version, or the
+              customResourceState config). Cluster-readiness and backup alerts are
+              all inert while this is firing.
+
+        # The guard for source 1.
+        - alert: CNPGInstanceMetricsMissing
+          expr: absent(cnpg_collector_up)
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "CNPG instance metrics are missing — replication and WAL health are unmonitored"
+            description: >-
+              No cnpg_collector_up series for >15m. Either every Postgres instance
+              is down or the PodMonitors are gone — note that
+              spec.monitoring.enablePodMonitor is deprecated upstream and a CNPG
+              upgrade may have removed it.
+
+        - alert: CNPGClusterNotReady
+          expr: cnpg_cluster_condition{type="Ready"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Postgres cluster {{ $labels.namespace }}/{{ $labels.name }} is not Ready"
+            description: >-
+              The CNPG operator reports {{ $labels.namespace }}/{{ $labels.name }}
+              as not Ready for >5m. The application backed by it is very likely
+              failing writes. Check
+              `kubectl -n {{ $labels.namespace }} describe cluster {{ $labels.name }}`.
+
+        # Redundancy loss, distinct from the cluster being down. Fires while the
+        # app is still perfectly happy on the surviving instances — which is the
+        # point, because that is the window in which it is cheap to fix.
+        - alert: CNPGClusterDegraded
+          expr: cnpg_cluster_ready_instances < cnpg_cluster_instances_desired
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres cluster {{ $labels.namespace }}/{{ $labels.name }} is running degraded"
+            description: >-
+              Only {{ $value }} of the requested instances are Ready in
+              {{ $labels.namespace }}/{{ $labels.name }} (>15m). The cluster is
+              serving but has lost redundancy; another instance failure could mean
+              downtime or data loss.
+
+        # Continuous archiving failing means point-in-time recovery is silently
+        # broken even while nightly base backups keep succeeding.
+        - alert: CNPGContinuousArchivingFailed
+          expr: cnpg_cluster_condition{type="ContinuousArchiving"} == 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "WAL archiving is failing for {{ $labels.namespace }}/{{ $labels.name }}"
+            description: >-
+              CNPG reports continuous archiving as failing for >15m. WAL is no
+              longer reaching s3://postgres-backups on RustFS, so point-in-time
+              recovery is broken and pg_wal will grow on the data volume until it
+              fills. This stays broken until the object store is reachable again.
+
+    - name: cnpg-backup.rules
+      rules:
+        # 6h, not minutes: backups are scheduled hourly-staggered between 02:00
+        # and 07:00 UTC, so a transient failure has a natural next attempt. What
+        # this catches is the state that persists past it — which is the norm,
+        # because a CNPG ScheduledBackup has NO retry. A failed run simply waits
+        # for the next cron slot, silently, for up to 24h.
+        - alert: CNPGBackupFailed
+          expr: cnpg_cluster_condition{type="LastBackupSucceeded"} == 0
+          for: 6h
+          labels:
+            severity: critical
+          annotations:
+            summary: "Last Postgres backup FAILED for {{ $labels.namespace }}/{{ $labels.name }}"
+            description: >-
+              The most recent backup of {{ $labels.namespace }}/{{ $labels.name }}
+              failed and has not been superseded by a successful one for >6h.
+              ScheduledBackup does not retry, so this will not fix itself before
+              the next nightly slot. Check `kubectl -n {{ $labels.namespace }} get
+              backup` and the barman sidecar logs, then force a run with
+              `kubectl -n {{ $labels.namespace }} create -f` a one-shot Backup CR.
+
+    - name: postgres-instance.rules
+      rules:
+        - alert: PostgresInstanceDown
+          expr: cnpg_collector_up == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Postgres instance {{ $labels.pod }} ({{ $labels.cluster }}) is down"
+            description: >-
+              The CNPG exporter on {{ $labels.pod }} reports the instance as down
+              for >5m. If this is the primary, CNPG should have failed over — if it
+              has not, check for a Pending pod or a stuck PVC attachment.
+
+        # Streaming replication falling behind. 5 minutes of lag on a homelab-sized
+        # database means something is genuinely wrong (network, a saturated
+        # replica, or a long-running query blocking replay), not just load.
+        - alert: PostgresReplicationLagHigh
+          expr: cnpg_pg_replication_lag > 300
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres replication lag on {{ $labels.pod }} is {{ $value | humanizeDuration }}"
+            description: >-
+              Replica {{ $labels.pod }} has been more than 5 minutes behind the
+              primary for >15m. A failover to this replica right now would lose
+              that much data.
+
+        # The WAL archive queue. `ready` counts segments written but not yet shipped
+        # to RustFS, so a rising number is the earliest sign the object store is
+        # unreachable — it shows up here well before ContinuousArchiving flips.
+        - alert: PostgresWALArchiveBacklog
+          expr: cnpg_collector_pg_wal_archive_status{value="ready"} > 20
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "WAL archive backlog on {{ $labels.pod }} ({{ $value }} segments waiting)"
+            description: >-
+              {{ $value }} WAL segments on {{ $labels.pod }} are waiting to be
+              archived to RustFS (>30m). Usually the S3 endpoint on the TrueNAS is
+              unreachable. pg_wal keeps growing until this drains.
+
+        - alert: PostgresConnectionsHigh
+          expr: |
+            sum by (namespace, pod) (cnpg_backends_total)
+              /
+            max by (namespace, pod) (cnpg_pg_settings_setting{name="max_connections"})
+              > 0.8
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres {{ $labels.pod }} is at {{ $value | humanizePercentage }} of max_connections"
+            description: >-
+              Connection usage on {{ $labels.pod }} has been above 80% of
+              max_connections for >15m. At 100% new connections are refused,
+              including the operator's own health checks, which can trigger a
+              spurious failover.
+
+        # Both of these mean CNPG has stopped managing the cluster automatically
+        # and is waiting for a human. Neither resolves on its own.
+        - alert: PostgresManualSwitchoverRequired
+          expr: cnpg_collector_manual_switchover_required == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres cluster {{ $labels.cluster }} needs a manual switchover"
+            description: >-
+              CNPG cannot complete an operation (usually a rolling update) without
+              a manual switchover. The cluster keeps serving but stays on the old
+              configuration until someone acts.
+
+        - alert: PostgresFencingEnabled
+          expr: cnpg_collector_fencing_on == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres instance {{ $labels.pod }} is fenced"
+            description: >-
+              Fencing has been on for >15m. Postgres is deliberately stopped on
+              this instance. If this was a manual intervention that someone forgot
+              to undo, the cluster is running with reduced redundancy.
+
+        # Transaction ID wraparound. At 2^31 the database refuses writes entirely
+        # and requires single-user-mode recovery; 1e9 is roughly half way and
+        # leaves weeks of headroom to fix a stuck autovacuum.
+        - alert: PostgresXIDWraparoundRisk
+          expr: cnpg_pg_database_xid_age > 1000000000
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Transaction ID age on {{ $labels.datname }} ({{ $labels.pod }}) is {{ $value }}"
+            description: >-
+              Database {{ $labels.datname }} is approaching transaction ID
+              wraparound. Autovacuum is almost certainly blocked — by a long-running
+              transaction, an idle-in-transaction session, or an orphaned
+              replication slot. Left alone the database will eventually refuse all
+              writes.
