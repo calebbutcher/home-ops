@@ -53,6 +53,8 @@ resources:
   - crowdsec/dashboard-details.yaml
   - crowdsec/dashboard-lapi.yaml
   - crowdsec/dashboard-appsec.yaml
+  - longhorn/dashboard-overview.yaml
+  - longhorn/dashboard-capacity.yaml
   - alloy/helmrelease.yaml
   - alloy/helmrelease-events.yaml
   - alloy/helmrelease-syslog.yaml

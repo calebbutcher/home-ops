@@ -53,7 +53,9 @@ spec:
       replicaReplenishmentWaitInterval: 300
     longhornUI:
       replicas: 1
-    # UI stays internal; expose via the existing Traefik ingress in a later PR.
+    # The UI is exposed by our own Ingress (ingress.yaml) rather than the chart's,
+    # so the Authentik forwardAuth annotation lives in git next to it. The UI has
+    # no auth of its own — see the warning in ingress.yaml.
     ingress:
       enabled: false
     # Scrape longhorn-manager's metrics (:9500 on the longhorn-backend Service).

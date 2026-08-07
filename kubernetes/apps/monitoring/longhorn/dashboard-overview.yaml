@@ -1,0 +1,488 @@
+---
+# Hand-authored Longhorn health + per-volume dashboard for this cluster (not a
+# grafana.com import — the published Longhorn dashboards get the metric shapes
+# below wrong). Auto-imported by the kube-prometheus-stack Grafana sidecar via
+# the grafana_dashboard label. Fed by the longhorn-manager ServiceMonitor
+# (job longhorn-backend, :9500) enabled in
+# kubernetes/infrastructure/controllers/longhorn/helmrelease.yaml.
+# Alerts live in kube-prometheus-stack/prometheusrule-longhorn.yaml and
+# prometheusrule-backups.yaml; capacity/backup trends are on "Longhorn / Capacity
+# & Backups" (uid longhorn-capacity), which reads Thanos for long-term history.
+#
+# Pinned to the `prometheus` datasource on purpose: every panel here is either a
+# "right now" question or 30s-resolution gauge data that Thanos downsampling
+# would smear. 6h << the 2d local retention, so nothing is lost.
+#
+# ⚠️ One-hot gauges, NOT numeric enums — same trap documented at length in
+# prometheusrule-longhorn.yaml. longhorn_volume_state, longhorn_volume_robustness,
+# longhorn_engine_state, longhorn_replica_state carry a `state` label and
+# longhorn_node_status / longhorn_disk_status carry `condition`:
+#   longhorn_volume_robustness{state="healthy"}  1
+#   longhorn_volume_robustness{state="degraded"} 0
+# so the predicate is always {state="degraded"} == 1, never == 2.
+#
+# ⚠️ Detached volumes report robustness "unknown". 14 of the 32 volumes here are
+# volsync-src-*-cache restic scratch volumes that are permanently detached, so the
+# "attached but robustness unknown" stat MUST be qualified with
+# `and on (volume) longhorn_volume_state{state="attached"} == 1` — unqualified it
+# reads 14 and is pure noise. Same reason `unknown` is coloured blue, not yellow,
+# on the robustness graph, and the $hidecache variable hides those 14 by default.
+#
+# ⚠️ longhorn_node_status has 8 conditions, of which kernelmodulesloaded and
+# multipathd are == 0 on all 6 nodes BY DESIGN (the v2 data engine is unused, and
+# multipathd is deliberately not running — it corrupts Longhorn volumes). An
+# unscoped conditions table shows 12 permanent red cells, so the query is scoped
+# to the six conditions that are actually meaningful. longhorn_disk_status needs
+# no such filter — it only has ready/schedulable.
+#
+# ⚠️ Replica counts use `longhorn_replica_state == 1` across ALL states, not
+# {state="running"}. Only 32 of the 46 replicas are running; the other 14 are
+# `stopped` replicas belonging to the detached cache volumes and they still
+# occupy disk. The `node` label here IS the replica's real host node (verified
+# 46/46 against replicas.longhorn.io spec.nodeID) — unlike the `node` on
+# longhorn_volume_*, which is the volume's owner/engine node.
+#
+# ⚠️ "Block %" in the inventory table is Longhorn BLOCK ALLOCATION INCLUDING
+# SNAPSHOT HISTORY — it is not filesystem fullness. Measured on media/sonarr-config:
+# 92.3% block allocation but only 24.7% filesystem used, because 7.49 GB of its
+# 7.92 GB is snapshots. Cluster-wide, snapshots are 28.4 GB of the 35.5 GB
+# allocated (80%). A high Block % next to a large Snapshots value means "lower
+# retain: on the daily-backup RecurringJob", NOT "grow the PVC" — which is why
+# the block-vs-filesystem panel sits directly under the table.
+#
+# ⚠️ The IO metrics are point-in-time gauges sampled from the engine, NOT
+# counters — rate() must never be applied to them. They exist only for the 18
+# attached volumes. Latency is nanoseconds (unit ns).
+#
+# ⚠️ longhorn_snapshot_actual_size_bytes can transiently carry both
+# user_created="true" and "false" for the same snapshot, so snapshot sums are
+# always wrapped in `max by (volume, snapshot) (...)` to avoid double counting.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: longhorn-overview-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  longhorn-overview.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "graphTooltip": 1,
+      "schemaVersion": 39,
+      "version": 1,
+      "id": null,
+      "uid": "longhorn-overview",
+      "title": "Longhorn / Overview",
+      "tags": ["longhorn", "storage"],
+      "time": { "from": "now-6h", "to": "now" },
+      "refresh": "30s",
+      "templating": {
+        "list": [
+          {
+            "name": "namespace",
+            "label": "Namespace",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "prometheus" },
+            "definition": "label_values(longhorn_volume_capacity_bytes, pvc_namespace)",
+            "query": { "query": "label_values(longhorn_volume_capacity_bytes, pvc_namespace)", "refId": "StandardVariableQuery" },
+            "current": { "text": "All", "value": "$__all", "selected": true },
+            "options": [], "includeAll": true, "allValue": ".*", "multi": true, "refresh": 2, "sort": 1, "hide": 0, "regex": ""
+          },
+          {
+            "name": "pvc",
+            "label": "PVC",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "prometheus" },
+            "definition": "label_values(longhorn_volume_capacity_bytes{pvc_namespace=~\"$namespace\"}, pvc)",
+            "query": { "query": "label_values(longhorn_volume_capacity_bytes{pvc_namespace=~\"$namespace\"}, pvc)", "refId": "StandardVariableQuery" },
+            "current": { "text": "All", "value": "$__all", "selected": true },
+            "options": [], "includeAll": true, "allValue": ".*", "multi": true, "refresh": 2, "sort": 1, "hide": 0, "regex": ""
+          },
+          {
+            "name": "hidecache",
+            "label": "VolSync caches",
+            "type": "custom",
+            "description": "14 of the 32 volumes are VolSync restic scratch caches — permanently detached, permanently robustness=unknown, never backed up by design. Hidden by default so the tables show real workloads.",
+            "query": "hide VolSync caches : volsync-src-.*-cache, show everything : __none__",
+            "current": { "text": "hide VolSync caches", "value": "volsync-src-.*-cache", "selected": true },
+            "options": [
+              { "selected": true, "text": "hide VolSync caches", "value": "volsync-src-.*-cache" },
+              { "selected": false, "text": "show everything", "value": "__none__" }
+            ],
+            "includeAll": false, "multi": false, "hide": 0
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "Attached volumes",
+          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "count(longhorn_volume_state{state=\"attached\"} == 1) or vector(0)" }
+          ]
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Detached volumes",
+          "description": "Normal, not a fault — these are the VolSync restic caches and idle app PVCs. Deliberately never coloured by a threshold.",
+          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "count(longhorn_volume_state{state=\"detached\"} == 1) or vector(0)" }
+          ]
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Degraded / faulted",
+          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }, "color": { "mode": "thresholds" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "count(longhorn_volume_robustness{state=~\"degraded|faulted\"} == 1) or vector(0)" }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Attached, robustness unknown",
+          "description": "The `and on (volume) state=\"attached\"` qualifier is mandatory — every detached volume reports robustness \"unknown\", so unqualified this reads 14 instead of 0.",
+          "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 } ] }, "color": { "mode": "thresholds" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "count((longhorn_volume_robustness{state=\"unknown\"} == 1) and on (volume) (longhorn_volume_state{state=\"attached\"} == 1)) or vector(0)" }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Replicas",
+          "description": "All states, not just running — the stopped replicas of detached volumes still occupy disk.",
+          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "purple" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "count(longhorn_replica_state == 1) or vector(0)" }
+          ]
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Longhorn nodes",
+          "description": "max(), not sum() — every one of the 6 managers reports this same total.",
+          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(longhorn_node_count_total) or vector(0)" }
+          ]
+        },
+        {
+          "id": 7,
+          "type": "table",
+          "title": "Node conditions",
+          "description": "Scoped to the six meaningful conditions. kernelmodulesloaded and multipathd are excluded because both are 0 on every node by design (v2 data engine unused; multipathd deliberately off) and would show 12 permanent red cells.",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "custom": { "align": "auto", "filterable": true } }, "overrides": [
+            { "matcher": { "id": "byName", "options": "Status" }, "properties": [
+              { "id": "mappings", "value": [ { "type": "value", "options": { "0": { "text": "FAIL", "color": "red", "index": 0 }, "1": { "text": "OK", "color": "green", "index": 1 } } } ] },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ] }
+          ] },
+          "options": { "showHeader": true, "sortBy": [ { "displayName": "Status", "desc": false } ] },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "longhorn_node_status{condition=~\"ready|schedulable|allowScheduling|mountpropagation|nfsclientinstalled|requiredpackages\"}", "instant": true, "range": false, "format": "table" }
+          ],
+          "transformations": [
+            { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "container": true, "endpoint": true, "instance": true, "job": true, "namespace": true, "pod": true, "service": true, "condition_reason": true }, "renameByName": { "node": "Node", "condition": "Condition", "Value": "Status" } } }
+          ]
+        },
+        {
+          "id": 8,
+          "type": "table",
+          "title": "Disk conditions",
+          "description": "No condition filter needed — longhorn_disk_status only reports ready and schedulable, both meaningful. schedulable flips to 0 when a disk crosses storageMinimalAvailablePercentage (15%).",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "custom": { "align": "auto", "filterable": true } }, "overrides": [
+            { "matcher": { "id": "byName", "options": "Status" }, "properties": [
+              { "id": "mappings", "value": [ { "type": "value", "options": { "0": { "text": "FAIL", "color": "red", "index": 0 }, "1": { "text": "OK", "color": "green", "index": 1 } } } ] },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ] }
+          ] },
+          "options": { "showHeader": true, "sortBy": [ { "displayName": "Status", "desc": false } ] },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "longhorn_disk_status", "instant": true, "range": false, "format": "table" }
+          ],
+          "transformations": [
+            { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "container": true, "endpoint": true, "instance": true, "job": true, "namespace": true, "pod": true, "service": true, "condition_reason": true }, "renameByName": { "node": "Node", "disk": "Disk", "condition": "Condition", "Value": "Status" } } }
+          ]
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "Volume state",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 25, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "count by (state) (longhorn_volume_state == 1)", "legendFormat": "{{state}}" }
+          ]
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "Volume robustness",
+          "description": "\"unknown\" is coloured blue rather than yellow: 14 of these are permanently detached VolSync caches and are entirely benign. Only degraded/faulted are faults.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 25, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [
+            { "matcher": { "id": "byName", "options": "healthy" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+            { "matcher": { "id": "byName", "options": "unknown" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
+            { "matcher": { "id": "byName", "options": "degraded" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] },
+            { "matcher": { "id": "byName", "options": "faulted" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+          ] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "count by (state) (longhorn_volume_robustness == 1)", "legendFormat": "{{state}}" }
+          ]
+        },
+        {
+          "id": 11,
+          "type": "timeseries",
+          "title": "Replicas per node",
+          "description": "The `node` label on longhorn_replica_state is the replica's real host (verified against replicas.longhorn.io spec.nodeID), unlike the `node` on longhorn_volume_*, which is the owner/engine node.",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 25, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "count by (node) (longhorn_replica_state == 1)", "legendFormat": "{{node}}" }
+          ]
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "Replica states",
+          "description": "The steady state is 32 running / 14 stopped. `error` or a spike in `starting` is a rebuild in flight.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 25, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [
+            { "matcher": { "id": "byName", "options": "running" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+            { "matcher": { "id": "byName", "options": "stopped" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
+            { "matcher": { "id": "byName", "options": "error" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+          ] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "count by (state) (longhorn_replica_state == 1)", "legendFormat": "{{state}}" }
+          ]
+        },
+        {
+          "id": 13,
+          "type": "timeseries",
+          "title": "Engine replica modes",
+          "description": "RW is healthy. An ERR appearing here is the leading indicator that precedes LonghornVolumeDegraded — replicas drop to ERR before the volume itself is marked degraded.",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 25, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [
+            { "matcher": { "id": "byName", "options": "RW" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+            { "matcher": { "id": "byName", "options": "ERR" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+          ] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "count by (mode) (longhorn_engine_replica_mode == 1)", "legendFormat": "{{mode}}" }
+          ]
+        },
+        {
+          "id": 14,
+          "type": "timeseries",
+          "title": "Longhorn control-plane memory",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 15, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(longhorn_instance_manager_memory_usage_bytes)", "legendFormat": "instance-managers" },
+            { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(longhorn_manager_memory_usage_bytes)", "legendFormat": "managers" }
+          ]
+        },
+        {
+          "id": 15,
+          "type": "table",
+          "title": "Volume inventory",
+          "description": "⚠️ \"Block %\" is Longhorn block allocation INCLUDING snapshot history, not filesystem fullness. media/sonarr-config reads 92% block but 25% filesystem because 7.49 GB of its 7.92 GB is snapshots. High Block % next to a large Snapshots value means lower `retain:` on the daily-backup RecurringJob, not a bigger PVC — see the block-vs-filesystem panel below. SC comes from kube_persistentvolumeclaim_info, so a longhorn-single volume showing 1 replica is intentional (CNPG members and VolSync caches replicate elsewhere or are disposable).",
+          "gridPos": { "h": 12, "w": 24, "x": 0, "y": 36 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "custom": { "align": "auto", "filterable": true } }, "overrides": [
+            { "matcher": { "id": "byName", "options": "Capacity" }, "properties": [ { "id": "unit", "value": "bytes" } ] },
+            { "matcher": { "id": "byName", "options": "Allocated" }, "properties": [ { "id": "unit", "value": "bytes" } ] },
+            { "matcher": { "id": "byName", "options": "Snapshots" }, "properties": [ { "id": "unit", "value": "bytes" } ] },
+            { "matcher": { "id": "byName", "options": "Replicas" }, "properties": [ { "id": "unit", "value": "short" } ] },
+            { "matcher": { "id": "byName", "options": "Block %" }, "properties": [
+              { "id": "unit", "value": "percentunit" },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 0.8 }, { "color": "red", "value": 0.9 } ] } }
+            ] },
+            { "matcher": { "id": "byName", "options": "Backup age" }, "properties": [
+              { "id": "unit", "value": "dtdurations" },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 129600 }, { "color": "red", "value": 172800 } ] } }
+            ] }
+          ] },
+          "options": { "showHeader": true, "sortBy": [ { "displayName": "Block %", "desc": true } ] },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "instant": true, "range": false, "format": "table", "expr": "max by (pvc_namespace, pvc, volume, storageclass) (longhorn_volume_capacity_bytes{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"} + on (volume) group_left (storageclass) (0 * label_replace(max by (volumename, storageclass) (kube_persistentvolumeclaim_info{storageclass=~\"longhorn.*\"}), \"volume\", \"$1\", \"volumename\", \"(.*)\")))" },
+            { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "instant": true, "range": false, "format": "table", "expr": "max by (pvc_namespace, pvc, volume) (longhorn_volume_actual_size_bytes{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"})" },
+            { "refId": "C", "datasource": { "type": "prometheus", "uid": "prometheus" }, "instant": true, "range": false, "format": "table", "expr": "max by (pvc_namespace, pvc, volume) (longhorn_volume_actual_size_bytes{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"} / longhorn_volume_capacity_bytes{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"})" },
+            { "refId": "D", "datasource": { "type": "prometheus", "uid": "prometheus" }, "instant": true, "range": false, "format": "table", "expr": "sum by (pvc_namespace, pvc, volume) (max by (volume, snapshot) (longhorn_snapshot_actual_size_bytes) + on (volume) group_left (pvc, pvc_namespace) (0 * longhorn_volume_capacity_bytes{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"}))" },
+            { "refId": "E", "datasource": { "type": "prometheus", "uid": "prometheus" }, "instant": true, "range": false, "format": "table", "expr": "count by (volume) (longhorn_replica_state == 1) + on (volume) group_left (pvc, pvc_namespace) (0 * longhorn_volume_capacity_bytes{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"})" },
+            { "refId": "F", "datasource": { "type": "prometheus", "uid": "prometheus" }, "instant": true, "range": false, "format": "table", "expr": "max by (pvc_namespace, pvc, volume) (time() - (longhorn_volume_last_backup_at{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"} > 0))" }
+          ],
+          "transformations": [
+            { "id": "merge", "options": {} },
+            { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "pvc_namespace": "Namespace", "pvc": "PVC", "volume": "Volume", "storageclass": "SC", "Value #A": "Capacity", "Value #B": "Allocated", "Value #C": "Block %", "Value #D": "Snapshots", "Value #E": "Replicas", "Value #F": "Backup age" } } }
+          ]
+        },
+        {
+          "id": 16,
+          "type": "timeseries",
+          "title": "Block allocation vs filesystem usage",
+          "description": "The panel that stops you growing a PVC that is actually a quarter full. Longhorn block allocation counts snapshot history; kubelet_volume_stats_* is what the application actually sees. A wide gap between the two lines for the same PVC means snapshots, not data. The filesystem series is constrained with `and on (pvc, pvc_namespace) longhorn_volume_capacity_bytes` so it covers only Longhorn-backed PVCs, not every PVC in the cluster; only ATTACHED volumes have a mounted filesystem, so detached ones show a block line with no filesystem counterpart.",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 48 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "custom": { "drawStyle": "line", "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last"], "sortBy": "Last", "sortDesc": true }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "longhorn_volume_actual_size_bytes{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"} / longhorn_volume_capacity_bytes{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"}", "legendFormat": "{{pvc_namespace}}/{{pvc}} block" },
+            { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "label_replace(label_replace(kubelet_volume_stats_used_bytes{namespace=~\"$namespace\", persistentvolumeclaim=~\"$pvc\", persistentvolumeclaim!~\"$hidecache\"} / kubelet_volume_stats_capacity_bytes, \"pvc\", \"$1\", \"persistentvolumeclaim\", \"(.*)\"), \"pvc_namespace\", \"$1\", \"namespace\", \"(.*)\") and on (pvc, pvc_namespace) longhorn_volume_capacity_bytes", "legendFormat": "{{pvc_namespace}}/{{pvc}} filesystem" }
+          ]
+        },
+        {
+          "id": 17,
+          "type": "timeseries",
+          "title": "Snapshot space per volume",
+          "description": "Snapshots are ~80% of Longhorn's total block allocation in this cluster (28.4 GB of 35.5 GB). Driven by the daily-backup RecurringJob's retain setting.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 48 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 25, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last"], "sortBy": "Last", "sortDesc": true }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (pvc_namespace, pvc) (max by (volume, snapshot) (longhorn_snapshot_actual_size_bytes) + on (volume) group_left (pvc, pvc_namespace) (0 * longhorn_volume_capacity_bytes{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"}))", "legendFormat": "{{pvc_namespace}}/{{pvc}}" }
+          ]
+        },
+        {
+          "id": 18,
+          "type": "timeseries",
+          "title": "Read IOPS",
+          "description": "⚠️ Point-in-time gauge sampled from the engine — never wrap in rate(). Only attached volumes report IO.",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 56 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "iops", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"], "sortBy": "Max", "sortDesc": true }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "longhorn_volume_read_iops{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"}", "legendFormat": "{{pvc_namespace}}/{{pvc}}" }
+          ]
+        },
+        {
+          "id": 19,
+          "type": "timeseries",
+          "title": "Write IOPS",
+          "description": "⚠️ Point-in-time gauge sampled from the engine — never wrap in rate(). Only attached volumes report IO.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 56 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "iops", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"], "sortBy": "Max", "sortDesc": true }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "longhorn_volume_write_iops{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"}", "legendFormat": "{{pvc_namespace}}/{{pvc}}" }
+          ]
+        },
+        {
+          "id": 20,
+          "type": "timeseries",
+          "title": "Read throughput",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 64 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "Bps", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"], "sortBy": "Max", "sortDesc": true }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "longhorn_volume_read_throughput{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"}", "legendFormat": "{{pvc_namespace}}/{{pvc}}" }
+          ]
+        },
+        {
+          "id": 21,
+          "type": "timeseries",
+          "title": "Write throughput",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 64 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "Bps", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"], "sortBy": "Max", "sortDesc": true }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "longhorn_volume_write_throughput{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"}", "legendFormat": "{{pvc_namespace}}/{{pvc}}" }
+          ]
+        },
+        {
+          "id": 22,
+          "type": "timeseries",
+          "title": "Read latency",
+          "description": "Nanoseconds, per the Longhorn metrics reference.",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 72 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "ns", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"], "sortBy": "Max", "sortDesc": true }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "longhorn_volume_read_latency{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"}", "legendFormat": "{{pvc_namespace}}/{{pvc}}" }
+          ]
+        },
+        {
+          "id": 23,
+          "type": "timeseries",
+          "title": "Write latency",
+          "description": "Nanoseconds, per the Longhorn metrics reference.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 72 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "ns", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"], "sortBy": "Max", "sortDesc": true }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "longhorn_volume_write_latency{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"}", "legendFormat": "{{pvc_namespace}}/{{pvc}}" }
+          ]
+        },
+        {
+          "id": 24,
+          "type": "table",
+          "title": "Replica placement",
+          "description": "Answers \"if I drain this node, which workloads lose a replica\" — tedious to get from the Longhorn UI. Includes stopped replicas (detached volumes), which still occupy disk on their host.",
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 80 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "custom": { "align": "auto", "filterable": true } }, "overrides": [
+            { "matcher": { "id": "byName", "options": "State" }, "properties": [
+              { "id": "mappings", "value": [ { "type": "value", "options": { "running": { "text": "running", "color": "green", "index": 0 }, "stopped": { "text": "stopped", "color": "blue", "index": 1 }, "starting": { "text": "starting", "color": "yellow", "index": 2 }, "stopping": { "text": "stopping", "color": "yellow", "index": 3 }, "error": { "text": "error", "color": "red", "index": 4 }, "unknown": { "text": "unknown", "color": "orange", "index": 5 } } } ] },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ] }
+          ] },
+          "options": { "showHeader": true, "sortBy": [ { "displayName": "PVC", "desc": false } ] },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "instant": true, "range": false, "format": "table", "expr": "(longhorn_replica_state == 1) + on (volume) group_left (pvc, pvc_namespace) (0 * longhorn_volume_capacity_bytes{pvc_namespace=~\"$namespace\", pvc=~\"$pvc\", pvc!~\"$hidecache\"})" }
+          ],
+          "transformations": [
+            { "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true, "container": true, "endpoint": true, "instance": true, "job": true, "namespace": true, "pod": true, "service": true, "data_engine": true }, "renameByName": { "pvc_namespace": "Namespace", "pvc": "PVC", "volume": "Volume", "replica": "Replica", "node": "Node", "state": "State" } } }
+          ]
+        }
+      ]
+    }
