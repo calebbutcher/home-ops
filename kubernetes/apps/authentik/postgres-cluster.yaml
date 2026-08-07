@@ -25,6 +25,14 @@ spec:
   storage:
     size: 10Gi
     storageClass: local-path
+  # Emits the per-instance metrics on :9187 and creates the PodMonitor that
+  # scrapes them. Until this was enabled the Postgres clusters were completely
+  # unmonitored: replication lag, WAL archive backlog, connection saturation and
+  # — via the barman-cloud plugin's own barman_cloud_cloudnative_pg_io_* series —
+  # backup success/failure timestamps were all invisible. Alerts live in
+  # kubernetes/apps/monitoring/kube-prometheus-stack/prometheusrule-postgres.yaml.
+  monitoring:
+    enablePodMonitor: true
   plugins:
     - name: barman-cloud.cloudnative-pg.io
       isWALArchiver: true

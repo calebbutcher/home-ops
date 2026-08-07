@@ -24,6 +24,9 @@ resources:
   - kube-prometheus-stack/prometheusrule-observability.yaml
   - kube-prometheus-stack/prometheusrule-longhorn.yaml
   - kube-prometheus-stack/prometheusrule-certificates.yaml
+  - kube-prometheus-stack/podmonitor-flux.yaml
+  - kube-prometheus-stack/prometheusrule-postgres.yaml
+  - kube-prometheus-stack/prometheusrule-flux.yaml
   - thanos/helmrelease.yaml
   - thanos/dashboard-overview.yaml
   - thanos/dashboard-store.yaml
