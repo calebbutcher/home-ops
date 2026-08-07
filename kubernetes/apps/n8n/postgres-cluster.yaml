@@ -27,6 +27,22 @@ spec:
   # kubernetes/apps/monitoring/kube-prometheus-stack/prometheusrule-postgres.yaml.
   monitoring:
     enablePodMonitor: true
+    # The barman-cloud plugin exports its backup timestamps
+    # (barman_cloud_cloudnative_pg_io_*) on this same :9187 endpoint, but with NO
+    # labels of their own — not even a cluster name. Without this relabeling the
+    # only way to tell one cluster's backup age from another's is the `namespace`
+    # or the `pod` name, which silently assumes one Postgres cluster per
+    # namespace. Copy the pod's cnpg.io/cluster label so the series identify
+    # themselves.
+    #
+    # ⚠️ Target label is `cnpg_cluster`, NOT `cluster`: the CNPG exporter already
+    # sets its own `cluster` label on cnpg_collector_up, and a relabeling that
+    # collides gets renamed to `exported_cluster`, quietly breaking any rule that
+    # matches on it.
+    podMonitorRelabelings:
+      - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+        targetLabel: cnpg_cluster
+        action: replace
   plugins:
     - name: barman-cloud.cloudnative-pg.io
       isWALArchiver: true

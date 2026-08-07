@@ -27,6 +27,7 @@ resources:
   - kube-prometheus-stack/podmonitor-flux.yaml
   - kube-prometheus-stack/prometheusrule-postgres.yaml
   - kube-prometheus-stack/prometheusrule-flux.yaml
+  - kube-prometheus-stack/prometheusrule-backups.yaml
   - thanos/helmrelease.yaml
   - thanos/dashboard-overview.yaml
   - thanos/dashboard-store.yaml

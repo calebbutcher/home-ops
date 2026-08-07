@@ -351,6 +351,9 @@ spec:
             resources:
               ["gitrepositories", "helmrepositories", "helmcharts", "ocirepositories"]
             verbs: ["list", "watch"]
+          - apiGroups: ["k3s.cattle.io"]
+            resources: ["etcdsnapshotfiles"]
+            verbs: ["list", "watch"]
 
       # Turn CR status fields into metrics. This exists because two critical
       # subsystems have no usable native readiness metric:
@@ -534,6 +537,60 @@ spec:
                         labelsFromPath:
                           type: [type]
                         valueFrom: [status]
+
+              # --- k3s etcd snapshots -----------------------------------------
+              # The etcd tier had NO in-cluster signal at all: snapshots are taken
+              # by k3s itself (every 12h) and shipped to s3://etcd-snapshots on
+              # RustFS, entirely outside Kubernetes' view. The audit assumed this
+              # would need a Pushgateway or a CronJob scraping the bucket — but
+              # k3s publishes an ETCDSnapshotFile CR per snapshot, which is a far
+              # better source: it is authoritative, already reconciled against the
+              # real files, and carries an explicit readyToUse.
+              #
+              # ⚠️ Cluster-scoped, so there is deliberately no `namespace` label.
+              #
+              # ⚠️ One series PER SNAPSHOT, so `name` must be a label — without it
+              # every snapshot on a node would collapse to the same label set and
+              # Prometheus would reject the duplicates. Cardinality is bounded by
+              # --etcd-snapshot-retention (14): ~56 series today, turning over
+              # roughly 12/day. That is cheap and the churn is expected.
+              #
+              # `bucket` distinguishes the two destinations: it resolves only for
+              # S3 snapshots, so {bucket=""} selects the node-local copies and
+              # {bucket!=""} selects the offsite ones. Both are alerted separately
+              # in prometheusrule-backups.yaml — a local snapshot that is never
+              # uploaded is exactly the failure worth catching, and it is invisible
+              # if you only ever look at "was a snapshot taken".
+              - groupVersionKind:
+                  group: k3s.cattle.io
+                  version: v1
+                  kind: ETCDSnapshotFile
+                metricNamePrefix: k3s_etcd_snapshot
+                labelsFromPath:
+                  name: [metadata, name]
+                  node: [spec, nodeName]
+                  bucket: [spec, s3, bucket]
+                metrics:
+                  # status.creationTime is RFC3339; kube-state-metrics coerces it
+                  # to Unix seconds, which is what makes a time() - max(...) age
+                  # comparison possible.
+                  - name: creation_timestamp
+                    help: "When the etcd snapshot was taken, Unix seconds."
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, creationTime]
+                  # Explicit readyToUse=false coerces to 0 and alerts. A snapshot
+                  # still being written has no readyToUse key at all and so emits
+                  # no series — deliberately not papered over with nilIsZero,
+                  # which only covers an explicit null (see the Flux `suspended`
+                  # note above).
+                  - name: ready
+                    help: "1 when the snapshot is usable for a restore."
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, readyToUse]
 
     # -------------------------------------------------------------------------
     # Kubelet and CoreDNS — DO work in k3s
