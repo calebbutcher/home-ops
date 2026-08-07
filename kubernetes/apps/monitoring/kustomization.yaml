@@ -12,6 +12,7 @@ resources:
   - thanos-objstore.sops.yaml
   - loki-s3.sops.yaml
   - discord-webhooks.sops.yaml
+  - alertmanager-heartbeat.sops.yaml
   - grafana-ingress.yaml
   - kube-prometheus-stack/helmrelease.yaml
   - kube-prometheus-stack/alertmanagerconfig.yaml
