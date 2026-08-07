@@ -1,16 +1,34 @@
 ---
-# Discord receiver for Alertmanager. Selected by the Prometheus Operator via
+# Alertmanager routing. Selected by the Prometheus Operator via
 # alertmanager.alertmanagerSpec.alertmanagerConfigSelector (matchLabels below) and
-# merged into the chart's default base config. The webhook URL is read straight
-# from the SOPS-managed discord-webhooks Secret (key alertmanager-url), so it
-# never appears in git. This replaces an inline `webhook_url_file` config, which
-# the operator's config validator rejects.
+# merged into the chart's default base config. Webhook/API URLs are read straight
+# from SOPS-managed Secrets, so they never appear in git. (An inline
+# `webhook_url_file` config is rejected by the operator's config validator.)
 #
-# The operator inserts this route ahead of the base Watchdog->null route with
-# continue: true, so a plain catch-all would also match Watchdog (the constantly
-# firing dead-man's switch). Exclude it explicitly here so only real alerts route
-# to Discord; the base config's Watchdog->null route still drops it. The chart
-# default also provides the stock inhibit_rules.
+# Two destinations:
+#
+#   discord    - every real alert. URL from the discord-webhooks Secret.
+#   heartbeat  - the Watchdog dead-man's switch ONLY. URL from the
+#                alertmanager-heartbeat Secret (a healthchecks.io ping URL).
+#
+# Why the heartbeat matters: Watchdog is the always-firing alert that certifies
+# the whole pipeline is alive. It used to be dropped — the operator inserts this
+# CR's route ahead of the chart's base `Watchdog -> null` route, and this config
+# simply excluded Watchdog so the base route swallowed it. That meant nothing
+# outside the cluster ever observed that Prometheus was still evaluating rules.
+# If Prometheus, Alertmanager, Discord, or the WAN died, the silence was
+# indistinguishable from "everything is fine". Now Watchdog pings healthchecks.io
+# every 5m; when the pings stop, healthchecks.io alerts out-of-band (email/push)
+# after its grace period — roughly 15m end to end with period 5m + grace 10m.
+#
+# Structure note: the parent route below deliberately has NO matchers so it acts
+# as the catch-all, with sub-routes peeling off Watchdog and InfoInhibitor first.
+# Sub-routes are evaluated in order and do not fall through to the parent
+# receiver, so a real alert only ever reaches Discord and Watchdog only ever
+# reaches the heartbeat. alertmanagerConfigMatcherStrategy.type: None keeps the
+# operator from injecting a namespace matcher, so this stays cluster-wide.
+#
+# The chart's base config still provides the stock inhibit_rules.
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig
 metadata:
@@ -21,17 +39,26 @@ metadata:
 spec:
   route:
     receiver: discord
-    matchers:
-      - name: alertname
-        value: Watchdog
-        matchType: "!="
-      - name: alertname
-        value: InfoInhibitor
-        matchType: "!="
     groupBy: ["alertname", "namespace"]
     groupWait: 30s
     groupInterval: 5m
     repeatInterval: 4h
+    routes:
+      # Dead-man's switch. Must come before anything else that could match.
+      # repeatInterval drives the ping cadence, so it must stay comfortably under
+      # the healthchecks.io check period (5m) + grace (10m).
+      - receiver: heartbeat
+        matchers:
+          - name: alertname
+            value: Watchdog
+        groupWait: 0s
+        groupInterval: 1m
+        repeatInterval: 5m
+      # InfoInhibitor is plumbing for the chart's inhibit_rules, never actionable.
+      - receiver: drop
+        matchers:
+          - name: alertname
+            value: InfoInhibitor
   receivers:
     - name: discord
       discordConfigs:
@@ -39,3 +66,16 @@ spec:
             name: discord-webhooks
             key: alertmanager-url
           sendResolved: true
+
+    - name: heartbeat
+      webhookConfigs:
+        - urlSecret:
+            name: alertmanager-heartbeat
+            key: url
+          # Deliberately false. Watchdog is not supposed to resolve, but if it
+          # ever did, a "resolved" POST would still register as a ping and keep
+          # the healthchecks.io check GREEN — masking the exact failure this
+          # route exists to detect.
+          sendResolved: false
+
+    - name: drop
