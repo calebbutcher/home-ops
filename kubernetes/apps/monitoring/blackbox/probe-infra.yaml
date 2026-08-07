@@ -1,0 +1,97 @@
+---
+# Infrastructure probes — the external dependencies the cluster cannot run without,
+# none of which had any monitored signal before this PR (audit finding #16).
+#
+# Three probers, chosen per target by what the target actually exposes rather than by
+# preference. Each Probe below documents why it is the shape it is.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: infra-tcp
+  namespace: monitoring
+spec:
+  jobName: blackbox-infra
+  interval: 60s
+  scrapeTimeout: 15s
+  module: tcp_connect
+  prober:
+    url: blackbox-exporter-prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        # RustFS on TrueNAS. EVERY backup tier lands here — etcd snapshots, VolSync
+        # restic, CNPG barman, MariaDB dumps, Longhorn backups, Loki and Thanos
+        # object storage (audit finding #24). When this endpoint went away on
+        # 2026-08-06 the first symptom was restic movers hanging for 8-13h; nothing
+        # alerted on the endpoint itself. This is that missing alert.
+        - 10.2.40.10:30292
+        # k3s API via the kube-vip VIP. Distinguishes "the VIP failed over / is
+        # unclaimed" from "a single control-plane node is down" — node-level alerts
+        # cannot tell those apart, and only the second one is survivable.
+        - 10.2.169.10:6443
+      labels:
+        probe_class: infra
+---
+# DNS resolution, checked by resolving a name we own rather than by connecting to
+# port 53. A resolver that is listening but answering NXDOMAIN for nerdbox.dev is the
+# failure that actually breaks the cluster, and a TCP check calls that healthy.
+# The module asserts a non-empty answer section for exactly this reason.
+#
+# 1.1.1.1 is included as a control: if the two internal resolvers fail and Cloudflare
+# succeeds, the problem is local DNS; if all three fail, it is upstream connectivity.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: infra-dns
+  namespace: monitoring
+spec:
+  jobName: blackbox-dns
+  interval: 60s
+  scrapeTimeout: 15s
+  module: dns_nerdbox
+  prober:
+    url: blackbox-exporter-prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - 10.1.30.250
+        - 10.1.30.251
+        - 1.1.1.1
+      labels:
+        probe_class: dns
+---
+# ICMP for hosts with nothing useful to connect to.
+#
+# ⚠️ pfSense (10.2.169.1) is here rather than in the TCP probe above because it
+# exposes NO TCP port to the pod network — 443, 80, 8443 and 22 were all swept and
+# all refuse. The tcp_connect probe originally planned for it would have alerted
+# permanently from the moment it merged.
+#
+# 1.1.1.1 and 8.8.8.8 give WAN reachability from two independent networks, which is
+# what separates "the ISP is down" from "one anycast provider is having a bad day"
+# from "our app is broken". Without it, every WAN-dependent failure looks like an app
+# failure.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: infra-icmp
+  namespace: monitoring
+spec:
+  jobName: blackbox-icmp
+  interval: 60s
+  scrapeTimeout: 15s
+  module: icmp
+  prober:
+    url: blackbox-exporter-prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - 10.2.169.1
+        - 10.2.40.10
+        - 1.1.1.1
+        - 8.8.8.8
+      labels:
+        probe_class: icmp

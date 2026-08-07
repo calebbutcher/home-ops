@@ -1,0 +1,343 @@
+---
+# Auto-provisioned Grafana dashboard. Imported by the kube-prometheus-stack Grafana
+# sidecar via the grafana_dashboard label.
+#
+# Hand-built rather than adapted from grafana.com: the community blackbox dashboards
+# all assume a single flat list of targets, and the distinction that matters here is
+# edge (through Traefik) vs app (direct to the Service). Those two rows answering
+# differently is the diagnostic — app down + edge up means the app broke behind
+# Authentik; edge down + app up means the ingress path broke. A flat target list
+# cannot show that.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blackbox-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  blackbox.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "type": "row",
+          "title": "Health summary",
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "collapsed": false,
+          "panels": []
+        },
+        {
+          "type": "stat",
+          "title": "Apps down",
+          "description": "Backing Services failing a direct probe. This is the count that matters — it bypasses Traefik and Authentik, so a non-zero value means an app itself is not answering.",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
+          "targets": [{"expr": "count(probe_success{job=\"blackbox-app\"} == 0) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "green", "value": null},
+                {"color": "red", "value": 1}
+              ]}
+            },
+            "overrides": []
+          },
+          "options": {"colorMode": "background", "graphMode": "none", "textMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"]}}
+        },
+        {
+          "type": "stat",
+          "title": "Ingress hosts down",
+          "description": "Hostnames failing through Traefik. If this is high while 'Apps down' is 0, suspect Traefik, MetalLB or TLS rather than any individual app.",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 4, "w": 4, "x": 4, "y": 1},
+          "targets": [{"expr": "count(probe_success{job=\"blackbox-edge\"} == 0) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "green", "value": null},
+                {"color": "orange", "value": 1},
+                {"color": "red", "value": 5}
+              ]}
+            },
+            "overrides": []
+          },
+          "options": {"colorMode": "background", "graphMode": "none", "textMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"]}}
+        },
+        {
+          "type": "stat",
+          "title": "WAN",
+          "description": "ICMP to 1.1.1.1 and 8.8.8.8. Both down means the link or the ISP, not a provider blip.",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 4, "w": 4, "x": 8, "y": 1},
+          "targets": [{"expr": "sum(probe_success{job=\"blackbox-icmp\", instance=~\"1\\\\.1\\\\.1\\\\.1|8\\\\.8\\\\.8\\\\.8\"})", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "mappings": [
+                {"type": "value", "options": {"0": {"text": "DOWN", "color": "red", "index": 0}}},
+                {"type": "value", "options": {"1": {"text": "DEGRADED", "color": "orange", "index": 1}}},
+                {"type": "value", "options": {"2": {"text": "UP", "color": "green", "index": 2}}}
+              ],
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "red", "value": null},
+                {"color": "orange", "value": 1},
+                {"color": "green", "value": 2}
+              ]}
+            },
+            "overrides": []
+          },
+          "options": {"colorMode": "background", "graphMode": "none", "textMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"]}}
+        },
+        {
+          "type": "stat",
+          "title": "Backup storage (RustFS)",
+          "description": "Every backup tier writes to 10.2.40.10:30292. Red here means backups are failing right now — 26h before the freshness alerts notice.",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 4, "w": 4, "x": 12, "y": 1},
+          "targets": [{"expr": "probe_success{job=\"blackbox-infra\", instance=\"10.2.40.10:30292\"}", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "mappings": [
+                {"type": "value", "options": {"0": {"text": "DOWN", "color": "red", "index": 0}}},
+                {"type": "value", "options": {"1": {"text": "UP", "color": "green", "index": 1}}}
+              ],
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]}
+            },
+            "overrides": []
+          },
+          "options": {"colorMode": "background", "graphMode": "none", "textMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"]}}
+        },
+        {
+          "type": "stat",
+          "title": "k3s API VIP",
+          "description": "kube-vip at 10.2.169.10:6443. Distinct from a single control-plane node being down.",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 4, "w": 4, "x": 16, "y": 1},
+          "targets": [{"expr": "probe_success{job=\"blackbox-infra\", instance=\"10.2.169.10:6443\"}", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "mappings": [
+                {"type": "value", "options": {"0": {"text": "DOWN", "color": "red", "index": 0}}},
+                {"type": "value", "options": {"1": {"text": "UP", "color": "green", "index": 1}}}
+              ],
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]}
+            },
+            "overrides": []
+          },
+          "options": {"colorMode": "background", "graphMode": "none", "textMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"]}}
+        },
+        {
+          "type": "stat",
+          "title": "Internal DNS",
+          "description": "Resolvers answering for nerdbox.dev. Counts a resolver that returns NXDOMAIN for our own zone as failed.",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 4, "w": 4, "x": 20, "y": 1},
+          "targets": [{"expr": "sum(probe_success{job=\"blackbox-dns\", instance=~\"10\\\\.1\\\\.30\\\\..*\"})", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "mappings": [
+                {"type": "value", "options": {"0": {"text": "BOTH DOWN", "color": "red", "index": 0}}},
+                {"type": "value", "options": {"1": {"text": "DEGRADED", "color": "orange", "index": 1}}},
+                {"type": "value", "options": {"2": {"text": "UP", "color": "green", "index": 2}}}
+              ],
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "red", "value": null},
+                {"color": "orange", "value": 1},
+                {"color": "green", "value": 2}
+              ]}
+            },
+            "overrides": []
+          },
+          "options": {"colorMode": "background", "graphMode": "none", "textMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"]}}
+        },
+        {
+          "type": "row",
+          "title": "Applications (direct to Service — the real app health signal)",
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+          "collapsed": false,
+          "panels": []
+        },
+        {
+          "type": "state-timeline",
+          "title": "App availability",
+          "description": "Direct ClusterIP probes. For the 15 apps that export no metrics at all, this is the only availability history that exists.",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 10, "w": 14, "x": 0, "y": 6},
+          "targets": [{"expr": "probe_success{job=\"blackbox-app\"}", "legendFormat": "{{instance}}", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {"lineWidth": 0, "fillOpacity": 80},
+              "mappings": [
+                {"type": "value", "options": {"0": {"text": "DOWN", "color": "red", "index": 0}}},
+                {"type": "value", "options": {"1": {"text": "UP", "color": "green", "index": 1}}}
+              ],
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]}
+            },
+            "overrides": []
+          },
+          "options": {"showValue": "never", "mergeValues": true, "legend": {"showLegend": false}}
+        },
+        {
+          "type": "timeseries",
+          "title": "App response time",
+          "description": "AppResponseSlow fires above 5s sustained; the module times out at 10s.",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 10, "w": 10, "x": 14, "y": 6},
+          "targets": [{"expr": "probe_duration_seconds{job=\"blackbox-app\"}", "legendFormat": "{{instance}}", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {"lineWidth": 1, "fillOpacity": 5, "showPoints": "never"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "green", "value": null},
+                {"color": "orange", "value": 5}
+              ]}
+            },
+            "overrides": []
+          },
+          "options": {"legend": {"showLegend": true, "displayMode": "list", "placement": "right"}, "tooltip": {"mode": "multi", "sort": "desc"}}
+        },
+        {
+          "type": "row",
+          "title": "Ingress edge and certificates",
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 16},
+          "collapsed": false,
+          "panels": []
+        },
+        {
+          "type": "state-timeline",
+          "title": "Ingress host availability",
+          "description": "Through Traefik. Note these stay green for forwardAuth-protected routes even if the backend is dead — Authentik answers the redirect itself. Cross-reference the app panel above.",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 12, "w": 14, "x": 0, "y": 17},
+          "targets": [{"expr": "probe_success{job=\"blackbox-edge\"}", "legendFormat": "{{instance}}", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {"lineWidth": 0, "fillOpacity": 80},
+              "mappings": [
+                {"type": "value", "options": {"0": {"text": "DOWN", "color": "red", "index": 0}}},
+                {"type": "value", "options": {"1": {"text": "UP", "color": "green", "index": 1}}}
+              ],
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]}
+            },
+            "overrides": []
+          },
+          "options": {"showValue": "never", "mergeValues": true, "legend": {"showLegend": false}}
+        },
+        {
+          "type": "table",
+          "title": "Days until served certificate expires",
+          "description": "The cert Traefik is ACTUALLY SERVING, which is a different fact from what cert-manager believes it issued. Alerts at 14d (below cert-manager's 21d) so this firing alone means the served cert has diverged from the issued one.",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 12, "w": 10, "x": 14, "y": 17},
+          "targets": [{"expr": "sort((probe_ssl_earliest_cert_expiry{job=\"blackbox-edge\"} - time()) / 86400)", "format": "table", "instant": true, "refId": "A"}],
+          "transformations": [
+            {"id": "organize", "options": {
+              "excludeByName": {"Time": true, "job": true, "__name__": true, "namespace": true, "probe_class": true, "service": true, "container": true, "endpoint": true, "pod": true},
+              "renameByName": {"instance": "Host", "Value": "Days left"}
+            }}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "d",
+              "decimals": 1,
+              "custom": {"align": "left"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "red", "value": null},
+                {"color": "orange", "value": 3},
+                {"color": "yellow", "value": 14},
+                {"color": "green", "value": 21}
+              ]}
+            },
+            "overrides": [
+              {"matcher": {"id": "byName", "options": "Days left"},
+               "properties": [{"id": "custom.cellOptions", "value": {"type": "color-background"}}]}
+            ]
+          },
+          "options": {"showHeader": true, "sortBy": [{"displayName": "Days left", "desc": false}]}
+        },
+        {
+          "type": "row",
+          "title": "Infrastructure and external dependencies",
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 29},
+          "collapsed": false,
+          "panels": []
+        },
+        {
+          "type": "state-timeline",
+          "title": "Infrastructure reachability",
+          "description": "TCP, ICMP and DNS probes for the dependencies the cluster cannot run without. None of these had any monitored signal before this dashboard.",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 9, "w": 14, "x": 0, "y": 30},
+          "targets": [{"expr": "probe_success{job=~\"blackbox-(infra|icmp|dns|external)\"}", "legendFormat": "{{job}} {{instance}}", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {"lineWidth": 0, "fillOpacity": 80},
+              "mappings": [
+                {"type": "value", "options": {"0": {"text": "DOWN", "color": "red", "index": 0}}},
+                {"type": "value", "options": {"1": {"text": "UP", "color": "green", "index": 1}}}
+              ],
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]}
+            },
+            "overrides": []
+          },
+          "options": {"showValue": "never", "mergeValues": true, "legend": {"showLegend": false}}
+        },
+        {
+          "type": "timeseries",
+          "title": "Network latency (ICMP RTT / DNS lookup)",
+          "description": "Rising RTT to the gateway or NAS often precedes an outright failure — the TrueNAS NIC wedge presented this way.",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 9, "w": 10, "x": 14, "y": 30},
+          "targets": [
+            {"expr": "probe_icmp_duration_seconds{phase=\"rtt\"}", "legendFormat": "icmp {{instance}}", "refId": "A"},
+            {"expr": "probe_duration_seconds{job=\"blackbox-dns\"}", "legendFormat": "dns {{instance}}", "refId": "B"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {"lineWidth": 1, "fillOpacity": 5, "showPoints": "never"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}
+            },
+            "overrides": []
+          },
+          "options": {"legend": {"showLegend": true, "displayMode": "list", "placement": "right"}, "tooltip": {"mode": "multi", "sort": "desc"}}
+        }
+      ],
+      "refresh": "1m",
+      "schemaVersion": 39,
+      "tags": ["blackbox", "availability", "home-ops"],
+      "templating": {"list": []},
+      "time": {"from": "now-6h", "to": "now"},
+      "timezone": "browser",
+      "title": "Blackbox / Synthetic Probes",
+      "uid": "blackbox-probes",
+      "version": 1
+    }

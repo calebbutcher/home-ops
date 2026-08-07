@@ -1,0 +1,296 @@
+---
+# Alerts on the blackbox synthetic probes (see kubernetes/apps/monitoring/blackbox/).
+#
+# These are the first availability alerts for the 15 apps that export no metrics, and
+# the first alerts of any kind for the external dependencies in probe-infra.yaml.
+#
+# ⚠️ Rules select on `job`, not on the `probe_class` label. Both exist, but `job` is
+# set explicitly via each Probe's spec.jobName and is guaranteed by the operator,
+# whereas probe_class rides on staticConfig.labels and is kept for dashboard grouping.
+# Alerting on the value we control outright avoids a silent no-match.
+#
+# EDGE vs APP — the two classes answer different questions and are alerted separately
+# on purpose:
+#   * blackbox-edge  → hostname through Traefik. Proves DNS/MetalLB/Traefik/TLS.
+#                      For forwardAuth routes it never reaches the backend.
+#   * blackbox-app   → Service over ClusterIP. Proves the app itself answers.
+# App failing while edge succeeds is the normal shape of an app outage behind
+# Authentik. Edge failing while app succeeds means the problem is in the ingress path,
+# not the app. That distinction is the whole reason both exist.
+#
+# No `release:` label needed — ruleSelectorNilUsesHelmValues: false — and the
+# `severity` labels route via the catch-all Discord AlertmanagerConfig.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: blackbox-probes
+  namespace: monitoring
+spec:
+  groups:
+    - name: blackbox-exporter.rules
+      rules:
+        # The guard. Every rule in this file is inert without probe_success, and an
+        # exporter that has stopped probing looks exactly like a cluster where
+        # everything is healthy.
+        - alert: BlackboxProbesMissing
+          expr: absent(probe_success)
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Blackbox probes are not running — synthetic monitoring is blind"
+            description: >-
+              No probe_success series for >15m. The blackbox exporter is down or the
+              Probe CRs stopped being discovered. Every availability alert for the 15
+              apps with no metrics of their own is inert while this is firing.
+
+        # Distinguishes "the exporter died" from "the probes are failing". Without
+        # this the two are indistinguishable, and they have completely different fixes.
+        #
+        # ⚠️ Regex, not an exact match, because the resulting job name is not obvious:
+        # the chart hardcodes `jobLabel: "blackbox-exporter"` on its self-monitor
+        # ServiceMonitor, which names a SERVICE LABEL to copy into `job`. No such label
+        # exists on the Service, so the operator falls back to the Service name —
+        # `blackbox-exporter-prometheus-blackbox-exporter`. Matching the prefix survives
+        # that quirk being fixed upstream either way. The probe jobs (blackbox-edge,
+        # blackbox-app, …) do not share this prefix, so they are not caught here.
+        - alert: BlackboxExporterDown
+          expr: |
+            up{job=~"blackbox-exporter.*"} == 0
+          for: 10m
+          labels:
+            severity: warning
+
+          annotations:
+            summary: "Blackbox exporter is down"
+            description: >-
+              The blackbox exporter has been unreachable for >10m. Probe results are
+              stale or absent; treat any probe alert firing alongside this as
+              unreliable.
+
+    - name: blackbox-app.rules
+      rules:
+        # The headline alert of this PR. For most of these apps this is the ONLY
+        # signal that the process is actually serving — a Ready replica proves the
+        # container is running, not that it answers HTTP.
+        - alert: AppNotResponding
+          expr: probe_success{job="blackbox-app"} == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "App at {{ $labels.instance }} is not responding"
+            description: >-
+              Direct probe of {{ $labels.instance }} has failed for >10m. This probe
+              bypasses Traefik and Authentik and talks to the Service, so the app
+              itself is not answering — the pod may be Ready while deadlocked, out of
+              its database, or serving errors. Check
+              `kubectl get pods` and the app's logs in Loki.
+
+        # A slow app is a failing app that has not finished failing yet. Threshold is
+        # deliberately loose (5s against a 10s module timeout) so this catches genuine
+        # degradation rather than ordinary variance.
+        - alert: AppResponseSlow
+          expr: probe_duration_seconds{job="blackbox-app"} > 5
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "App at {{ $labels.instance }} is responding slowly ({{ $value | humanizeDuration }})"
+            description: >-
+              {{ $labels.instance }} has taken over 5s to respond for >15m. Probes time
+              out at 10s, so this is the early warning before AppNotResponding fires.
+
+    - name: blackbox-edge.rules
+      rules:
+        - alert: IngressHostNotResponding
+          expr: probe_success{job="blackbox-edge"} == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Ingress host {{ $labels.instance }} is not responding"
+            description: >-
+              {{ $labels.instance }} has failed its edge probe for >10m — DNS, MetalLB,
+              Traefik routing, the CrowdSec bouncer or TLS. If AppNotResponding is
+              quiet for the same app, the fault is in the ingress path rather than the
+              app. If many hosts fail at once, suspect Traefik or the MetalLB VIP
+              rather than any individual route.
+
+        # ⚠️ Complements, and does NOT duplicate, CertificateExpiringSoon in
+        # prometheusrule-certificates.yaml. That alert reads cert-manager's view of the
+        # Certificate object; this one reads the certificate Traefik is ACTUALLY
+        # SERVING. The gap between them is real: if cert-manager renews successfully
+        # but Traefik keeps serving the old cert from its store, cert-manager's alert
+        # stays silent while the served cert ages out and browsers start failing.
+        # 14d sits below cert-manager's 21d so that in the ordinary
+        # renewal-is-broken case cert-manager fires first and this stays quiet — if
+        # THIS one fires alone, the served cert has diverged from the issued one.
+        - alert: ServedCertificateExpiringSoon
+          expr: |
+            (probe_ssl_earliest_cert_expiry{job="blackbox-edge"} - time()) < (14 * 24 * 3600)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate served for {{ $labels.instance }} expires in {{ $value | humanizeDuration }}"
+            description: >-
+              The certificate Traefik is serving for {{ $labels.instance }} expires in
+              under 14 days. If cert-manager reports this Certificate as Ready, the
+              renewed cert has NOT reached Traefik and browsers will start failing on
+              expiry regardless of what cert-manager believes.
+
+        - alert: ServedCertificateExpiringCritical
+          expr: |
+            (probe_ssl_earliest_cert_expiry{job="blackbox-edge"} - time()) < (3 * 24 * 3600)
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "Certificate served for {{ $labels.instance }} expires in {{ $value | humanizeDuration }}"
+            description: >-
+              Under 3 days remaining on the certificate Traefik serves for
+              {{ $labels.instance }}. Browsers will hard-fail on expiry. Check the
+              Certificate resource and restart Traefik if cert-manager shows it as
+              renewed.
+
+    - name: blackbox-infra.rules
+      rules:
+        # RustFS. Every backup tier in the cluster writes here (etcd snapshots,
+        # VolSync restic, CNPG barman, MariaDB dumps, Longhorn, Loki, Thanos). On
+        # 2026-08-06 this endpoint went away and the only symptom was restic movers
+        # hanging for 8-13h — no alert named the actual cause. 5m because backups are
+        # not latency-sensitive but a sustained outage silently breaks every tier.
+        - alert: BackupStorageUnreachable
+          expr: |
+            probe_success{job="blackbox-infra", instance="10.2.40.10:30292"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "RustFS backup endpoint 10.2.40.10:30292 is unreachable"
+            description: >-
+              TCP connect to the RustFS S3 endpoint has failed for >5m. EVERY backup
+              tier depends on this one address — etcd snapshots, VolSync, CNPG barman,
+              MariaDB dumps, Longhorn, Loki and Thanos. Backups are failing or hanging
+              right now, and the freshness alerts will not fire for another 26h.
+
+        - alert: KubernetesAPIVIPUnreachable
+          expr: |
+            probe_success{job="blackbox-infra", instance="10.2.169.10:6443"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "k3s API VIP 10.2.169.10:6443 is unreachable"
+            description: >-
+              The kube-vip VIP has not accepted a connection for >5m. Node-level alerts
+              cannot distinguish this from a single control-plane node being down — one
+              of those is survivable and this one is not. Every kubectl, Flux reconcile
+              and controller watch goes through this address.
+
+        - alert: InfraEndpointUnreachable
+          expr: probe_success{job="blackbox-infra"} == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Infrastructure endpoint {{ $labels.instance }} is unreachable"
+            description: >-
+              Catch-all for TCP probe targets, so a target added to probe-infra.yaml
+              later is never silently unalerted. Overlaps the two specific rules above
+              by design — they page faster and name the consequence.
+
+    - name: blackbox-network.rules
+      rules:
+        # One resolver down is survivable; both is not. Splitting them keeps the
+        # severity honest.
+        - alert: InternalDNSResolverDown
+          expr: |
+            probe_success{job="blackbox-dns", instance=~"10\\.1\\.30\\..*"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Internal DNS resolver {{ $labels.instance }} is not resolving nerdbox.dev"
+            description: >-
+              {{ $labels.instance }} has failed to return an answer for nerdbox.dev for
+              >5m. The probe asserts a non-empty answer section, so this fires for a
+              resolver that is up but answering NXDOMAIN for our own zone — not just
+              for one that is down. The other resolver is presumably still serving.
+
+        - alert: AllInternalDNSDown
+          expr: |
+            sum(probe_success{job="blackbox-dns", instance=~"10\\.1\\.30\\..*"}) == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "BOTH internal DNS resolvers are failing to resolve nerdbox.dev"
+            description: >-
+              Neither 10.1.30.250 nor 10.1.30.251 is answering for nerdbox.dev. Every
+              internal hostname is broken. If the 1.1.1.1 control probe is still
+              succeeding the fault is local DNS, not connectivity.
+
+        # Only fires when BOTH anycast providers are unreachable — one provider having
+        # a bad day is not an outage worth waking up for, and this is the alert that
+        # stops a WAN failure from being misdiagnosed as an app failure.
+        - alert: WANConnectivityLost
+          expr: |
+            sum(probe_success{job="blackbox-icmp", instance=~"1\\.1\\.1\\.1|8\\.8\\.8\\.8"}) == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "WAN connectivity lost — neither 1.1.1.1 nor 8.8.8.8 is reachable"
+            description: >-
+              ICMP to both upstream anycast resolvers has failed for >5m, on two
+              independent networks, so this is the local link or the ISP rather than a
+              provider issue. Expect ACME, Renovate, image pulls and every external
+              probe to fail while this is firing.
+
+        - alert: GatewayUnreachable
+          expr: |
+            probe_success{job="blackbox-icmp", instance="10.2.169.1"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "pfSense gateway 10.2.169.1 is unreachable"
+            description: >-
+              ICMP to the gateway has failed for >5m. Probed by ICMP rather than TCP
+              because pfSense exposes no TCP port to the pod network. Nothing leaves
+              the cluster while this is down.
+
+        - alert: NASUnreachable
+          expr: |
+            probe_success{job="blackbox-icmp", instance="10.2.40.10"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TrueNAS 10.2.40.10 is unreachable"
+            description: >-
+              ICMP to the NAS has failed for >5m. This is the host-level counterpart to
+              BackupStorageUnreachable — if both fire the box is gone, and if only the
+              backup one fires the host is up but RustFS is not. It also serves every
+              NFS PV (immich, paperless, audiobookshelf and the media libraries), so
+              expect widespread pod I/O errors.
+
+    - name: blackbox-external.rules
+      rules:
+        # 15m, and the probe itself runs at 120s: a third party's transient blip
+        # should not page.
+        - alert: ExternalAPIUnreachable
+          expr: probe_success{job="blackbox-external"} == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "External API {{ $labels.instance }} is unreachable"
+            description: >-
+              {{ $labels.instance }} has been unreachable for >15m. For the Cloudflare
+              endpoint this is what separates "our ACME token was revoked" from
+              "Cloudflare is down" when cert-manager alerts fire — the token itself is
+              checked by CertManagerACMErrors, not here. For GitHub it means Flux
+              cannot pull new manifests.
