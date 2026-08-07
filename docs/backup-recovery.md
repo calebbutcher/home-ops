@@ -15,11 +15,44 @@ recover it.
 | Authentik signing key (`AUTHENTIK_SECRET_KEY`) | Git (SOPS) | `kubernetes/apps/authentik/secret.sops.yaml` |
 | n8n credential-encryption key (`N8N_ENCRYPTION_KEY`) | Git (SOPS) | `kubernetes/apps/n8n/secret.sops.yaml` |
 | MariaDB (mariadb-operator) | native `Backup` CR (nightly `mariadb-dump` → S3) | RustFS `mariadb-backups` bucket |
-| Media / downloads | NAS-level (out of scope here) | NAS `mainPool` |
+| Longhorn volumes (block-level) | `daily-backup` RecurringJob, 04:00, `default` group | RustFS `longhorn-backups` bucket |
+| Media / downloads / other NFS exports | TrueNAS-side ZFS snapshots — **not managed by this cluster** | NAS `mainPool` |
 | SOPS age key | **Manual / offline** | Password manager + offline copy |
 
 RustFS (S3-compatible object storage) runs on the TrueNAS at
 `10.2.40.10:30292`, intentionally independent of the cluster it protects.
+
+> ⚠️ **Every tier above lands on the same TrueNAS box.** etcd, VolSync/restic,
+> CNPG barman, MariaDB dumps, Longhorn backups, Loki and Thanos all target
+> `10.2.40.10`. Losing that host — or a ransomware event reaching it — takes out
+> every tier simultaneously. There is currently no offsite copy and no
+> append-only credential. The 2026-08-06 NAS outage demonstrated the correlated
+> failure: all 7 Postgres clusters lost a night of backups at once.
+
+### Two layers protect Longhorn volumes, and they are not the same thing
+
+Longhorn's RecurringJob takes **block-level** volume backups of everything in the
+`default` recurring-job group. VolSync takes **file-level** restic backups of
+specific PVCs. Most app config PVCs have both; they are complementary, not
+redundant:
+
+- Longhorn backups restore a whole volume quickly, but only to a Longhorn cluster.
+- Restic backups are portable, deduplicated, browsable, and restorable file-by-file
+  onto any storage class — which is what the per-app restore procedures below use.
+
+### Deliberately NOT backed up
+
+Verified by inspecting contents rather than inferred from a PVC list. Do not
+"fix" these by adding a `ReplicationSource` without re-checking:
+
+| PVC | Why not |
+| --- | --- |
+| `paperless/paperless-data` (77M) | Search index, classifier model, and logs. All regenerable: `document_index reindex` + `document_create_classifier`. Documents live on NFS, metadata in CNPG Postgres. |
+| `audiobookshelf/audiobookshelf-metadata` (60K) | Covers/streams/cache only. The actual database is `absdatabase.sqlite` in `audiobookshelf-config`, which **is** backed up by VolSync. |
+| `volsync-src-*-cache` (14 PVCs) | VolSync's own restic scratch caches. The data they accelerate already lives in the restic repository. Excluded from `LonghornVolumeNeverBackedUp` for this reason. |
+| `*-redis`, `immich-model-cache` | Caches, rebuilt on start. |
+| `monitoring/*` (Prometheus, Thanos, Loki, Alertmanager) | Prometheus keeps 2d locally; long-term history is already in RustFS via Thanos/Loki object storage. |
+| CNPG `*-postgres-N` PVCs | Covered by barman base backups + WAL archiving, which is restorable to a point in time. Backing up the raw volume would be strictly worse. |
 
 ## Critical secrets (the things that make recovery possible)
 
@@ -355,15 +388,67 @@ node-by-node:
 
 ## Verifying backups are healthy
 
-- `kubectl get replicationsource -A` → `LAST SYNC` recent for every source (the
-  `*-config` sources in `media`, `home-assistant-config` in `home-assistant`, and
-  `n8n-data` in `n8n`).
-- `kubectl get scheduledbackup -A` → recent for every CNPG cluster
-  (`tracearr-postgres`, `authentik-postgres`, `n8n-postgres`); objects under RustFS
-  `postgres-backups/<cluster>/`.
-- `kubectl get etcdsnapshotfiles.k3s.cattle.io` → entries with `s3://` locations.
-- `kubectl get cronjob uptime-kuma-mariadb -n uptime-kuma` → recent
-  `LAST SCHEDULE`; objects present in RustFS `mariadb-backups/uptime-kuma/`.
-- Objects present in RustFS `volsync` and `etcd-snapshots` buckets.
-- Periodically run a restore drill (restore `seerr-config` into a scratch PVC
-  and confirm `db/db.sqlite3` + `settings.json` are intact).
+**This is now alerted, not just checkable.**
+`kubernetes/apps/monitoring/kube-prometheus-stack/prometheusrule-backups.yaml`
+covers every tier with the same question — *how long since the last success?* —
+because the failure that actually happens is a backup that quietly stops running,
+not one that loudly fails. Thresholds are 26h (schedule + one missed run + slack).
+
+| Alert | Tier |
+| --- | --- |
+| `VolSyncOutOfSync`, `VolSyncNoRecentSync`, `VolSyncMissedIntervals` | VolSync/restic |
+| `CNPGBackupStale` | CNPG base backups (never ran) |
+| `CNPGBackupFailed` (in `prometheusrule-postgres.yaml`) | CNPG base backups (ran and failed) |
+| `BackupCronJobStale`, `BackupCronJobSuspended` | MariaDB dump + Longhorn RecurringJob |
+| `EtcdSnapshotS3Stale`, `EtcdSnapshotLocalStale`, `EtcdSnapshotNotReady` | etcd snapshots |
+| `LonghornVolumeNeverBackedUp` | Longhorn coverage |
+| `*MetricsMissing` (one per tier) | the collector itself |
+
+Each group has an `absent()` guard, because a collector that stops reporting is
+indistinguishable from "everything is fine" — which is precisely how the
+2026-08-06 outage went unnoticed.
+
+### Manual spot-checks
+
+- `kubectl get replicationsource -A` → `LAST SYNC` recent for every source.
+  Normal `DURATION` is **15–45s**; the 8–13h durations seen on 2026-08-06 were
+  restic hanging on a dead S3 endpoint during the NAS outage, not real work.
+- `kubectl get scheduledbackup -A` → recent for every CNPG cluster.
+- `kubectl get backups.postgresql.cnpg.io -A` → note the **fully-qualified**
+  form. A bare `kubectl get backup` resolves to `backups.k8s.mariadb.com`
+  (mariadb-operator wins the short name; Longhorn also registers `Backup`) and
+  returns a misleading `NotFound`.
+- `kubectl get etcdsnapshotfiles.k3s.cattle.io` → entries with `s3://` locations,
+  newest under 12h old on each control node.
+- `kubectl get cronjob -A` → recent `LAST SCHEDULE` for `uptime-kuma-mariadb`
+  and `longhorn-system/daily-backup`.
+
+### Forcing a one-off backup
+
+CNPG `ScheduledBackup` has **no retry** — a failed run waits for the next cron
+slot, up to 24h later. To force one immediately:
+
+```bash
+kubectl -n <ns> create -f - <<'YAML'
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata:
+  name: <cluster>-manual-<yyyymmdd>
+spec:
+  cluster:
+    name: <cluster>
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+YAML
+```
+
+Use an explicit `name` (not `generateName`) so re-running is idempotent, and omit
+`backupOwnerReference: self` — that belongs to the ScheduledBackup, not a one-off.
+
+### Restore drill
+
+Periodically restore `seerr-config` into a scratch PVC and confirm
+`db/db.sqlite3` + `settings.json` are intact. **This is still manual and
+unscheduled** — automating it is the remaining gap in this document, since an
+untested backup is only a hypothesis.

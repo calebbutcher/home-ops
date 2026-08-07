@@ -1,0 +1,286 @@
+---
+# Backup freshness across every tier, in one place.
+#
+# The individual tiers each had their own gap: some emitted no metric at all
+# (etcd), some emitted metrics nobody alerted on (VolSync — 28 series scraped and
+# entirely unused), and some only reported failure, never absence. The common
+# blind spot is the same in all of them: a backup that STOPS RUNNING looks
+# exactly like a backup that has nothing to do. Every rule here is therefore
+# framed as "how long since the last SUCCESS", not "did the last attempt fail".
+#
+# Everything lands on RustFS at 10.2.40.10:30292 on the TrueNAS, so a NAS outage
+# takes out every tier at once — as happened on 2026-08-06, when all 7 Postgres
+# clusters lost a night of backups silently. Expect these alerts to fire together
+# rather than individually; that correlation is the signal that it is the NAS and
+# not the workload.
+#
+# Thresholds are "schedule + one missed run + slack", so a single transient
+# failure with a successful retry stays quiet, and a genuinely stopped backup
+# fires within a day.
+#
+#   tier              schedule            threshold
+#   VolSync/restic    daily, staggered    26h
+#   CNPG barman       daily 02:00-07:00   26h
+#   MariaDB           daily 02:00         26h
+#   Longhorn          daily 04:00         26h  (volume-level regression: see
+#                                               prometheusrule-longhorn.yaml)
+#   etcd snapshots    every 12h           26h  (allows two missed runs)
+#
+# No `release:` label needed — ruleSelectorNilUsesHelmValues: false — and the
+# `severity` labels route via the catch-all Discord AlertmanagerConfig.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: backups
+  namespace: monitoring
+spec:
+  groups:
+    - name: backup-volsync.rules
+      rules:
+        # VolSync's own opinion that a source has missed its schedule. This is the
+        # cheapest and most direct signal — it comes from the operator that owns
+        # the schedule, so it needs no threshold guessing.
+        #
+        # ⚠️ role="source" is REQUIRED. VolSync keeps emitting series for objects
+        # that no longer exist: this cluster currently has 14 phantom
+        # `role="destination"` series named *-config-restore, left over from a
+        # past one-off restore, with zero live ReplicationDestinations. They read
+        # 0 today, but an unfiltered rule would be permanently unfixable if one
+        # ever read 1 — there is no object left to delete.
+        - alert: VolSyncOutOfSync
+          expr: volsync_volume_out_of_sync{role="source"} == 1
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "VolSync backup {{ $labels.obj_namespace }}/{{ $labels.obj_name }} is out of sync"
+            description: >-
+              VolSync reports {{ $labels.obj_namespace }}/{{ $labels.obj_name }} as
+              having missed its schedule. The restic repository on RustFS is not
+              receiving new snapshots for this PVC.
+
+        # The backstop for the above: no completed sync in 26h regardless of what
+        # VolSync thinks. Catches a source wedged mid-sync, where the operator has
+        # not yet declared it out of sync.
+        #
+        # ⚠️ VolSync exports NO last-sync-timestamp metric — the full set is
+        # volsync_{missed_intervals_total,sync_duration_seconds*,volume_out_of_sync}
+        # and nothing else. So freshness has to be inferred from the completed-sync
+        # COUNTER standing still, rather than compared against a timestamp.
+        # changes() is the right function here: increase() extrapolates and can
+        # return a small non-zero value over a window with no actual increment.
+        #
+        # A brand-new ReplicationSource has no completed sync yet and so will fire
+        # this until its first run — which is correct, an unproven backup is not a
+        # backup, but expect it briefly when adding one.
+        - alert: VolSyncNoRecentSync
+          expr: |
+            changes(volsync_sync_duration_seconds_count{role="source"}[26h]) == 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "VolSync {{ $labels.obj_namespace }}/{{ $labels.obj_name }} has not completed a sync in over 26h"
+            description: >-
+              The completed-sync counter for {{ $labels.obj_namespace }}/{{ $labels.obj_name }}
+              has not advanced in more than 26 hours, and every source here runs
+              daily. Check for a stuck mover Job in that namespace.
+
+        # Cumulative missed intervals climbing means the schedule is being skipped
+        # repeatedly rather than once.
+        - alert: VolSyncMissedIntervals
+          expr: |
+            increase(volsync_missed_intervals_total{role="source"}[6h]) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "VolSync {{ $labels.obj_namespace }}/{{ $labels.obj_name }} is missing its schedule"
+            description: >-
+              VolSync has missed at least one scheduled interval for
+              {{ $labels.obj_namespace }}/{{ $labels.obj_name }} in the last 6h.
+              Usually the mover pod cannot be scheduled, or the restic repository
+              is unreachable.
+
+        - alert: VolSyncMetricsMissing
+          expr: absent(volsync_volume_out_of_sync)
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "VolSync is not reporting — PVC backups are unmonitored"
+            description: >-
+              No volsync_volume_out_of_sync series for >30m. The VolSync operator
+              is down or unscraped, and every VolSync alert above is inert.
+
+    - name: backup-postgres.rules
+      rules:
+        # Fed by barman_cloud_cloudnative_pg_io_last_available_backup_timestamp,
+        # which the barman plugin exports on each instance's :9187. Aggregated by
+        # cnpg_cluster (see podMonitorRelabelings on each Cluster CR) because all
+        # three instances report the same cluster-wide value.
+        #
+        # This is the counterpart to CNPGBackupFailed in prometheusrule-postgres.yaml:
+        # that one catches a backup that RAN AND FAILED, this one catches a backup
+        # that never ran at all — a deleted or suspended ScheduledBackup, which
+        # leaves the LastBackupSucceeded condition frozen on its last good result.
+        - alert: CNPGBackupStale
+          expr: |
+            (time() - max by (cnpg_cluster) (
+              barman_cloud_cloudnative_pg_io_last_available_backup_timestamp
+            )) > 26 * 3600
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "No Postgres backup for {{ $labels.cnpg_cluster }} in {{ $value | humanizeDuration }}"
+            description: >-
+              The newest base backup in s3://postgres-backups for
+              {{ $labels.cnpg_cluster }} is more than 26h old, but its
+              ScheduledBackup runs daily. Either the schedule stopped firing or
+              every run since has failed. Check
+              `kubectl get scheduledbackup -A` and
+              `kubectl get backups.postgresql.cnpg.io -A`.
+
+        # A cluster whose barman series never appears at all. Distinct from the
+        # staleness rule above, which can only fire once a series exists.
+        - alert: CNPGBackupMetricsMissing
+          expr: absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp)
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres backup timestamps are not being reported"
+            description: >-
+              No barman_cloud_cloudnative_pg_io_last_available_backup_timestamp
+              series for >30m. Postgres backup freshness is unmonitored — note
+              that the in-tree cnpg_collector_last_available_backup_timestamp is
+              always 0 on the plugin path and is NOT a substitute.
+
+    - name: backup-cronjob.rules
+      rules:
+        # Covers the two tiers that run as ordinary CronJobs: the MariaDB dump
+        # (uptime-kuma, 02:00) and the Longhorn RecurringJob (04:00). Both report
+        # through kube-state-metrics, so one rule shape serves both.
+        - alert: BackupCronJobStale
+          expr: |
+            (time() - kube_cronjob_status_last_successful_time{
+              namespace=~"uptime-kuma|longhorn-system"
+            }) > 26 * 3600
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "Backup CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} last succeeded {{ $value | humanizeDuration }} ago"
+            description: >-
+              {{ $labels.namespace }}/{{ $labels.cronjob }} runs daily but has not
+              completed successfully in over 26h.
+
+        # Suspending a backup CronJob is silent and permanent. Nothing fails, the
+        # last-success timestamp simply stops advancing — which the staleness rule
+        # above would catch a day later, but this names the actual cause.
+        - alert: BackupCronJobSuspended
+          expr: |
+            kube_cronjob_spec_suspend{namespace=~"uptime-kuma|longhorn-system"} == 1
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Backup CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} is suspended"
+            description: >-
+              {{ $labels.namespace }}/{{ $labels.cronjob }} is suspended, so no
+              further backups will run until it is resumed.
+
+    - name: backup-etcd.rules
+      rules:
+        # k3s takes an etcd snapshot every 12h and uploads it to
+        # s3://etcd-snapshots. 26h therefore allows two consecutive misses.
+        #
+        # The OFFSITE copy is the one that matters for cluster-loss recovery: a
+        # node-local snapshot is worthless if the node it lives on is the thing
+        # that died. {bucket!=""} selects the S3 copies (see the ETCDSnapshotFile
+        # block in helmrelease.yaml).
+        - alert: EtcdSnapshotS3Stale
+          expr: |
+            (time() - max(k3s_etcd_snapshot_creation_timestamp{bucket!=""})) > 26 * 3600
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "No etcd snapshot uploaded to S3 in {{ $value | humanizeDuration }}"
+            description: >-
+              The newest etcd snapshot in s3://etcd-snapshots is over 26h old.
+              k3s snapshots every 12h, so at least two uploads have failed. Local
+              snapshots may still be fine — this is specifically the OFFSITE copy,
+              which is the only one that survives losing a control node. Check
+              `kubectl get etcdsnapshotfile` and the RustFS endpoint.
+
+        # Local snapshots failing too means snapshotting itself is broken, not
+        # just the upload. Separated so the two failure modes are distinguishable
+        # at a glance.
+        - alert: EtcdSnapshotLocalStale
+          expr: |
+            (time() - max(k3s_etcd_snapshot_creation_timestamp{bucket=""})) > 26 * 3600
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "No local etcd snapshot in {{ $value | humanizeDuration }}"
+            description: >-
+              No node has taken an etcd snapshot in over 26h. This is snapshotting
+              itself failing, not just the S3 upload — the control plane is running
+              without any recent recovery point.
+
+        - alert: EtcdSnapshotNotReady
+          expr: k3s_etcd_snapshot_ready == 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "etcd snapshot {{ $labels.name }} on {{ $labels.node }} is not usable"
+            description: >-
+              k3s reports readyToUse=false for this snapshot, so it cannot be
+              restored from. Check status.error on the ETCDSnapshotFile.
+
+        - alert: EtcdSnapshotMetricsMissing
+          expr: absent(k3s_etcd_snapshot_creation_timestamp)
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "etcd snapshot status is not being collected"
+            description: >-
+              No k3s_etcd_snapshot_creation_timestamp series for >30m.
+              kube-state-metrics has stopped reading ETCDSnapshotFile CRs, so the
+              etcd backup tier is completely unmonitored.
+
+    - name: backup-longhorn-coverage.rules
+      rules:
+        # Coverage, as opposed to the freshness regression rule in
+        # prometheusrule-longhorn.yaml. This catches a volume that has NEVER been
+        # backed up — a PVC created outside the daily-backup RecurringJob group,
+        # which would otherwise be silently unprotected forever.
+        #
+        # ⚠️ volsync-src-*-cache MUST be excluded. Those are VolSync's own restic
+        # scratch volumes; all 14 of them legitimately report 0 here, so an
+        # unfiltered rule fires 14 false positives on merge and never clears.
+        # Their contents are a cache — the real data is already in the restic
+        # repository that the cache exists to accelerate.
+        - alert: LonghornVolumeNeverBackedUp
+          expr: |
+            longhorn_volume_last_backup_at == 0
+              unless on (volume)
+            label_replace(
+              longhorn_volume_last_backup_at{pvc=~"volsync-src-.*-cache"},
+              "volume", "$1", "volume", "(.*)"
+            )
+          for: 24h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn volume for {{ $labels.pvc_namespace }}/{{ $labels.pvc }} has never been backed up"
+            description: >-
+              Volume {{ $labels.volume }} has no backup in s3://longhorn-backups at
+              all. Either it is not in the `default` recurring-job group, or its
+              first backup has never succeeded. If this PVC is genuinely
+              disposable, document it rather than leaving the alert firing.
