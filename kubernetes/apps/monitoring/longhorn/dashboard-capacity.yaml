@@ -1,0 +1,436 @@
+---
+# Hand-authored Longhorn capacity-planning + backup-coverage dashboard. Companion
+# to "Longhorn / Overview" (uid longhorn-overview), which covers live health.
+# Auto-imported by the kube-prometheus-stack Grafana sidecar via the
+# grafana_dashboard label. Fed by the longhorn-manager ServiceMonitor
+# (job longhorn-backend, :9500). Alerts live in
+# kube-prometheus-stack/prometheusrule-longhorn.yaml and prometheusrule-backups.yaml.
+#
+# ⚠️ Defaults to the THANOS datasource, not Prometheus. prometheusSpec.retention
+# is 2d, and capacity planning over two days is not capacity planning — Thanos
+# Query holds the long-term history and de-duplicates Longhorn correctly
+# (verified: count(longhorn_volume_capacity_bytes) = 32, not a multiple of it).
+# Flip the Datasource dropdown to Prometheus for high-resolution recent detail.
+#
+# ⚠️ Longhorn scraping only started at commit a298163, so Thanos holds very
+# little Longhorn history to begin with and accumulates from there. On a fresh
+# deploy the now-7d view is mostly blank on the left and the two "growth over
+# range" stats read ~0. That is expected and self-healing — do not "fix" it by
+# switching the datasource permanently to Prometheus.
+#
+# ⚠️ THE HEADLINE NUMBER IS SCHEDULING HEADROOM, NOT DISK USED. Each node
+# reserves 30% of its data disk (longhorn_node_storage_reservation_bytes), and
+# storage-over-provisioning-percentage is 100, so Longhorn will only place a
+# replica while:
+#     scheduled <= capacity - reservation
+# Longhorn schedules against the volume's REQUESTED size, not its actual usage,
+# so that ratio fills long before the disk does. Measured when this dashboard was
+# written: worker-06 was at 77% of the scheduling gate while the existing
+# LonghornNodeStorageHigh alert (which watches usage/capacity) read 1.9% on that
+# same node. The two stats sit side by side deliberately, so the gap is visible.
+# If storage-over-provisioning-percentage is ever raised above 100, the
+# denominator here must be scaled by pct/100.
+#
+# ⚠️ longhorn_volume_actual_size_bytes is BLOCK ALLOCATION INCLUDING SNAPSHOTS,
+# not filesystem usage — cluster-wide, snapshots are 28.4 GB of the 35.5 GB
+# allocated. It is labelled "allocated" here rather than "used" for that reason.
+# The per-volume breakdown and the kubelet comparison live on the Overview
+# dashboard.
+#
+# ⚠️ Per-node capacity comes from longhorn_node_storage_* / longhorn_disk_*
+# ONLY. The `node` label on longhorn_volume_* is the volume's owner/engine node,
+# not where its replicas physically live, so summing volume metrics by node gives
+# a wrong answer.
+#
+# ⚠️ Growth uses delta() over a subquery, never rate()/increase() — these are
+# gauges. There is deliberately no predict_linear "days until full" stat: with a
+# near-zero derivative it renders an absurd duration, and with days rather than
+# months of history it would be actively misleading.
+#
+# ⚠️ longhorn_backup_state is the ONE numeric enum in the Longhorn metric set
+# (0=New 1=Pending 2=InProgress 3=Completed 4=Error 5=Unknown) — every other
+# state metric is a one-hot gauge. It carries no pvc/pvc_namespace labels, so the
+# backup table joins them on `volume` with `+ on (volume) group_left (...) (0 * ...)`,
+# using longhorn_volume_capacity_bytes as the join partner because that is
+# exactly one series per volume (longhorn_volume_robustness is four, and would
+# raise a many-to-many error). longhorn_backup_volume_backups_count keys on
+# backup_volume = <volume>-<hash>, hence the label_replace.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: longhorn-capacity-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  longhorn-capacity.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "graphTooltip": 1,
+      "schemaVersion": 39,
+      "version": 1,
+      "id": null,
+      "uid": "longhorn-capacity",
+      "title": "Longhorn / Capacity & Backups",
+      "tags": ["longhorn", "storage", "capacity"],
+      "time": { "from": "now-7d", "to": "now" },
+      "refresh": "5m",
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "label": "Datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": { "text": "Thanos", "value": "thanos", "selected": true },
+            "options": [], "refresh": 1, "regex": "", "hide": 0
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "Provisioned",
+          "description": "Sum of PVC requested sizes. This is what Longhorn schedules against.",
+          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "sum(longhorn_volume_capacity_bytes)" }
+          ]
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Allocated (incl. snapshots)",
+          "description": "Longhorn block allocation, which includes snapshot history — NOT filesystem usage.",
+          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "color": { "mode": "fixed", "fixedColor": "purple" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "sum(longhorn_volume_actual_size_bytes)" }
+          ]
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Raw cluster capacity",
+          "description": "Total of the dedicated /dev/sdb data disks across all Longhorn nodes.",
+          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "sum(longhorn_node_storage_capacity_bytes)" }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Raw used",
+          "description": "Actual bytes on disk across every replica — the physical footprint.",
+          "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "color": { "mode": "fixed", "fixedColor": "text" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "sum(longhorn_node_storage_usage_bytes)" }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Worst scheduling headroom",
+          "description": "THE capacity number. scheduled / (capacity - reservation) on the fullest node. At 100% Longhorn refuses to place any new replica there and rebuilds stall. Compare with the panel to the right — this fills far ahead of actual disk usage.",
+          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 0.8 }, { "color": "red", "value": 0.95 } ] }, "color": { "mode": "thresholds" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "max(longhorn_node_storage_scheduled_bytes / (longhorn_node_storage_capacity_bytes - longhorn_node_storage_reservation_bytes))" }
+          ]
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Worst disk used",
+          "description": "usage / capacity on the fullest node — what LonghornNodeStorageHigh (85%) and LonghornNodeStorageCritical (93%) watch. Thresholds mirror those alerts.",
+          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 0.85 }, { "color": "red", "value": 0.93 } ] }, "color": { "mode": "thresholds" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "max(longhorn_node_storage_usage_bytes / longhorn_node_storage_capacity_bytes)" }
+          ]
+        },
+        {
+          "id": 7,
+          "type": "bargauge",
+          "title": "Scheduling headroom per node",
+          "description": "scheduled / (capacity - reservation). Longhorn places a replica only while this is below 100% (storage-over-provisioning-percentage = 100). Reservation is 30% of each 100G data disk, so the effective schedulable ceiling is ~73.5 GB per node.",
+          "gridPos": { "h": 7, "w": 24, "x": 0, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 0.8 }, { "color": "red", "value": 0.95 } ] }, "color": { "mode": "thresholds" } }, "overrides": [] },
+          "options": { "displayMode": "gradient", "orientation": "horizontal", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"] } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "longhorn_node_storage_scheduled_bytes / (longhorn_node_storage_capacity_bytes - longhorn_node_storage_reservation_bytes)", "legendFormat": "{{node}}", "instant": true, "range": false }
+          ]
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "Scheduled per node vs schedulable ceiling",
+          "description": "The dashed line is capacity - reservation, the point at which a node stops accepting new replicas.",
+          "gridPos": { "h": 9, "w": 12, "x": 0, "y": 11 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [
+            { "matcher": { "id": "byName", "options": "schedulable ceiling" }, "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ] }
+          ] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last"], "sortBy": "Last", "sortDesc": true }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "sum by (node) (longhorn_node_storage_scheduled_bytes)", "legendFormat": "{{node}}" },
+            { "refId": "B", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "max(longhorn_node_storage_capacity_bytes - longhorn_node_storage_reservation_bytes)", "legendFormat": "schedulable ceiling" }
+          ]
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "Disk used per node vs raw capacity",
+          "gridPos": { "h": 9, "w": 12, "x": 12, "y": 11 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [
+            { "matcher": { "id": "byName", "options": "disk capacity" }, "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ] }
+          ] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last"], "sortBy": "Last", "sortDesc": true }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "sum by (node) (longhorn_node_storage_usage_bytes)", "legendFormat": "{{node}}" },
+            { "refId": "B", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "max(longhorn_node_storage_capacity_bytes)", "legendFormat": "disk capacity" }
+          ]
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "Provisioned vs allocated vs on-disk",
+          "description": "Provisioned is what workloads asked for; allocated is Longhorn block allocation including snapshots; on-disk is the real footprint across all replicas (so it counts 2-replica volumes twice).",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "sum(longhorn_volume_capacity_bytes)", "legendFormat": "provisioned" },
+            { "refId": "B", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "sum(longhorn_volume_actual_size_bytes)", "legendFormat": "allocated (incl. snapshots)" },
+            { "refId": "C", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "sum(longhorn_node_storage_usage_bytes)", "legendFormat": "raw on disk (all replicas)" }
+          ]
+        },
+        {
+          "id": 11,
+          "type": "timeseries",
+          "title": "Overcommit ratios",
+          "description": "provisioned:allocated shows how much thin provisioning is buying. scheduled:schedulable is the cluster-wide version of the headroom gauge — at 1.0 nothing more can be placed anywhere.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0, "decimals": 2, "custom": { "drawStyle": "line", "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "sum(longhorn_volume_capacity_bytes) / sum(longhorn_volume_actual_size_bytes)", "legendFormat": "provisioned : allocated" },
+            { "refId": "B", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "sum(longhorn_node_storage_scheduled_bytes) / sum(longhorn_node_storage_capacity_bytes - longhorn_node_storage_reservation_bytes)", "legendFormat": "scheduled : schedulable" }
+          ]
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "Provisioned by namespace",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 25, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last"], "sortBy": "Last", "sortDesc": true }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "sum by (pvc_namespace) (longhorn_volume_capacity_bytes)", "legendFormat": "{{pvc_namespace}}" }
+          ]
+        },
+        {
+          "id": 13,
+          "type": "timeseries",
+          "title": "Allocated by namespace",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 25, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last"], "sortBy": "Last", "sortDesc": true }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "sum by (pvc_namespace) (longhorn_volume_actual_size_bytes)", "legendFormat": "{{pvc_namespace}}" }
+          ]
+        },
+        {
+          "id": 14,
+          "type": "stat",
+          "title": "Allocated growth (over range)",
+          "description": "delta() over a subquery, scoped to the dashboard time picker. Gauges, so never rate()/increase().",
+          "gridPos": { "h": 4, "w": 8, "x": 0, "y": 36 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "color": { "mode": "fixed", "fixedColor": "purple" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "delta(sum(longhorn_volume_actual_size_bytes)[$__range:5m])" }
+          ]
+        },
+        {
+          "id": 15,
+          "type": "stat",
+          "title": "Scheduled growth (over range)",
+          "description": "How much more space Longhorn has committed to placing over the selected window — the leading indicator for the headroom gauge.",
+          "gridPos": { "h": 4, "w": 8, "x": 8, "y": 36 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "color": { "mode": "fixed", "fixedColor": "orange" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "delta(sum(longhorn_node_storage_scheduled_bytes)[$__range:5m])" }
+          ]
+        },
+        {
+          "id": 16,
+          "type": "stat",
+          "title": "Free schedulable space (cluster)",
+          "description": "How much more Longhorn will accept cluster-wide before it stops placing replicas. Note a single volume must fit on ONE node, so this total is optimistic — check the per-node graph below.",
+          "gridPos": { "h": 4, "w": 8, "x": 16, "y": 36 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 21474836480 }, { "color": "green", "value": 53687091200 } ] }, "color": { "mode": "thresholds" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "sum(longhorn_node_storage_capacity_bytes - longhorn_node_storage_reservation_bytes - longhorn_node_storage_scheduled_bytes)" }
+          ]
+        },
+        {
+          "id": 17,
+          "type": "timeseries",
+          "title": "Free schedulable space per node",
+          "description": "capacity - reservation - scheduled. The node with the least free space is the one that determines whether the next migration off local-path will fit, because a volume's replica has to land on a single node.",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 40 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "min"], "sortBy": "Last", "sortDesc": false }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "longhorn_node_storage_capacity_bytes - longhorn_node_storage_reservation_bytes - longhorn_node_storage_scheduled_bytes", "legendFormat": "{{node}}" }
+          ]
+        },
+        {
+          "id": 18,
+          "type": "table",
+          "title": "Per-node capacity detail",
+          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 48 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "custom": { "align": "auto", "filterable": true } }, "overrides": [
+            { "matcher": { "id": "byName", "options": "Capacity" }, "properties": [ { "id": "unit", "value": "bytes" } ] },
+            { "matcher": { "id": "byName", "options": "Reserved" }, "properties": [ { "id": "unit", "value": "bytes" } ] },
+            { "matcher": { "id": "byName", "options": "Scheduled" }, "properties": [ { "id": "unit", "value": "bytes" } ] },
+            { "matcher": { "id": "byName", "options": "Used" }, "properties": [ { "id": "unit", "value": "bytes" } ] },
+            { "matcher": { "id": "byName", "options": "Replicas" }, "properties": [ { "id": "unit", "value": "short" } ] }
+          ] },
+          "options": { "showHeader": true, "sortBy": [ { "displayName": "Scheduled", "desc": true } ] },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "instant": true, "range": false, "format": "table", "expr": "max by (node) (longhorn_node_storage_capacity_bytes)" },
+            { "refId": "B", "datasource": { "type": "prometheus", "uid": "$datasource" }, "instant": true, "range": false, "format": "table", "expr": "max by (node) (longhorn_node_storage_reservation_bytes)" },
+            { "refId": "C", "datasource": { "type": "prometheus", "uid": "$datasource" }, "instant": true, "range": false, "format": "table", "expr": "max by (node) (longhorn_node_storage_scheduled_bytes)" },
+            { "refId": "D", "datasource": { "type": "prometheus", "uid": "$datasource" }, "instant": true, "range": false, "format": "table", "expr": "max by (node) (longhorn_node_storage_usage_bytes)" },
+            { "refId": "E", "datasource": { "type": "prometheus", "uid": "$datasource" }, "instant": true, "range": false, "format": "table", "expr": "count by (node) (longhorn_replica_state == 1)" }
+          ],
+          "transformations": [
+            { "id": "merge", "options": {} },
+            { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "node": "Node", "Value #A": "Capacity", "Value #B": "Reserved", "Value #C": "Scheduled", "Value #D": "Used", "Value #E": "Replicas" } } }
+          ]
+        },
+        {
+          "id": 19,
+          "type": "stat",
+          "title": "Volumes with backups",
+          "description": "Reported by whichever manager owns the BackupTarget, hence max().",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 57 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "max(longhorn_backup_target_backup_volume_count{backup_target=\"default\"}) or vector(0)" }
+          ]
+        },
+        {
+          "id": 20,
+          "type": "stat",
+          "title": "Never backed up",
+          "description": "Excludes volsync-src-*-cache — those are VolSync's own restic scratch volumes and legitimately have no Longhorn backup. Same exclusion as LonghornVolumeNeverBackedUp in prometheusrule-backups.yaml. Without it this reads 14 and is pure noise.",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 57 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }, "color": { "mode": "thresholds" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "count((longhorn_volume_last_backup_at == 0) and on (volume) (longhorn_volume_capacity_bytes{pvc!~\"volsync-src-.*-cache\"})) or vector(0)" }
+          ]
+        },
+        {
+          "id": 21,
+          "type": "stat",
+          "title": "Oldest backup age",
+          "description": "Thresholds mirror LonghornVolumeBackupStale (36h) — the daily-backup RecurringJob runs at 04:00.",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 57 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "dtdurations", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 129600 }, { "color": "red", "value": 172800 } ] }, "color": { "mode": "thresholds" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "max(time() - (longhorn_volume_last_backup_at > 0))" }
+          ]
+        },
+        {
+          "id": 22,
+          "type": "stat",
+          "title": "Backup data in S3",
+          "description": "Total size of Longhorn backups in s3://longhorn-backups on RustFS.",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 57 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "expr": "sum(longhorn_backup_actual_size_bytes)" }
+          ]
+        },
+        {
+          "id": 23,
+          "type": "table",
+          "title": "Latest backup per volume",
+          "description": "longhorn_backup_state is a numeric enum (0=New 1=Pending 2=InProgress 3=Completed 4=Error 5=Unknown) and carries no PVC labels, so Namespace/PVC are joined on `volume`. Longhorn retains only the newest backup record per volume here, so this is current state, not history.",
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 61 },
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "custom": { "align": "auto", "filterable": true } }, "overrides": [
+            { "matcher": { "id": "byName", "options": "State" }, "properties": [
+              { "id": "mappings", "value": [ { "type": "value", "options": { "0": { "text": "New", "color": "text", "index": 0 }, "1": { "text": "Pending", "color": "blue", "index": 1 }, "2": { "text": "InProgress", "color": "blue", "index": 2 }, "3": { "text": "Completed", "color": "green", "index": 3 }, "4": { "text": "Error", "color": "red", "index": 4 }, "5": { "text": "Unknown", "color": "orange", "index": 5 } } } ] },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ] },
+            { "matcher": { "id": "byName", "options": "Age" }, "properties": [
+              { "id": "unit", "value": "dtdurations" },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 129600 }, { "color": "red", "value": 172800 } ] } }
+            ] },
+            { "matcher": { "id": "byName", "options": "Backups" }, "properties": [ { "id": "unit", "value": "short" } ] }
+          ] },
+          "options": { "showHeader": true, "sortBy": [ { "displayName": "Age", "desc": true } ] },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "$datasource" }, "instant": true, "range": false, "format": "table", "expr": "max by (pvc_namespace, pvc, volume) (longhorn_backup_state + on (volume) group_left (pvc, pvc_namespace) (0 * longhorn_volume_capacity_bytes))" },
+            { "refId": "B", "datasource": { "type": "prometheus", "uid": "$datasource" }, "instant": true, "range": false, "format": "table", "expr": "max by (pvc_namespace, pvc, volume) (time() - (longhorn_volume_last_backup_at > 0))" },
+            { "refId": "C", "datasource": { "type": "prometheus", "uid": "$datasource" }, "instant": true, "range": false, "format": "table", "expr": "max by (pvc_namespace, pvc, volume) (label_replace(longhorn_backup_volume_backups_count, \"volume\", \"$1\", \"backup_volume\", \"(pvc-.*)-[0-9a-f]+\") + on (volume) group_left (pvc, pvc_namespace) (0 * longhorn_volume_capacity_bytes))" }
+          ],
+          "transformations": [
+            { "id": "merge", "options": {} },
+            { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "pvc_namespace": "Namespace", "pvc": "PVC", "volume": "Volume", "Value #A": "State", "Value #B": "Age", "Value #C": "Backups" } } }
+          ]
+        }
+      ]
+    }
