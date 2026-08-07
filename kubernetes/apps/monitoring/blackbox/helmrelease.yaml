@@ -1,0 +1,176 @@
+---
+# blackbox-exporter — synthetic probing from inside the cluster.
+#
+# This closes the largest single blindspot in the stack: 15 of ~28 apps export no
+# metrics at all, so "is it actually serving?" had no answer anywhere. It also gives
+# the first monitored signal for external dependencies (pfSense, the internal DNS
+# resolvers, the RustFS backup endpoint, the k3s API VIP, WAN reachability).
+#
+# ⚠️ MODULE DESIGN — the stock `http_2xx` module is WRONG for almost everything here.
+# A live sweep of all 21 backing Services and 30 ingress hosts returned 200, 302, 303
+# and 307: Authentik forwardAuth answers 302, Grafana/Paperless/Tandoor/Uptime-Kuma
+# redirect to their own login pages, seerr answers 307, Tautulli 303. Requiring 2xx
+# would have left ~11 permanently-firing alerts on a completely healthy cluster. The
+# modules below accept any valid HTTP response instead — the question they answer is
+# "did the app respond", not "did it return 200".
+#
+# ⚠️ follow_redirects is FALSE everywhere on purpose. Following an Authentik 302 lands
+# on the Authentik login page, which returns 200 — so a redirect-following probe would
+# report every forwardAuth-protected app as healthy for as long as Authentik is up,
+# even with the backend completely dead. Not following keeps the probe honest about
+# which hop actually answered.
+#
+# ⚠️ CrowdSec: probes originate from the pod CIDR (10.42/16) and pass through the
+# bouncer on 11 Ingresses. That is safe ONLY because the crowdsec HelmRelease
+# whitelists 10.0.0.0/8 in its s02-enrich parser. If that whitelist is ever narrowed,
+# these probes will get the exporter banned and every edge probe will fail at once.
+#
+# NET_RAW is added for the icmp prober. Verified working with the chart's default
+# non-root securityContext (runAsUser 1000) — containerd applies the capability after
+# the UID switch, so ICMP succeeds without root.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: blackbox-exporter
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: prometheus-blackbox-exporter
+      version: "11.16.0"
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    replicas: 1
+
+    # Probe targets are addressed by Probe CRs (probe-*.yaml), which the operator
+    # picks up because kube-prometheus-stack sets probeSelectorNilUsesHelmValues:
+    # false. The chart's own serviceMonitor.targets mechanism is deliberately NOT
+    # used — it would put the target list in Helm values instead of in CRs.
+    serviceMonitor:
+      enabled: false
+      # Scrape the exporter's OWN metrics so we can tell "probe failed" apart from
+      # "exporter is down". Without this, an exporter crash silently zeroes every
+      # probe_success series and looks identical to a total outage.
+      selfMonitor:
+        enabled: true
+        interval: 60s
+
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      runAsNonRoot: true
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+        # Required by the icmp prober to open a raw socket.
+        add: ["NET_RAW"]
+
+    # 63 targets across 6 Probe CRs, nearly all on a 60s interval — roughly one probe
+    # per second, and 31 of those are full TLS handshakes. Headroom is deliberate:
+    # this exporter is the thing that tells us other things are broken, so it is the
+    # worst possible component to have OOM under load.
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+
+    config:
+      modules:
+        # ---- Ingress hosts, through Traefik, over TLS ----------------------------
+        # Validates DNS → MetalLB → Traefik → (CrowdSec/Authentik) → route, and
+        # exports the certificate Traefik is ACTUALLY SERVING (probe_ssl_*), which is
+        # a different fact from the cert cert-manager believes it issued.
+        # fail_if_not_ssl guards against a silent downgrade to plaintext.
+        http_edge:
+          prober: http
+          timeout: 10s
+          http:
+            valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+            valid_status_codes: [200, 201, 204, 301, 302, 303, 307, 308, 401, 403]
+            method: GET
+            follow_redirects: false
+            fail_if_not_ssl: true
+            preferred_ip_protocol: ip4
+            ip_protocol_fallback: false
+
+        # ---- Backing Services, direct over ClusterIP -----------------------------
+        # The counterpart to http_edge, and the reason both exist. This bypasses
+        # Traefik/Authentik entirely and talks to the app, so it is the ONLY probe
+        # that can see a dead backend behind a forwardAuth route.
+        http_app:
+          prober: http
+          timeout: 10s
+          http:
+            valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+            valid_status_codes: [200, 201, 204, 301, 302, 303, 307, 308, 401, 403]
+            method: GET
+            follow_redirects: false
+            fail_if_not_ssl: false
+            preferred_ip_protocol: ip4
+            ip_protocol_fallback: false
+
+        # ---- Third-party HTTPS APIs ---------------------------------------------
+        # 400 is valid here: the Cloudflare token-verify endpoint returns 400 to an
+        # unauthenticated request, which still proves DNS + TLS + reachability.
+        # See probe-external.yaml for why this is deliberately unauthenticated.
+        http_public:
+          prober: http
+          timeout: 10s
+          http:
+            valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+            valid_status_codes: [200, 400, 401, 403]
+            method: GET
+            follow_redirects: false
+            fail_if_not_ssl: true
+            preferred_ip_protocol: ip4
+            ip_protocol_fallback: false
+
+        # ---- Raw TCP -------------------------------------------------------------
+        tcp_connect:
+          prober: tcp
+          timeout: 5s
+          tcp:
+            preferred_ip_protocol: ip4
+            ip_protocol_fallback: false
+
+        # ---- DNS -----------------------------------------------------------------
+        # The Probe TARGET is the resolver; the name queried is fixed here. Asserting
+        # a non-empty answer section matters — a resolver that is up and answering
+        # NXDOMAIN for our own zone is the actual failure mode worth catching, and a
+        # bare "did it respond" check would call that healthy.
+        dns_nerdbox:
+          prober: dns
+          timeout: 5s
+          dns:
+            query_name: "nerdbox.dev"
+            query_type: "A"
+            preferred_ip_protocol: ip4
+            ip_protocol_fallback: false
+            validate_answer_rrs:
+              fail_if_not_matches_regexp: [".*"]
+
+        # ---- ICMP ----------------------------------------------------------------
+        # Used for hosts that expose no TCP port to the cluster. pfSense at
+        # 10.2.169.1 is exactly that case: 443/80/8443/22 all refuse from the pod
+        # network, so the tcp_connect probe the plan originally called for would have
+        # fired permanently. ICMP replies fine.
+        icmp:
+          prober: icmp
+          timeout: 5s
+          icmp:
+            preferred_ip_protocol: ip4
+            ip_protocol_fallback: false

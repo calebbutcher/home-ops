@@ -1,0 +1,48 @@
+---
+# Third-party services the cluster depends on.
+#
+# ⚠️ The Cloudflare probe is deliberately UNAUTHENTICATED, which is a change from the
+# plan. The plan called for hitting the token-verify endpoint WITH the ACME token so a
+# revoked token would surface early. Two reasons not to:
+#
+#   1. It is already covered. cert-manager alerting (prometheusrule-certificates.yaml,
+#      added in PR 2) fires CertManagerACMErrors and CertificateRenewalOverdue on a
+#      revoked token, and does so at renewal time — ~30 days before any certificate
+#      would actually expire. An authenticated probe would find the same fault at
+#      roughly the same time.
+#   2. It costs a second copy of a live credential. The token exists once, in
+#      cert-manager/cloudflare-token. Reaching it from the monitoring namespace means
+#      duplicating it into a second SOPS secret, and a credential in two places is a
+#      credential that gets rotated in one.
+#
+# So this probe answers only the question cert-manager cannot: is the Cloudflare API
+# reachable at all. That distinguishes "our token was revoked" from "Cloudflare is
+# down" when an ACME failure does fire, which is exactly the ambiguity worth removing.
+# 400 counts as success — the endpoint rejects unauthenticated requests, and reaching
+# that rejection already proves DNS, TLS and connectivity.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: external-apis
+  namespace: monitoring
+spec:
+  jobName: blackbox-external
+  # Slower than the internal probes: these leave the network, and a third party's
+  # transient blip is not worth a page. Combined with the 15m `for` on the alert,
+  # this needs a sustained outage to fire.
+  interval: 120s
+  scrapeTimeout: 30s
+  module: http_public
+  prober:
+    url: blackbox-exporter-prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        # ACME DNS-01 depends on this for all 29 certificates.
+        - https://api.cloudflare.com/client/v4/user/tokens/verify
+        # Flux pulls every manifest from here. A sustained GitHub outage means no
+        # deployment can land, which otherwise presents only as reconciles going quiet.
+        - https://api.github.com
+      labels:
+        probe_class: external

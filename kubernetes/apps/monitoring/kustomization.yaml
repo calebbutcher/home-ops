@@ -28,6 +28,13 @@ resources:
   - kube-prometheus-stack/prometheusrule-postgres.yaml
   - kube-prometheus-stack/prometheusrule-flux.yaml
   - kube-prometheus-stack/prometheusrule-backups.yaml
+  - kube-prometheus-stack/prometheusrule-probes.yaml
+  - blackbox/helmrelease.yaml
+  - blackbox/probe-edge.yaml
+  - blackbox/probe-app.yaml
+  - blackbox/probe-infra.yaml
+  - blackbox/probe-external.yaml
+  - blackbox/dashboard.yaml
   - thanos/helmrelease.yaml
   - thanos/dashboard-overview.yaml
   - thanos/dashboard-store.yaml

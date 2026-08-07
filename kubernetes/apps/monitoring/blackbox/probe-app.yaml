@@ -1,0 +1,66 @@
+---
+# Application probes — every ingress-backing Service, direct over ClusterIP.
+#
+# THIS IS THE MOST VALUABLE FILE IN THE PR. 15 of ~28 apps export no metrics of any
+# kind (audit finding #12): authentik, gitea, immich, paperless, tandoor,
+# home-assistant, n8n, seerr, tautulli, tracearr, maintainerr, it-tools, pricewatch,
+# audiobookshelf, uptime-kuma. Until now the only evidence any of them were alive was
+# a Deployment reporting its replicas Ready — which stays true while the process
+# inside deadlocks, serves 500s, or loses its database.
+#
+# Probing the Service instead of the ingress host is what makes this a real signal:
+# it bypasses Traefik and Authentik and requires the app itself to answer. For the
+# forwardAuth-protected routes this is the ONLY check that reaches the backend at all.
+#
+# Apps that DO export metrics (sonarr/radarr/prowlarr/sabnzbd via exportarr,
+# qbittorrent via the martabal exporter) are probed too — an exporter sidecar being
+# up says nothing about whether the app is still serving its own UI, and uniform
+# coverage is cheaper to reason about than a curated exception list.
+#
+# ⚠️ Ports are the Service ports the Ingresses actually route to, not container ports;
+# several differ (audiobookshelf 13378, immich 2283, maintainerr 6246, seerr 5055).
+# All 21 were swept live before writing this file and every one answered.
+#
+# ⚠️ Service names are not always the app name — gitea is `gitea-app`, tracearr is
+# `tracearr-app`, authentik is `authentik-server`, grafana is the chart's
+# `kube-prometheus-stack-grafana`. Getting these wrong yields a probe that fails
+# forever on DNS rather than an obviously-broken config.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: app-services
+  namespace: monitoring
+spec:
+  jobName: blackbox-app
+  interval: 60s
+  scrapeTimeout: 30s
+  module: http_app
+  prober:
+    url: blackbox-exporter-prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - http://audiobookshelf.audiobookshelf:13378
+        - http://authentik-server.authentik:80
+        - http://gitea-app.gitea:3000
+        - http://home-assistant.home-assistant:8123
+        - http://immich-server.immich:2283
+        - http://kube-prometheus-stack-grafana.monitoring:80
+        - http://it-tools.tools:80
+        - http://maintainerr.media:6246
+        - http://n8n.n8n:5678
+        - http://paperless.paperless:8000
+        - http://pricewatch.pricewatch:5000
+        - http://prowlarr.media:9696
+        - http://qbittorrent.media:8080
+        - http://radarr.media:7878
+        - http://sabnzbd.media:8080
+        - http://seerr.media:5055
+        - http://sonarr.media:8989
+        - http://tandoor.tandoor:8080
+        - http://tautulli.media:8181
+        - http://tracearr-app.media:3000
+        - http://uptime-kuma.uptime-kuma:3001
+      labels:
+        probe_class: app

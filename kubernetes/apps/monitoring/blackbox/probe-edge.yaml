@@ -1,0 +1,72 @@
+---
+# Edge probes — every ingress host, through Traefik, over TLS.
+#
+# One probe per hostname (31 of them, including aliases). Aliases are NOT deduplicated
+# to the app behind them on purpose: cert-manager issues a SEPARATE certificate per
+# hostname here (verified — grafana.int.nerdbox.dev's leaf carries exactly one SAN),
+# and each host is its own Traefik router. seerr alone answers to five names, and any
+# one of those routes or certs can break independently of the others.
+#
+# WHAT THIS PROVES: DNS resolves, MetalLB is holding the VIP, Traefik is routing, the
+# CrowdSec bouncer is not blocking us, and the served certificate is valid and current.
+#
+# WHAT THIS DOES NOT PROVE: that the app behind the route is alive. For the 8 hosts
+# behind Authentik forwardAuth, Authentik answers the 302 itself and never contacts
+# the backend — the probe would stay green with the app completely dead. That gap is
+# what probe-app.yaml exists to cover; the two files are complementary and neither is
+# sufficient alone.
+#
+# ⚠️ Split-horizon DNS: *.nerdbox.dev resolves to the internal MetalLB address
+# (10.2.169.81) from inside the cluster, so even the public hostnames are probed over
+# the LAN path. These probes say nothing about WAN ingress, Cloudflare, or whether the
+# site is reachable from the internet. Genuine outside-in checking still has no
+# vantage point (audit finding #4) — Uptime Kuma runs in the same cluster.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: ingress-hosts
+  namespace: monitoring
+spec:
+  jobName: blackbox-edge
+  interval: 60s
+  scrapeTimeout: 30s
+  module: http_edge
+  prober:
+    url: blackbox-exporter-prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://audiobookshelf.int.nerdbox.dev
+        - https://audiobookshelf.nerdbox.dev
+        - https://authentik.int.nerdbox.dev
+        - https://gitea.int.nerdbox.dev
+        - https://grafana.int.nerdbox.dev
+        - https://ha.int.nerdbox.dev
+        - https://immich.int.nerdbox.dev
+        - https://immich.nerdbox.dev
+        - https://it-tools.int.nerdbox.dev
+        - https://maintainerr.int.nerdbox.dev
+        - https://n8n.int.nerdbox.dev
+        - https://overseerr.nerdbox.dev
+        - https://paperless.int.nerdbox.dev
+        - https://pricewatch.int.nerdbox.dev
+        - https://prowlarr.int.nerdbox.dev
+        - https://qbittorrent.int.nerdbox.dev
+        - https://radarr.int.nerdbox.dev
+        - https://radarr.nerdbox.dev
+        - https://requests.int.nerdbox.dev
+        - https://requests.nerdbox.dev
+        - https://sabnzbd.int.nerdbox.dev
+        - https://seerr.int.nerdbox.dev
+        - https://seerr.nerdbox.dev
+        - https://sonarr.int.nerdbox.dev
+        - https://sonarr.nerdbox.dev
+        - https://tandoor.int.nerdbox.dev
+        - https://tautulli.int.nerdbox.dev
+        - https://tracearr.int.nerdbox.dev
+        - https://tracearr.nerdbox.dev
+        - https://uptime.int.nerdbox.dev
+        - https://uptime.nerdbox.dev
+      labels:
+        probe_class: edge
