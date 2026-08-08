@@ -25,11 +25,18 @@ spec:
       retries: 3
   values:
     # -------------------------------------------------------------------------
-    # k3s compatibility — these components are embedded in k3s and either
-    # don't expose standard metrics ports or are replaced by Cilium
+    # k3s compatibility — these components run inside the k3s server/agent
+    # process rather than as standalone pods, so the chart's stock selectors and
+    # metrics ports don't apply to them unmodified.
     # -------------------------------------------------------------------------
+    # NOTE: kube-proxy IS running (this cluster is flannel + kube-proxy, not
+    # Cilium — an earlier comment here claimed otherwise). It is left unscraped
+    # because k3s binds its metrics to 127.0.0.1:10249, which is unreachable from
+    # the pod network; exposing it needs
+    # `--kube-proxy-arg=metrics-bind-address=0.0.0.0` on every agent. Tracked as a
+    # follow-up, not a Cilium consequence.
     kubeProxy:
-      enabled: false  # replaced by Cilium (disable-kube-proxy: true in our k3s config)
+      enabled: false
 
     kubeControllerManager:
       enabled: false  # embedded in k3s server process, not standalone
@@ -37,8 +44,42 @@ spec:
     kubeScheduler:
       enabled: false  # embedded in k3s server process, not standalone
 
+    # etcd IS scraped, but not the way the chart expects. Two k3s-specific points:
+    #
+    #   1. There is no etcd Pod. k3s runs etcd inside the k3s server process, so
+    #      the chart's default `component: etcd` Service selector matches nothing.
+    #      Listing the control-plane IPs under `endpoints` switches the chart to
+    #      emitting a selector-less Service plus a hand-built Endpoints object
+    #      pointing at those IPs (in kube-system).
+    #
+    #   2. Use port 2381, NOT 2379. 2379 is etcd's client port and requires mTLS
+    #      with certs at k3s-specific paths; 2381 is the read-only metrics
+    #      listener and is plain HTTP with no auth. So none of the chart's
+    #      serviceMonitor scheme/caFile/certFile/keyFile settings are needed —
+    #      the empty default scheme resolves to http, which is what we want.
+    #
+    # 2381 only listens on 127.0.0.1 until `etcd-expose-metrics: true` is set in
+    # /etc/rancher/k3s/config.yaml on every control node, which rebinds it to
+    # 0.0.0.0 so Prometheus can reach it from the pod network. That file is
+    # hand-managed — see the note in ansible/inventory/my-cluster/group_vars/all/main.yml.
+    # If the flag is missing on a node, its target goes down rather than silently
+    # disappearing, so the gap is visible.
+    #
+    # Enabling this also activates the chart's stock etcd rule group (15 rules:
+    # quorum, leader changes, DB quota/growth/fragmentation, fsync and commit
+    # latency, failed proposals, gRPC error rate — two of them appear twice at
+    # different severities). All of them key on `job=~".*etcd.*"`, which the
+    # chart's Service label `jobLabel: kube-etcd` satisfies.
     kubeEtcd:
-      enabled: false  # k3s uses embedded etcd with non-standard cert paths
+      enabled: true
+      endpoints:
+        - 10.2.169.30  # k3s-control-01
+        - 10.2.169.31  # k3s-control-02
+        - 10.2.169.32  # k3s-control-03
+      service:
+        enabled: true
+        port: 2381
+        targetPort: 2381
 
     # -------------------------------------------------------------------------
     # Prometheus
