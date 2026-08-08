@@ -19,11 +19,17 @@
 # the sibling Innodb_buffer_pool_read_requests / _reads counters do keep the
 # innodb_ prefix, which is why the two appear inconsistent below.
 #
-# ⚠️ Unlike the Postgres and Redis dashboards in this directory, these queries could
-# not be executed against live data before merge — the exporter does not exist until
-# this lands. They follow mysqld_exporter's documented metric set for v0.15.1 (the
-# version pinned in mariadb.yaml, which is also operator 26.6.0's default). Worth a
-# spot-check on first reconcile; `mysql_up` is the one to look at first.
+# ⚠️ THE EXPORTER USES THE MULTI-TARGET ENDPOINT. The operator points the
+# ServiceMonitor at /probe?target=<pod>:3306, not /metrics, so every series carries
+# extra `target` and `role` labels and `instance` is the MariaDB DNS name rather than
+# an IP:port. Nothing here keys on instance, but be aware of it when writing new
+# panels.
+#
+# ⚠️ MariaDB 12.3 HAS NO Innodb_rows_* STATUS VARIABLES. Only Innodb_row_lock_*
+# exists, so the mysql_global_status_innodb_row_ops_total metric that mysqld_exporter
+# produces on MySQL is simply absent here — verified against the exporter's raw
+# output. The Handler operations panel uses mysql_global_status_handlers_total
+# instead, which is MariaDB's own row-level accounting.
 #
 # Pinned to the `prometheus` datasource — one small instance, all "right now"
 # questions, well inside the ~2d local retention.
@@ -1142,7 +1148,7 @@ data:
         {
           "type": "timeseries",
           "id": 16,
-          "title": "InnoDB row operations/sec",
+          "title": "Handler operations/sec",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -1224,13 +1230,14 @@ data:
             {
               "datasource": "A",
               "editorMode": "code",
-              "expr": "rate(mysql_global_status_innodb_row_ops_total[5m])",
+              "expr": "rate(mysql_global_status_handlers_total{handler=~\"write|update|delete|read_key|read_next|read_rnd|commit|rollback\"}[5m])",
               "refId": "A",
-              "legendFormat": "{{operation}}",
+              "legendFormat": "{{handler}}",
               "instant": false,
               "range": true
             }
-          ]
+          ],
+          "description": "Row-level work as MariaDB actually reports it. This is NOT the InnoDB Innodb_rows_* family that mysqld_exporter exposes on MySQL — MariaDB 12.3's SHOW GLOBAL STATUS has no Innodb_rows_inserted/read/updated/deleted at all (only the Innodb_row_lock_* counters), so a mysql_global_status_innodb_row_ops_total panel is permanently empty here. Handler_* is the portable equivalent, and like buffer_pool_pages the exporter folds it into ONE series (handlers_total) with a `handler` label rather than one metric per counter. Filtered to the meaningful handlers; the full set is ~29 and mostly zero."
         },
         {
           "type": "row",
