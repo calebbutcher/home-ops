@@ -1,0 +1,202 @@
+---
+# Alerts for the edge security stack: CrowdSec (LAPI / agents / AppSec) and Traefik.
+#
+# The theme is "the control stopped working" rather than "an attack happened". A
+# blocked attack is the system doing its job and does not need a Discord message;
+# a WAF that quietly stopped inspecting does. Two of these fail OPEN by design and
+# were completely unmonitored until now:
+#   - AppSec: crowdsecAppsecUnreachableBlock/FailureBlock are both false, so if the
+#     AppSec pod dies every request sails through uninspected and nothing 500s.
+#   - The bouncer in stream mode serves from a local cache, so a dead LAPI degrades
+#     silently — enforcement keeps using an ever-staler decision list.
+#
+# Every expression below was checked against live series before being written.
+# Deliberately NOT written: a Traefik config-reload-failure alert. Traefik v3 here
+# exposes only traefik_config_last_reload_success (a timestamp) and
+# traefik_config_reloads_total, with no failure counter, and reloads are event-driven
+# so "time since last reload" is meaningless as a health signal.
+#
+# No `release:` label needed — ruleSelectorNilUsesHelmValues: false — and the
+# `severity` labels route via the catch-all Discord AlertmanagerConfig.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: security
+  namespace: monitoring
+spec:
+  groups:
+    - name: crowdsec.rules
+      rules:
+        # The LAPI owns the decision store. While it is down the bouncer keeps
+        # enforcing from its stream cache, so nothing visibly breaks — bans just
+        # stop being added or expired, and every cs_lapi_* series disappears.
+        #
+        # This has already happened: the LAPI is CPU-hungry serving ~39k decisions
+        # out of SQLite, and the chart's default 500m cpu limit throttled it to
+        # 81-100%, at which point its /metrics stopped answering within the scrape
+        # timeout. That limit is removed in the same PR that adds this alert; if
+        # this fires again, check CPU first (kubectl -n crowdsec top pod).
+        - alert: CrowdSecLAPIDown
+          expr: up{job="crowdsec-service"} == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "CrowdSec LAPI is down or unscrapeable"
+            description: >-
+              The CrowdSec LAPI has not been scrapeable for >10m. Bouncer enforcement
+              continues from its cached decision list but is going stale, and no new
+              bans are being recorded. Check `kubectl -n crowdsec get pods` and
+              `kubectl -n crowdsec top pod` — CPU throttling has caused this before.
+
+        # Agents are a DaemonSet: one per node, each tailing that node's Traefik
+        # access logs. A dead agent means requests served by the Traefik replica on
+        # that node are never parsed, so scanners hitting it are never detected.
+        - alert: CrowdSecAgentDown
+          expr: up{job="crowdsec-agent-service"} == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CrowdSec agent down on {{ $labels.pod }}"
+            description: >-
+              A CrowdSec agent has been unscrapeable for >15m. Traefik access logs on
+              that node are not being parsed, so detections from traffic served there
+              are lost. Check `kubectl -n crowdsec get pods -o wide`.
+
+        # ⚠️ Fails OPEN. crowdsecAppsecUnreachableBlock and crowdsecAppsecFailureBlock
+        # are both false (a deliberate detect-first choice), so when AppSec is down
+        # Traefik forwards every request uninspected and returns normal responses.
+        # There is no user-visible symptom at all — this alert is the only signal.
+        - alert: CrowdSecAppSecDown
+          expr: up{job="crowdsec-appsec-service"} == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CrowdSec AppSec (WAF) is down — requests are passing uninspected"
+            description: >-
+              The AppSec component has been unscrapeable for >10m. Because the bouncer
+              is configured to fail open, in-band WAF inspection on the seerr routes is
+              silently disabled and requests are being served normally. Check
+              `kubectl -n crowdsec get pods -l type=appsec`.
+
+        # The community blocklist (CAPI) is where almost all enforcement value comes
+        # from — normally ~25k active ban decisions plus ~13k from the firehol lists.
+        # If the pull breaks, the count collapses toward zero and the bouncer becomes
+        # decorative. 1000 is well below any healthy value and well above zero, so
+        # this catches a broken pull without firing on normal list churn.
+        - alert: CrowdSecBlocklistCollapsed
+          expr: sum(cs_active_decisions{origin="CAPI"}) < 1000
+          for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "CrowdSec community blocklist has collapsed to {{ $value }} decisions"
+            description: >-
+              Active CAPI decisions dropped below 1000 for >2h (normal is ~25k). The
+              central API pull is probably failing, which leaves the bouncer enforcing
+              almost nothing. Check `cscli capi status` in the LAPI pod.
+
+        # Locally-generated bans, i.e. this cluster's own agents deciding an IP is
+        # hostile from Traefik's logs (as opposed to inherited blocklists). A handful
+        # is routine background noise; a sustained double-digit count means something
+        # is actively hammering the edge and worth a look.
+        - alert: CrowdSecLocalBanSpike
+          expr: sum(cs_active_decisions{origin="crowdsec"}) > 10
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $value }} locally-generated CrowdSec bans active"
+            description: >-
+              This cluster's own agents have banned more than 10 IPs concurrently for
+              >15m, which is well above the usual background rate. Inspect with
+              `cscli decisions list --origin crowdsec` in the LAPI pod.
+
+        # AppSec in-band matches return 403 on the live request, so this doubles as
+        # the false-positive detector: three blocks total have ever been recorded
+        # here (all vpatch-git-config scanners), so 20 in 15m is either a real burst
+        # or a legitimate client tripping a rule. Check which before assuming attack.
+        - alert: CrowdSecAppSecBlockSpike
+          expr: sum(increase(cs_appsec_block_total[15m])) > 20
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CrowdSec AppSec blocked {{ $value }} requests in 15m"
+            description: >-
+              A burst of in-band WAF blocks (403s on live requests). Confirm these are
+              hostile and not a false positive before ignoring — `cscli alerts list`
+              in the LAPI pod shows the rule and the real client IP. If a legitimate
+              client is tripping a rule, exclude it in the appsec config rather than
+              detaching the middleware.
+
+    - name: traefik-edge.rules
+      rules:
+        # Single replica gone: still serving, but there is no redundancy left and
+        # MetalLB's endpoint-aware announcement has narrowed to one node.
+        - alert: TraefikInstanceDown
+          expr: up{job="traefik"} == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Traefik replica {{ $labels.pod }} is down"
+            description: >-
+              One Traefik replica has been unscrapeable for >10m. Ingress still works
+              via the surviving replica, but there is no headroom for a node failure.
+
+        # Every replica gone = total ingress outage for all ~22 hostnames. Written as
+        # absent() over the healthy series rather than up == 0 so it still fires if
+        # the targets disappear entirely rather than reporting down.
+        - alert: TraefikAllInstancesDown
+          expr: absent(up{job="traefik"} == 1)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "All Traefik replicas are down — total ingress outage"
+            description: >-
+              No healthy Traefik instance for >5m. Every ingress hostname is
+              unreachable. Check `kubectl -n traefik get pods` and the MetalLB
+              speaker for the 10.2.169.81 VIP.
+
+        # 429s only exist because of the rate-limit middleware added in this PR, so
+        # any occurrence is worth surfacing: either something is genuinely flooding a
+        # route, or the 50/s ceiling is too low for a legitimate client. The busiest
+        # minute ever observed on any backend was 7.1 req/s, so a real user should
+        # never reach this.
+        - alert: TraefikRateLimitTriggering
+          expr: sum by (exported_service) (increase(traefik_service_requests_total{code="429"}[15m])) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Rate limit is rejecting requests to {{ $labels.exported_service }}"
+            description: >-
+              {{ $value }} requests were rejected with 429 in 15m. Check whether this
+              is an attack or a legitimate client (a bulk immich upload, a webhook
+              burst) that needs a higher ceiling in the traefik rate-limit Middleware.
+
+        # Backend erroring rather than the edge. Per exported_service so the alert
+        # names the app. The `and` clause is a traffic floor — without it a single
+        # 500 on an idle route (paperless idles at 0.03 req/s) reads as a 100% error
+        # rate and pages for nothing.
+        - alert: TraefikBackendErrorRate
+          expr: |
+            (
+              sum by (exported_service) (rate(traefik_service_requests_total{code=~"5.."}[10m]))
+              /
+              sum by (exported_service) (rate(traefik_service_requests_total[10m]))
+            ) > 0.1
+            and
+            sum by (exported_service) (rate(traefik_service_requests_total[10m])) > 0.05
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.exported_service }} is returning {{ $value | humanizePercentage }} 5xx"
+            description: >-
+              More than 10% of requests to this backend have failed with a 5xx for
+              >15m. Traefik is routing fine — look at the app itself and its database.

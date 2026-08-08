@@ -141,6 +141,21 @@ spec:
           memory: 128Mi
         limits:
           memory: 256Mi
+          # Explicitly REMOVE the chart's default cpu limit (500m). Helm deep-merges
+          # maps, so overriding only limits.memory above silently left that default
+          # in place, and `null` is how Helm deletes an inherited key.
+          #
+          # It was actively hurting: the LAPI serves the bouncer's stream-mode
+          # decision set out of SQLite, and with ~39k active decisions (CAPI
+          # blocklist + firehol lists) it pegged 502m and sat at 81-100% CFS
+          # throttling. Throttled that hard, its :6060 metrics endpoint stopped
+          # answering inside the 10s scrape timeout, so the LAPI scrape target
+          # flapped to down and every cs_lapi_* series vanished — which is exactly
+          # what the CrowdSecLAPIDown alert added in this PR watches for.
+          #
+          # Matches this repo's memory-limit-only convention (see 7c098b4, the same
+          # fix for node-exporter). The 50m request keeps its scheduling floor.
+          cpu: null
 
     # Agent (DaemonSet) — tails Traefik's JSON access logs from the node filesystem and
     # runs the parsers/scenarios to produce alerts. Access logs are enabled in the Traefik

@@ -71,3 +71,4 @@ resources:
   - mariadb/dashboard.yaml
   - redis/dashboard.yaml
   - kube-prometheus-stack/prometheusrule-datastores.yaml
+  - kube-prometheus-stack/prometheusrule-security.yaml

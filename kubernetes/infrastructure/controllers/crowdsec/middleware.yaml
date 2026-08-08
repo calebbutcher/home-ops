@@ -4,10 +4,15 @@
 # the CrowdSec LAPI. Referenced cross-namespace as `crowdsec-crowdsec-bouncer@kubernetescrd`
 # (the `@kubernetescrd` FQ name works without allowCrossNamespace, same as authentik's).
 #
-# NOTE (observe-first rollout): this Middleware exists but is intentionally NOT attached to
-# any Ingress yet. Enforcement is a separate step — add the annotation
-#   traefik.ingress.kubernetes.io/router.middlewares: crowdsec-crowdsec-bouncer@kubernetescrd
-# to an external Ingress once observe mode has run clean. See docs/crowdsec-deploy.md.
+# STATUS: ENFORCING. The observe-first rollout is over — this Middleware is now attached to
+# every Ingress in the cluster (see the router.middlewares annotation on each). It has real
+# decisions to act on: ~39k active bans, almost all pulled from the CAPI community blocklist
+# (http:scan, http:exploit, http:crawl) and the firehol lists.
+#
+# ⚠️ Note what clientTrustedIPs below means in practice: RFC1918 is never blocked, so on the
+# ~30 hostnames that resolve only on the LAN this Middleware is INERT. It does real work on
+# the handful of names that are published in public DNS. Do not read its presence on an
+# internal route as protection. See docs/crowdsec-deploy.md.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
@@ -40,10 +45,18 @@ spec:
         - 192.168.0.0/16
 ---
 # CrowdSec AppSec middleware — forwards each request to the AppSec component (:7422) for
-# in-band WAF inspection (virtual-patching CVEs + generic attack rules). The appsec config
-# is DETECT-ONLY (default_remediation: allow in the HelmRelease), so this logs matches but
-# does NOT block. Attach ALONGSIDE crowdsec-bouncer (IP reputation, which stays first).
-# Referenced as `crowdsec-crowdsec-appsec@kubernetescrd`. Wired to seerr only for now.
+# in-band WAF inspection (virtual-patching CVEs + generic attack rules).
+#
+# ⚠️ This BLOCKS. The appsec config sets `default_remediation: ban` for in-band rules (see
+# the HelmRelease), so an in-band match returns 403 on the live request. Only the
+# out-of-band OWASP CRS rules are detect-only. It has fired for real three times so far, all
+# `crowdsecurity/vpatch-git-config` (GCP-hosted scanners probing /.git/config) — confirmed
+# against real public client IPs via `cscli alerts list`, i.e. client-IP preservation
+# through externalTrafficPolicy: Local is working end to end.
+#
+# Attach ALONGSIDE crowdsec-bouncer (IP reputation, which stays first). Referenced as
+# `crowdsec-crowdsec-appsec@kubernetescrd`. Wired to seerr only — see the HelmRelease for
+# why immich (the only other publicly-resolvable route) is deliberately excluded.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:

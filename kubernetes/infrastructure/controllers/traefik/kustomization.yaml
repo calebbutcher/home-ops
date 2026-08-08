@@ -7,3 +7,7 @@ resources:
   - helmrelease.yaml
   # Bouncer API key mounted into Traefik for the CrowdSec plugin (crowdsecLapiKeyFile).
   - crowdsec-bouncer-key.sops.yaml
+  # Cluster-wide TLS floor (TLSOption named `default` in this namespace).
+  - tlsoption.yaml
+  # Shared security-headers and rate-limit Middlewares, attached per-Ingress.
+  - middleware.yaml

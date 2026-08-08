@@ -11,7 +11,7 @@ metadata:
     # not challenge/redirect, so it is safe for the mobile app and ABS's native OIDC.
     # Do NOT add the authentik forwardauth middleware here: it would break the mobile
     # app/API and the OIDC callback. ABS authenticates via native OIDC against Authentik.
-    traefik.ingress.kubernetes.io/router.middlewares: crowdsec-crowdsec-bouncer@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-rate-limit@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
