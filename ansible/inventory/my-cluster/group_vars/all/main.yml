@@ -85,15 +85,15 @@ etcd_snapshot_retention: 14
 # --- etcd metrics ---
 # etcd always serves its metrics on port 2381, but binds them to 127.0.0.1 by
 # default, where Prometheus (running in the pod network) cannot reach them. This
-# flag rebinds that listener to 0.0.0.0 so the kube-prometheus-stack kubeEtcd
-# ServiceMonitor can scrape it — see the kubeEtcd block in
+# flag adds a second listener on the node's own IP — verified as
+# `10.2.169.3x:2381`, not 0.0.0.0 — so the kube-prometheus-stack kubeEtcd
+# ServiceMonitor can scrape it. See the kubeEtcd block in
 # kubernetes/apps/monitoring/kube-prometheus-stack/helmrelease.yaml.
 #
 # 2381 is metrics-only and read-only: it exposes no key/value data and cannot
-# mutate etcd. It is however unauthenticated, and k3s offers no way to bind it to
-# a single interface, so it is reachable from the whole LAN once enabled. That is
-# an accepted tradeoff here — it leaks cluster-shape telemetry (object counts,
-# request rates), not secrets.
+# mutate etcd. It is however unauthenticated, so anything that can route to the
+# node IP can read it. That is an accepted tradeoff here — it leaks cluster-shape
+# telemetry (object counts, request rates), not secrets.
 #
 # Same caveat as the S3 block above: the live cluster is configured by hand in
 # /etc/rancher/k3s/config.yaml (as `etcd-expose-metrics: true`) on each control

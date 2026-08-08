@@ -59,8 +59,9 @@ spec:
     #      the empty default scheme resolves to http, which is what we want.
     #
     # 2381 only listens on 127.0.0.1 until `etcd-expose-metrics: true` is set in
-    # /etc/rancher/k3s/config.yaml on every control node, which rebinds it to
-    # 0.0.0.0 so Prometheus can reach it from the pod network. That file is
+    # /etc/rancher/k3s/config.yaml on every control node, which adds a second
+    # listener on the node's own IP (not 0.0.0.0) so Prometheus can reach it from
+    # the pod network. Applying it requires a k3s restart. That file is
     # hand-managed — see the note in ansible/inventory/my-cluster/group_vars/all/main.yml.
     # If the flag is missing on a node, its target goes down rather than silently
     # disappearing, so the gap is visible.
