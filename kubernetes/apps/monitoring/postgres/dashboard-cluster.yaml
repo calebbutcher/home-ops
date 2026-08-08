@@ -10,6 +10,15 @@
 # longhorn/dashboard-capacity.yaml. Panels here are mostly rate() over counters,
 # which survive Thanos downsampling fine.
 #
+# ⚠️ THE $cluster VARIABLE MUST NOT CARRY qryType. Setting "qryType": 1 in the
+# variable's query object makes Grafana's Prometheus variable editor look for sibling
+# `label`/`metric` fields and ignore the label_values() string, so the dropdown comes
+# up with no options. Here that failed quietly rather than loudly, because `current`
+# is pinned to a real cluster below and the panels kept resolving — the only symptom
+# was an empty cluster picker. On the Redis dashboard, which defaults to All, the same
+# mistake blanked every panel. The bare {query, refId} shape is what the rest of this
+# repo uses.
+#
 # ⚠️ NO ROLE LABEL EXISTS. CNPG publishes nothing that says "primary". The Instances
 # table derives it from cnpg_pg_replication_in_recovery (0 = primary, 1 = replica),
 # and that is also how the fleet dashboard isolates primary-only throughput.
@@ -2070,9 +2079,8 @@ data:
             "name": "cluster",
             "options": [],
             "query": {
-              "qryType": 1,
               "query": "label_values(cnpg_collector_up, cnpg_cluster)",
-              "refId": "PrometheusVariableQueryEditor-VariableQuery"
+              "refId": "StandardVariableQuery"
             },
             "refresh": 2,
             "regex": "",
