@@ -61,6 +61,26 @@ spec:
       ports:
         - protocol: TCP
           port: 9187
+    # Uptime Kuma's TCP port monitors, which probe these Postgres services from
+    # their own namespace as an independent liveness check.
+    #
+    # This is the rule the original policy missed. A port monitor is a
+    # short-lived connect() — it never appears in a point-in-time sample of
+    # ESTABLISHED connections, which is exactly how the pre-merge verification
+    # (which found "zero cross-namespace clients") came back clean while
+    # monitors #19 'Tracearr Postgres' and #48 'Immich Postgres' were about to
+    # break. The same blind spot was correctly anticipated for the CNPG
+    # operator's :8000 polling and then not generalised.
+    #
+    # Applied to every Postgres uniformly, not just the two with monitors today,
+    # so that adding a monitor later cannot silently break it again.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: uptime-kuma
+      ports:
+        - protocol: TCP
+          port: 5432
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
