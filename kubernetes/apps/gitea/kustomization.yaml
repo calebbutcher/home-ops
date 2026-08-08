@@ -16,3 +16,4 @@ resources:
   - replicationsource.yaml
   - helmrelease.yaml
   - ingress.yaml
+  - networkpolicy.yaml

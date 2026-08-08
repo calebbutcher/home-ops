@@ -16,3 +16,4 @@ resources:
   - redis.yaml
   - helmrelease.yaml
   - ingress.yaml
+  - networkpolicy.yaml

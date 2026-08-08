@@ -3,3 +3,20 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: monitoring
+  labels:
+    # DOCUMENTED EXCEPTION — stays at 'privileged'.
+    #
+    # Several workloads here legitimately need host access:
+    #   - node-exporter: hostNetwork/hostPID, hostPort, and an Unconfined
+    #     AppArmor profile (required for the systemd collector to reach the D-Bus
+    #     system bus on Ubuntu 24.04 — see PR #266). "forbidden AppArmor
+    #     profiles" is a baseline violation on its own.
+    #   - alloy (x3): hostPath mounts of /var/log and /var/log/journal to tail
+    #     pod logs and the node journal.
+    #   - blackbox-exporter: NET_RAW for ICMP probes.
+    #
+    # This is load-bearing, not incidental: dropping the Unconfined profile to
+    # satisfy baseline would silently kill the systemd collector and, with it,
+    # NodeSystemdServiceFailed and NodeK3sServiceNotActive.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest

@@ -1,0 +1,73 @@
+---
+# Restrict who can open a socket to this namespace's datastores.
+#
+# SCOPE: deliberately not a namespace-wide default-deny. The aim is to stop
+# *cross-namespace* lateral movement to the data — a compromised app in one
+# namespace should not be able to reach another app's database — without taking
+# on the breakage risk of allow-listing every flow in the cluster. Only the
+# datastore pods are selected; every other pod here is untouched. Egress is not
+# restricted at all (CNPG needs it to push barman backups to RustFS).
+#
+# Verified on this cluster before writing, since a NetworkPolicy that is not
+# enforced is worse than none (it reads as protection):
+#   - policies ARE enforced: k3s runs the kube-router policy controller next to
+#     flannel, and a default-deny in a scratch namespace did block traffic;
+#   - cross-namespace namespaceSelector matches work, keyed on the
+#     kubernetes.io/metadata.name label the API server sets automatically;
+#   - kubelet health probes are NOT subject to ingress rules — a probed pod
+#     under default-deny stayed Ready with zero restarts through 25s of 5s
+#     probes.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-restrict-ingress
+  namespace: authentik
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: authentik-postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    # Anything in this namespace: the app itself, plus the other Postgres
+    # instances. All three replicas match the selector above, so they must be
+    # allowed to reach each other or streaming replication stops.
+    - from:
+        - podSelector: {}
+    # The CloudNativePG operator, which polls each instance manager and drives
+    # failover. Not pinned to a port on purpose: the operator is trusted
+    # infrastructure, and pinning it would turn a future CNPG change into a
+    # cluster stuck in an unknown state for no real security gain.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+    # Prometheus scraping the built-in exporter via the CNPG PodMonitor. Without
+    # this, the Postgres dashboards and prometheusrule-postgres.yaml go blind —
+    # and an absent metric is silence, not an alert.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9187
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-restrict-ingress
+  namespace: authentik
+spec:
+  podSelector:
+    matchLabels:
+      app: authentik-redis
+  policyTypes:
+    - Ingress
+  ingress:
+    # Same namespace only. This Redis runs with no requirepass and no TLS (the
+    # container args are just --save "" --appendonly no), so before this policy
+    # an open 6379 was reachable from every pod in the cluster. Nothing outside
+    # this namespace has any reason to talk to it.
+    - from:
+        - podSelector: {}
