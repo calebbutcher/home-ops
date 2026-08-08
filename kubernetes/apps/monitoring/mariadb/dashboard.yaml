@@ -507,7 +507,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_queries[5m])",
               "refId": "A",
@@ -516,10 +519,13 @@ data:
               "range": true
             },
             {
-              "datasource": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_questions[5m])",
-              "refId": "A",
+              "refId": "B",
               "legendFormat": "questions (client-issued)",
               "instant": false,
               "range": true
@@ -610,7 +616,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "mysql_global_status_threads_connected",
               "refId": "A",
@@ -619,19 +628,25 @@ data:
               "range": true
             },
             {
-              "datasource": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "mysql_global_status_threads_running",
-              "refId": "A",
+              "refId": "B",
               "legendFormat": "running",
               "instant": false,
               "range": true
             },
             {
-              "datasource": "C",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "mysql_global_variables_max_connections",
-              "refId": "A",
+              "refId": "C",
               "legendFormat": "max_connections",
               "instant": false,
               "range": true
@@ -726,7 +741,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_slow_queries[5m])",
               "refId": "A",
@@ -819,7 +837,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_aborted_connects[5m])",
               "refId": "A",
@@ -828,10 +849,13 @@ data:
               "range": true
             },
             {
-              "datasource": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_aborted_clients[5m])",
-              "refId": "A",
+              "refId": "B",
               "legendFormat": "aborted clients",
               "instant": false,
               "range": true
@@ -922,7 +946,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_created_tmp_tables[5m])",
               "refId": "A",
@@ -931,10 +958,13 @@ data:
               "range": true
             },
             {
-              "datasource": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_created_tmp_disk_tables[5m])",
-              "refId": "A",
+              "refId": "B",
               "legendFormat": "on disk",
               "instant": false,
               "range": true
@@ -1040,7 +1070,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "(1 - (\n  rate(mysql_global_status_innodb_buffer_pool_reads[5m])\n  / clamp_min(rate(mysql_global_status_innodb_buffer_pool_read_requests[5m]), 1)\n)) * 100",
               "refId": "A",
@@ -1134,7 +1167,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "mysql_global_status_buffer_pool_pages",
               "refId": "A",
@@ -1228,7 +1264,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_handlers_total{handler=~\"write|update|delete|read_key|read_next|read_rnd|commit|rollback\"}[5m])",
               "refId": "A",
@@ -1335,7 +1374,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_table_locks_waited[5m])",
               "refId": "A",
@@ -1344,10 +1386,13 @@ data:
               "range": true
             },
             {
-              "datasource": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_table_locks_immediate[5m])",
-              "refId": "A",
+              "refId": "B",
               "legendFormat": "immediate",
               "instant": false,
               "range": true
@@ -1438,7 +1483,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_bytes_received[5m])",
               "refId": "A",
@@ -1447,10 +1495,13 @@ data:
               "range": true
             },
             {
-              "datasource": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_bytes_sent[5m])",
-              "refId": "A",
+              "refId": "B",
               "legendFormat": "sent",
               "instant": false,
               "range": true
