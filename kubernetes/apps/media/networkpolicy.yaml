@@ -1,0 +1,85 @@
+---
+# Restrict who can open a socket to tracearr's datastores.
+#
+# SCOPE: this namespace is the reason the policy is written per-pod rather than
+# per-namespace. `media` holds ten unrelated apps, two of which (qbittorrent,
+# sabnzbd) exist to fetch untrusted content from the internet and run it through
+# extractors. "Same namespace = same trust domain" is simply false here, so
+# unlike the other namespaces these rules allow tracearr's own pods rather than
+# `podSelector: {}`.
+#
+# Verified on this cluster before writing, since a NetworkPolicy that is not
+# enforced is worse than none (it reads as protection):
+#   - policies ARE enforced: k3s runs the kube-router policy controller next to
+#     flannel, and a default-deny in a scratch namespace did block traffic;
+#   - cross-namespace namespaceSelector matches work, keyed on the
+#     kubernetes.io/metadata.name label the API server sets automatically;
+#   - kubelet health probes are NOT subject to ingress rules — a probed pod
+#     under default-deny stayed Ready with zero restarts through 25s of 5s
+#     probes.
+#
+# Egress is not restricted (CNPG needs it to push barman backups to RustFS, and
+# the VPN sidecars need it for everything).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tracearr-postgres-restrict-ingress
+  namespace: media
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: tracearr-postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # The other Postgres instances. All three replicas match the selector
+        # above, so they must be allowed to reach each other or streaming
+        # replication stops.
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: tracearr-postgres
+        # tracearr itself. This label covers the tracearr app pod and its Redis;
+        # it does NOT cover sonarr/radarr/prowlarr/seerr/maintainerr/tautulli/
+        # unpackerr/qbittorrent/sabnzbd, which is the entire point.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: tracearr
+    # The CloudNativePG operator, which polls each instance manager and drives
+    # failover. Not pinned to a port on purpose: the operator is trusted
+    # infrastructure, and pinning it would turn a future CNPG change into a
+    # cluster stuck in an unknown state for no real security gain.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+    # Prometheus scraping the built-in exporter via the CNPG PodMonitor.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9187
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tracearr-redis-restrict-ingress
+  namespace: media
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: tracearr
+      app.kubernetes.io/controller: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    # tracearr's own pods only. This Redis runs with no requirepass and no TLS
+    # (args are just redis-server --appendonly yes), so before this policy an
+    # open 6379 was reachable from every pod in the cluster — including the two
+    # that handle untrusted downloads in this very namespace.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: tracearr

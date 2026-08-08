@@ -3,6 +3,22 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: gitea
+  labels:
+    # PodSecurity baseline: blocks the container-escape primitives (privileged,
+    # host namespaces, hostPath, hostPort, unsafe capabilities) while permitting
+    # everything this namespace runs today.
+    #
+    # This one needed checking beyond the live pods, because of the
+    # privileged-movers annotation below: VolSync's mover Job only exists during
+    # the 06:35 sync, so a dry-run against running pods would not see it. Its
+    # "privileged" mover (volsync 0.16.0, internal/controller/mover/restic) sets
+    # privileged=false, allowPrivilegeEscalation=false, drop ALL, and adds only
+    # DAC_OVERRIDE/CHOWN/FOWNER with runAsUser=0. All three capabilities are on
+    # baseline's allowed list and baseline does not require runAsNonRoot, so the
+    # mover admits cleanly — verified by dry-running that exact pod shape against
+    # a namespace labelled enforce=baseline. It would fail 'restricted'.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
   annotations:
     # Allow VolSync to run the gitea-data backup mover as a privileged (root, full
     # capabilities) pod. The gitea PVC has mixed ownership — /data/ssh host keys are

@@ -3,3 +3,16 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: home-assistant
+  labels:
+    # DOCUMENTED EXCEPTION — stays at 'privileged'.
+    #
+    # home-assistant runs with hostNetwork: true (it needs the host's network
+    # namespace for mDNS/SSDP device discovery, which does not survive being
+    # NAT'd through a pod network). Host namespaces are forbidden by baseline, so
+    # labelling this namespace 'baseline' would not break the running pod — PSA
+    # only evaluates at admission — but it would silently reject the NEXT pod
+    # creation (node reboot, image bump, any Flux change) and take the app down
+    # at the worst possible moment. Explicit 'privileged' records that this is a
+    # known, accepted exception rather than a namespace we forgot to label.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest

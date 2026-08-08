@@ -3,3 +3,15 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: paperless
+  labels:
+    # PodSecurity baseline: blocks the container-escape primitives (privileged,
+    # host namespaces, hostPath, hostPort, unsafe capabilities) while permitting
+    # everything this namespace runs today — confirmed with a server-side dry-run
+    # against the live pods before enforcing, so this is a no-op now and a guard
+    # against future drift.
+    #
+    # 'restricted' is deliberately NOT used, not even as a warning: every pod in
+    # the cluster fails it (no seccompProfile, no runAsNonRoot), so it would emit
+    # a warning on every reconcile and train us to ignore warnings.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest

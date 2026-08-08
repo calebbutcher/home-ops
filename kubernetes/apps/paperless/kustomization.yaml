@@ -19,3 +19,4 @@ resources:
   - tika.yaml
   - helmrelease.yaml
   - ingress.yaml
+  - networkpolicy.yaml

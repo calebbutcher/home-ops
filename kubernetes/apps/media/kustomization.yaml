@@ -61,3 +61,4 @@ resources:
   - backup/qbittorrent-replicationsource.yaml
   - backup/sabnzbd-secret.sops.yaml
   - backup/sabnzbd-replicationsource.yaml
+  - networkpolicy.yaml

@@ -3,3 +3,19 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: media
+  labels:
+    # DOCUMENTED EXCEPTION — stays at 'privileged'.
+    #
+    # qbittorrent and sabnzbd each run a PIA WireGuard sidecar that needs
+    # NET_ADMIN (to create and configure wg0) and a /dev/net/tun hostPath. Both
+    # are forbidden by baseline. PSA only evaluates at admission, so labelling
+    # this 'baseline' would leave the running pods alone and then reject them on
+    # the next restart — a delayed outage, which is worse than an immediate one.
+    #
+    # Note this namespace is shared by ten apps, two of which handle untrusted
+    # downloaded content, so the usual "one namespace, one trust domain"
+    # assumption does not hold here. That is exactly why networkpolicy.yaml
+    # scopes tracearr's Postgres and Redis to tracearr's own pods rather than to
+    # the whole namespace.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest

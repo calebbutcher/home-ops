@@ -1,0 +1,48 @@
+---
+# Restrict who can open a socket to this namespace's datastore.
+#
+# SCOPE: deliberately not a namespace-wide default-deny. The aim is to stop
+# *cross-namespace* lateral movement to the data — a compromised app in one
+# namespace should not be able to reach another app's database — without taking
+# on the breakage risk of allow-listing every flow in the cluster. Only the
+# MariaDB pod is selected. Egress is not restricted (the nightly dump has to
+# reach RustFS).
+#
+# Verified on this cluster before writing, since a NetworkPolicy that is not
+# enforced is worse than none (it reads as protection):
+#   - policies ARE enforced: k3s runs the kube-router policy controller next to
+#     flannel, and a default-deny in a scratch namespace did block traffic;
+#   - cross-namespace namespaceSelector matches work, keyed on the
+#     kubernetes.io/metadata.name label the API server sets automatically;
+#   - kubelet health probes are NOT subject to ingress rules — a probed pod
+#     under default-deny stayed Ready with zero restarts through 25s of 5s
+#     probes.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mariadb-restrict-ingress
+  namespace: uptime-kuma
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: uptime-kuma-mariadb
+  policyTypes:
+    - Ingress
+  ingress:
+    # Anything in this namespace: uptime-kuma itself, and the
+    # uptime-kuma-mariadb CronJob that takes the 02:00 dump.
+    - from:
+        - podSelector: {}
+    # The mariadb-operator, which reconciles the StatefulSet, runs health checks
+    # and drives the Backup/Restore Jobs. Not pinned to a port for the same
+    # reason as CNPG above — it is trusted infrastructure and a future operator
+    # change should not silently wedge the database.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mariadb-system
+    # NOTE: no monitoring allow. There is no ServiceMonitor for this MariaDB
+    # today — confirmed live, `kubectl get servicemonitor -n uptime-kuma` is
+    # empty. If a mysqld-exporter is ever added, this policy must gain an allow
+    # for the monitoring namespace on the exporter's port, or the scrape will
+    # fail closed and look like the exporter is broken.

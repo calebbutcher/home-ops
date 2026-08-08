@@ -17,6 +17,7 @@ resources:
   - helmrelease.yaml
   - ingress.yaml
   - middleware.yaml
+  - networkpolicy.yaml
 # Blueprints stay as standalone, reviewable YAML files; this generator wraps them
 # into the ConfigMap the HelmRelease mounts (blueprints.configMaps). The generator
 # only reads blueprints/*.yaml — it does not touch the .sops.yaml files above.
