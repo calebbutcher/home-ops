@@ -1,0 +1,159 @@
+---
+# Alerts for the two datastores that had no metrics at all until now: the single
+# MariaDB behind Uptime Kuma, and the four Redis caches (immich, authentik,
+# paperless, media/tracearr).
+#
+# Postgres already had thirteen rules in prometheusrule-postgres.yaml. These two
+# had none — not because they were considered and judged unimportant, but because
+# nothing was scraping them. Enabling spec.metrics on the MariaDB and adding a
+# redis_exporter sidecar to each Redis is what makes these expressible.
+#
+# Every rule pairs with a panel on "MariaDB / Overview" (uid mariadb-overview) or
+# "Redis / Overview" (uid redis-overview), and the thresholds are the same numbers
+# in both places so a red panel and a firing alert never disagree.
+#
+# No `release:` label needed — ruleSelectorNilUsesHelmValues: false — and the
+# `severity` labels route via the catch-all Discord AlertmanagerConfig.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: datastores
+  namespace: monitoring
+spec:
+  groups:
+    - name: mariadb.rules
+      rules:
+        # The guard. Everything else in this group is a comparison against a series
+        # that only exists while the exporter is being scraped successfully, so
+        # without this rule the entire group fails silent — which is exactly the
+        # state MariaDB was in before this change.
+        #
+        # The most likely cause of it firing is not a dead database but a blocked
+        # scrape: the exporter is a separate Deployment and the monitoring namespace
+        # needs the :9104 allow in apps/uptime-kuma/networkpolicy.yaml.
+        - alert: MariaDBMetricsMissing
+          expr: absent(mysql_up)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "MariaDB metrics are not being collected — the database is unmonitored"
+            description: >-
+              No mysql_up series for >15m. Either the mysqld-exporter is not running,
+              or the scrape is being denied by the uptime-kuma NetworkPolicy. Until
+              this clears, every other MariaDB alert is silent rather than passing.
+
+        - alert: MariaDBDown
+          expr: mysql_up == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "MariaDB is down"
+            description: >-
+              The exporter is running but cannot query MariaDB (>5m). Uptime Kuma
+              stores all of its monitors, heartbeats and notification config here, so
+              the whole application is down with it — including the monitors that
+              would otherwise report on everything else.
+
+        - alert: MariaDBConnectionsHigh
+          expr: |
+            mysql_global_status_threads_connected
+              / mysql_global_variables_max_connections
+              > 0.8
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "MariaDB is at {{ $value | humanizePercentage }} of max_connections"
+            description: >-
+              Connection usage has been above 80% of max_connections for >15m. At
+              100% new connections are refused. On a workload as small as Uptime
+              Kuma's this almost certainly means connections are being leaked rather
+              than legitimately used.
+
+        # Aborted connects are failed handshakes. The threshold is a rate rather than
+        # "> 0" on purpose: an occasional aborted connect is normal noise (a pod
+        # restarting mid-handshake), whereas a sustained fifth-of-a-second rate is a
+        # client retrying bad credentials or something probing the port.
+        - alert: MariaDBAbortedConnectsHigh
+          expr: rate(mysql_global_status_aborted_connects[5m]) > 0.2
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "MariaDB is aborting {{ $value | printf \"%.2f\" }} connection attempts/sec"
+            description: >-
+              Sustained failed handshakes for >30m — bad credentials, a TLS mismatch,
+              or something probing :3306.
+
+    - name: redis.rules
+      rules:
+        - alert: RedisMetricsMissing
+          expr: absent(redis_up)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis metrics are not being collected — all four caches are unmonitored"
+            description: >-
+              No redis_up series for >15m. Most likely the redis_exporter sidecars are
+              not running, or the :9121 allow is missing from the redis-restrict-ingress
+              policies. A blocked scrape looks identical to a crashed exporter here.
+
+        - alert: RedisDown
+          expr: redis_up == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis in {{ $labels.namespace }} is down"
+            description: >-
+              The exporter cannot reach Redis in {{ $labels.namespace }} (>5m). None of
+              these hold durable data — they are caches and job brokers — so the
+              consequence is a degraded app (stalled Celery/BullMQ queues, cold cache),
+              not data loss.
+
+        # The one that matters. maxmemory is unset and the policy is noeviction on
+        # every instance, so Redis will NOT shed keys to stay under a ceiling: it
+        # grows until the kernel OOM-kills the container at its 256Mi limit and the
+        # entire cache is lost at once. redis_evicted_keys_total stays at zero
+        # throughout and gives no warning, so the container limit is the only usable
+        # signal.
+        #
+        # Deliberately expressed against kube_pod_container_resource_limits rather
+        # than redis_memory_max_bytes, which is 0 here and would make this rule
+        # divide by zero and never fire.
+        - alert: RedisMemoryHigh
+          expr: |
+            sum by (namespace) (redis_memory_used_bytes)
+              / on (namespace)
+            max by (namespace) (
+              kube_pod_container_resource_limits{
+                resource="memory", pod=~".*-redis-.*", container!~".*exporter.*"
+              }
+            )
+              > 0.85
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis in {{ $labels.namespace }} is at {{ $value | humanizePercentage }} of its container memory limit"
+            description: >-
+              Redis in {{ $labels.namespace }} has been above 85% of its 256Mi limit
+              for >15m. With maxmemory unset and maxmemory-policy=noeviction it cannot
+              evict its way out of this — the next stop is an OOMKill that drops the
+              whole keyspace. Either raise the limit or set maxmemory with an lru
+              policy so it sheds keys instead.
+
+        - alert: RedisRejectingConnections
+          expr: rate(redis_rejected_connections_total[5m]) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis in {{ $labels.namespace }} is rejecting connections"
+            description: >-
+              Redis in {{ $labels.namespace }} has refused connections for >15m,
+              meaning maxclients is exhausted. Usually a client that is opening
+              connections without closing them.

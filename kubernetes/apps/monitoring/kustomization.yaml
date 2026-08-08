@@ -66,3 +66,8 @@ resources:
   - alloy/helmrelease.yaml
   - alloy/helmrelease-events.yaml
   - alloy/helmrelease-syslog.yaml
+  - postgres/dashboard-overview.yaml
+  - postgres/dashboard-cluster.yaml
+  - mariadb/dashboard.yaml
+  - redis/dashboard.yaml
+  - kube-prometheus-stack/prometheusrule-datastores.yaml

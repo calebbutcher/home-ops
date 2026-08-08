@@ -43,6 +43,30 @@ spec:
               memory: 64Mi
             limits:
               memory: 256Mi
+        # Metrics sidecar. Every Redis in this cluster was previously unmonitored —
+        # no exporter, no ServiceMonitor, no redis_* series anywhere — so an eviction
+        # storm or a memory ceiling was invisible until the app misbehaved. Talks to
+        # Redis over localhost inside the pod, so it needs no NetworkPolicy of its own
+        # for that hop and no credentials (this Redis has no requirepass).
+        - name: redis-exporter
+          image: oliver006/redis_exporter:v1.88.0-alpine
+          env:
+            - name: REDIS_ADDR
+              value: redis://localhost:6379
+          ports:
+            - name: metrics
+              containerPort: 9121
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -53,6 +77,10 @@ kind: Service
 metadata:
   name: immich-redis
   namespace: immich
+  # Labelled so the ServiceMonitor below can select it. Without a label on the
+  # Service there is nothing for the selector to match and the scrape never starts.
+  labels:
+    app: immich-redis
 spec:
   selector:
     app: immich-redis
@@ -60,3 +88,23 @@ spec:
     - name: redis
       port: 6379
       targetPort: 6379
+    - name: metrics
+      port: 9121
+      targetPort: 9121
+---
+# Prometheus discovers this without a `release` label: the stack runs with
+# serviceMonitorSelectorNilUsesHelmValues false, so ServiceMonitors are picked up
+# from every namespace.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: immich-redis
+  namespace: immich
+spec:
+  selector:
+    matchLabels:
+      app: immich-redis
+  endpoints:
+    - port: metrics
+      interval: 30s
+      scrapeTimeout: 10s

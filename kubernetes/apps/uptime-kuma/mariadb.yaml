@@ -20,6 +20,42 @@ spec:
     storageClassName: local-path
   tls:
     enabled: false
+  # Metrics. Before this, MariaDB was the only datastore in the cluster with no
+  # instrumentation at all — no exporter, no ServiceMonitor, no mysql_* series — so
+  # the sole signal was Uptime Kuma probing its own database, plus the nightly dump's
+  # CronJob success time in prometheusrule-backups.yaml. Neither says anything about
+  # connections, InnoDB, or query load.
+  #
+  # The operator renders all of this: a mysqld-exporter Deployment, a Service on
+  # :9104, the `monitoring` DB user with the grants the exporter needs, and the
+  # ServiceMonitor. Leaving passwordSecretKeyRef unset lets it generate and rotate
+  # that user's password itself.
+  #
+  # No `prometheusRelease` — Prometheus runs with serviceMonitorSelectorNilUsesHelmValues
+  # false, so a ServiceMonitor in any namespace is scraped without a release label.
+  #
+  # ⚠️ The exporter is a SEPARATE Deployment, not a sidecar in the MariaDB pod, so it
+  # is a distinct client connecting over the network. networkpolicy.yaml has the
+  # matching :9104 allow for the monitoring namespace — without it the scrape fails
+  # closed and reads exactly like a broken exporter.
+  #
+  # Image pinned so the version is visible in git rather than moving under us on an
+  # operator bump. v0.15.1 is operator 26.6.0's own default (exporterImage in the
+  # chart values) and the CRD floor is ">= v0.15.0". If mysql_up comes up 0 against
+  # MariaDB 12.3, bumping this tag is the first thing to try.
+  metrics:
+    enabled: true
+    exporter:
+      image: prom/mysqld-exporter:v0.15.1
+      resources:
+        requests:
+          cpu: 25m
+          memory: 32Mi
+        limits:
+          memory: 128Mi
+    serviceMonitor:
+      interval: 30s
+      scrapeTimeout: 10s
   myCnf: |
     [mariadb]
     default_storage_engine=InnoDB
