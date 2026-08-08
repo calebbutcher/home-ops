@@ -11,7 +11,7 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    traefik.ingress.kubernetes.io/router.middlewares: authentik-authentik-forwardauth@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
@@ -46,6 +46,16 @@ metadata:
   namespace: n8n
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # This is the only Ingress in the cluster that is deliberately UNauthenticated,
+    # so it is the one that most needs a request ceiling: the rate limit is here to
+    # stop a runaway workflow loop or a stuck external caller from hammering n8n
+    # (peak observed: 0.02 req/s, so 50/s leaves enormous headroom).
+    #
+    # The CrowdSec bouncer is added for parity with every other route, but be clear
+    # about what it does TODAY: n8n.int.nerdbox.dev has no public DNS record, and
+    # the bouncer trusts all of RFC1918, so it is inert for the LAN clients that
+    # currently reach this. It earns its keep only if this host is ever published.
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-rate-limit@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:

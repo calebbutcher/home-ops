@@ -1,0 +1,34 @@
+---
+# Cluster-wide TLS floor. A TLSOption named exactly `default` in Traefik's OWN
+# namespace is applied to every router that does not name a different one — so
+# this single object covers all ~22 Ingresses with no per-route annotation.
+#
+# Verified to be a no-op for current clients before enabling: over the last
+# 175,884 TLS requests the edge saw only
+#   TLS 1.3  175,879  (TLS_AES_128_GCM_SHA256, TLS_CHACHA20_POLY1305_SHA256)
+#   TLS 1.2        5  (TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256)
+# and nothing below 1.2 — so raising the floor to 1.2 rejects zero real traffic.
+# (Query: sum by (tls_version,tls_cipher) (traefik_entrypoint_requests_tls_total).)
+apiVersion: traefik.io/v1alpha1
+kind: TLSOption
+metadata:
+  name: default
+  namespace: traefik
+spec:
+  minVersion: VersionTLS12
+
+  # cipherSuites applies to TLS 1.2 ONLY — TLS 1.3 suites are fixed by the RFC and
+  # are not configurable in Go, so the 1.3 traffic above is unaffected either way.
+  # This is the Mozilla "intermediate" set: AEAD-only, forward-secret. It drops the
+  # CBC-mode suites Go still offers by default (e.g. AES_128_CBC_SHA), which are the
+  # ones with a Lucky13/padding-oracle history. The single TLS 1.2 cipher actually
+  # observed in use is the second entry, so nothing in the house loses access.
+  # The ECDSA entries are inert today (cert-manager issues RSA keys) but cost
+  # nothing and mean an ECDSA cert can be adopted later without editing this list.
+  cipherSuites:
+    - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+    - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+    - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+    - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+    - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305
+    - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305

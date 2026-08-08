@@ -1,0 +1,107 @@
+---
+# Baseline response-header floor for every route. Referenced cross-namespace as
+# `traefik-security-headers@kubernetescrd` (the fully-qualified @kubernetescrd form
+# works without allowCrossNamespace, same as authentik's forwardauth).
+#
+# Attach it FIRST in the middleware chain so it also stamps responses that never
+# reach the backend — the CrowdSec bouncer's 403 and Authentik's 302 both get the
+# headers, because Traefik wraps the chain outermost-first.
+#
+# WHAT THIS DELIBERATELY DOES *NOT* SET, and why — a survey of the live responses
+# on all 22 routes (curl -I through Traefik) showed several apps already send their
+# own header values, and Traefik's customResponseHeaders OVERWRITE rather than
+# fill-in-if-absent. So anything set here that an app sets more strictly would be a
+# silent DOWNGRADE:
+#   - Referrer-Policy: omitted. audiobookshelf and home-assistant send `no-referrer`
+#     and authentik/paperless/tandoor send `same-origin` — both stricter than the
+#     `strict-origin-when-cross-origin` we would put here. That value has also been
+#     the default in every current browser since 2021, so setting it explicitly
+#     would buy nothing and cost those five apps their stricter choice.
+#   - Content-Security-Policy: omitted. A CSP that is correct for one app breaks the
+#     next one; it belongs in each app's own config, not in a shared middleware.
+#
+# X-Content-Type-Options and HSTS are safe to set globally: nosniff has exactly one
+# valid value (so overwriting it is a no-op for the 6 apps that already send it),
+# and NO route sends HSTS today, so it is purely additive.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: security-headers
+  namespace: traefik
+spec:
+  headers:
+    # X-Content-Type-Options: nosniff — stop browsers MIME-sniffing a response into
+    # something executable. Already sent by authentik, gitea, home-assistant,
+    # grafana, paperless and tandoor; this extends it to the other 16 routes.
+    contentTypeNosniff: true
+
+    # X-Frame-Options: SAMEORIGIN — clickjacking floor. SAMEORIGIN rather than DENY
+    # because gitea, home-assistant, paperless, tandoor and uptime-kuma all choose
+    # SAMEORIGIN for themselves, i.e. they frame their own pages; DENY would break
+    # them. Nothing in the cluster is framed cross-origin (checked: Home Assistant
+    # has no panel_iframe/webpage cards, and Grafana runs with allow_embedding off).
+    # The two apps that send DENY today get the stricter middleware below instead.
+    customFrameOptionsValue: SAMEORIGIN
+
+    # HSTS. Every host is already HTTPS-only (the `web` entrypoint 301s to
+    # `websecure`), so this mainly removes the first-request downgrade window.
+    #
+    # max-age is deliberately 1 day to start. HSTS is the one header here that a
+    # browser will REMEMBER and enforce against us: while it is cached, a broken or
+    # expired cert becomes a hard failure with no click-through. A 1-day window
+    # keeps the blast radius of a cert-manager problem to a day. Raise to 31536000
+    # (1 year) once this has run clean for a month or so.
+    #
+    # includeSubdomains stays OFF: these hosts sit under *.int.nerdbox.dev and
+    # *.nerdbox.dev, and asserting for subdomains from an app response would pin
+    # names this cluster does not serve. preload stays OFF for the same reason —
+    # it is effectively irreversible.
+    stsSeconds: 86400
+    stsIncludeSubdomains: false
+    stsPreload: false
+---
+# Same floor, but keeps X-Frame-Options: DENY. Only for the two routes observed
+# sending DENY already (authentik and grafana) — the shared middleware above would
+# relax them to SAMEORIGIN, and an identity provider is exactly the page you least
+# want framed. Referenced as `traefik-security-headers-frame-deny@kubernetescrd`.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: security-headers-frame-deny
+  namespace: traefik
+spec:
+  headers:
+    contentTypeNosniff: true
+    frameDeny: true
+    stsSeconds: 86400
+    stsIncludeSubdomains: false
+    stsPreload: false
+---
+# Per-client-IP request ceiling. Referenced as `traefik-rate-limit@kubernetescrd`.
+#
+# This is a flood backstop, NOT a brute-force control — CrowdSec already handles
+# credential stuffing and scanning via its own scenarios and the community
+# blocklist. The job here is to stop one client from saturating an app (a runaway
+# n8n loop, a scraper, a stuck mobile client) before it becomes an outage.
+#
+# Sizing, from 7 days of live data: the busiest single MINUTE any backend has seen
+# is radarr at 7.1 req/s, then sonarr 4.8, qbittorrent 2.9, grafana 2.7, uptime-kuma
+# 1.9, immich 1.8. (Query: max_over_time(sum by (exported_service)
+# (rate(traefik_service_requests_total[1m]))[7d:1m]).) 50/s sustained is ~7x the
+# worst observed minute and the 100 burst absorbs a cold page load firing dozens of
+# asset requests at once, so no human or app hits this in normal use.
+#
+# sourceCriterion is left at the default (client IP, ipStrategy depth 0), which is
+# the REAL client address here because the Traefik Service runs
+# externalTrafficPolicy: Local — without that, kube-proxy would SNAT every external
+# client to a node IP and the whole cluster would share one bucket.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: rate-limit
+  namespace: traefik
+spec:
+  rateLimit:
+    average: 50
+    period: 1s
+    burst: 100
