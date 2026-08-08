@@ -252,3 +252,107 @@ data:
                 A mon clock-skew warning appeared in the last 10m — NTP drift between
                 mon hosts can destabilise quorum. Check `chrony`/`timedatectl` on the
                 PVE nodes.
+  k3s-nodes.yaml: |
+    # Host-journal signatures from the nine k3s nodes, shipped by the Alloy
+    # DaemonSet's loki.source.journal (see alloy/helmrelease.yaml) and queried by
+    # {job="journal"}. These are the OS-level events that pod logs cannot see.
+    #
+    # These rules match on MESSAGE TEXT, never on the `level` label. k3s logs
+    # everything at journal priority "info" and carries its real severity as
+    # klog's I/W/E prefix inside the message, so `level="error"` would match
+    # almost nothing. Verified against a 48h sample: 1948/1948 entries were
+    # level="info", including lines beginning "E0808 ...".
+    #
+    # Baseline before merge: all five patterns returned 0 hits over 7 days on all
+    # 9 nodes, so these start quiet. Deliberately NOT included: a generic k3s
+    # error-line rule — k3s routinely logs benign E-level lines such as "Error on
+    # socket receive: use of closed network connection", which would make it fire
+    # constantly.
+    groups:
+      - name: k3s-node-journal
+        rules:
+          - alert: NodeKernelOOMKill
+            # The kernel killed a process to reclaim memory. Container OOM kills
+            # already surface via kube-state-metrics; this catches the ones that
+            # happen OUTSIDE a container cgroup (k3s/containerd/sshd themselves),
+            # which nothing else reports.
+            expr: |
+              sum by (node) (count_over_time({job="journal"} |~ `(?i)(oom-kill|Out of memory: Killed process|oom_reaper)` [10m])) > 0
+            for: 0m
+            labels:
+              severity: critical
+              component: kernel
+            annotations:
+              summary: "Kernel OOM-killed a process on {{ $labels.node }}"
+              description: >-
+                The kernel invoked the OOM killer on {{ $labels.node }} in the last
+                10m. Find the victim in Loki ({job="journal", node="{{ $labels.node }}"})
+                — if it was k3s or containerd the node is about to misbehave badly.
+
+          - alert: NodeSystemdUnitFailed
+            # Event-side counterpart to node_systemd_unit_state (PR: prometheusrule-nodes.yaml).
+            # The metric says "is failed now"; this says "failed just now", and
+            # catches units that fail-and-restart in between metric scrapes.
+            expr: |
+              sum by (node) (count_over_time({job="journal"} |~ `(?i)(Failed with result|Failed to start)` [10m])) > 0
+            for: 0m
+            labels:
+              severity: warning
+              component: systemd
+            annotations:
+              summary: "A systemd unit failed on {{ $labels.node }}"
+              description: >-
+                systemd reported a unit failure on {{ $labels.node }} in the last 10m.
+                Check which one in Loki ({job="journal", node="{{ $labels.node }}"})
+                and cross-check node_systemd_unit_state{state="failed"} for whether
+                it is still down or recovered.
+
+          - alert: NodeFilesystemOrHungTask
+            # ext4 errors, block I/O errors, and hung kernel tasks. On these VMs a
+            # hung task usually means the Ceph-backed virtual disk stalled.
+            expr: |
+              sum by (node) (count_over_time({job="journal"} |~ `(?i)(EXT4-fs error|I/O error|blocked for more than|hung_task)` [10m])) > 0
+            for: 0m
+            labels:
+              severity: critical
+              component: kernel
+            annotations:
+              summary: "Filesystem error or hung task on {{ $labels.node }}"
+              description: >-
+                A filesystem error / block I/O error / hung-task message appeared on
+                {{ $labels.node }} in the last 10m. These VMs sit on Proxmox Ceph, so
+                also check Ceph health — a stalled OSD shows up here first.
+
+          - alert: NodeSSHAuthFailureBurst
+            # Threshold, not >0: a fat-fingered password should not page. A burst
+            # means something is guessing. These nodes are LAN-only, so any burst
+            # is either a broken automation or someone who should not be there.
+            expr: |
+              sum by (node) (count_over_time({job="journal"} |~ `(?i)(Failed password|Invalid user|authentication failure|Connection closed by authenticating user)` [10m])) > 10
+            for: 0m
+            labels:
+              severity: warning
+              component: security
+            annotations:
+              summary: "SSH authentication failure burst on {{ $labels.node }}"
+              description: >-
+                More than 10 SSH auth failures on {{ $labels.node }} in 10m. Identify
+                the source IP in Loki ({job="journal", node="{{ $labels.node }}"}).
+                These hosts are not internet-exposed, so this is a LAN source.
+
+          - alert: NodeSudoFailure
+            # Only FAILED sudo — a successful sudo is routine here (the k3s config
+            # is hand-managed) and alerting on it would be pure noise. A failure
+            # means someone tried to escalate and could not.
+            expr: |
+              sum by (node) (count_over_time({job="journal"} |~ `(?i)sudo:.*(NOT in sudoers|incorrect password|authentication failure)` [10m])) > 0
+            for: 0m
+            labels:
+              severity: warning
+              component: security
+            annotations:
+              summary: "Failed sudo attempt on {{ $labels.node }}"
+              description: >-
+                A sudo attempt was rejected on {{ $labels.node }} in the last 10m
+                (not in sudoers, or wrong password). Check who in Loki
+                ({job="journal", node="{{ $labels.node }}"}).

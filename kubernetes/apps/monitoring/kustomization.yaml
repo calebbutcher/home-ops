@@ -29,6 +29,7 @@ resources:
   - kube-prometheus-stack/prometheusrule-flux.yaml
   - kube-prometheus-stack/prometheusrule-backups.yaml
   - kube-prometheus-stack/prometheusrule-probes.yaml
+  - kube-prometheus-stack/prometheusrule-nodes.yaml
   - blackbox/helmrelease.yaml
   - blackbox/probe-edge.yaml
   - blackbox/probe-app.yaml
