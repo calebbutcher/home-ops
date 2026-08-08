@@ -682,7 +682,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "sum by (namespace) (redis_memory_used_bytes{namespace=~\"$namespace\"})",
               "refId": "A",
@@ -691,10 +694,13 @@ data:
               "range": true
             },
             {
-              "datasource": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "max(kube_pod_container_resource_limits{resource=\"memory\", pod=~\".*-redis-.*\", container!~\".*exporter.*\", namespace=~\"$namespace\"})",
-              "refId": "A",
+              "refId": "B",
               "legendFormat": "container limit",
               "instant": false,
               "range": true
@@ -793,7 +799,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "sum by (namespace) (redis_memory_used_bytes{namespace=~\"$namespace\"})\n  / on (namespace)\nmax by (namespace) (kube_pod_container_resource_limits{resource=\"memory\", pod=~\".*-redis-.*\", container!~\".*exporter.*\", namespace=~\"$namespace\"})\n  * 100",
               "refId": "A",
@@ -900,7 +909,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "sum by (namespace) (rate(redis_commands_processed_total{namespace=~\"$namespace\"}[5m]))",
               "refId": "A",
@@ -994,7 +1006,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "sum by (namespace) (rate(redis_keyspace_hits_total{namespace=~\"$namespace\"}[5m]))\n  /\nclamp_min(\n  sum by (namespace) (rate(redis_keyspace_hits_total{namespace=~\"$namespace\"}[5m]))\n  + sum by (namespace) (rate(redis_keyspace_misses_total{namespace=~\"$namespace\"}[5m]))\n, 1)\n  * 100",
               "refId": "A",
@@ -1088,7 +1103,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "sum by (namespace) (redis_connected_clients{namespace=~\"$namespace\"})",
               "refId": "A",
@@ -1097,10 +1115,13 @@ data:
               "range": true
             },
             {
-              "datasource": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "sum by (namespace) (redis_blocked_clients{namespace=~\"$namespace\"})",
-              "refId": "A",
+              "refId": "B",
               "legendFormat": "{{namespace}} blocked",
               "instant": false,
               "range": true
@@ -1208,7 +1229,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "sum by (namespace) (rate(redis_evicted_keys_total{namespace=~\"$namespace\"}[5m]))",
               "refId": "A",
@@ -1302,7 +1326,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "sum by (namespace) (rate(redis_expired_keys_total{namespace=~\"$namespace\"}[5m]))",
               "refId": "A",
@@ -1400,7 +1427,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "sum by (namespace) (rate(redis_rejected_connections_total{namespace=~\"$namespace\"}[5m]))",
               "refId": "A",
@@ -1494,7 +1524,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "sum by (namespace, db) (redis_db_keys{namespace=~\"$namespace\"})",
               "refId": "A",
@@ -1587,7 +1620,10 @@ data:
           },
           "targets": [
             {
-              "datasource": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "sum by (namespace) (rate(redis_net_input_bytes_total{namespace=~\"$namespace\"}[5m]))",
               "refId": "A",
@@ -1596,10 +1632,13 @@ data:
               "range": true
             },
             {
-              "datasource": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
               "editorMode": "code",
               "expr": "sum by (namespace) (rate(redis_net_output_bytes_total{namespace=~\"$namespace\"}[5m]))",
-              "refId": "A",
+              "refId": "B",
               "legendFormat": "{{namespace}} out",
               "instant": false,
               "range": true
