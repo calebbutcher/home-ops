@@ -350,6 +350,58 @@ spec:
     # Node exporter — runs on every node, collects CPU/memory/disk/network
     # -------------------------------------------------------------------------
     prometheus-node-exporter:
+      # --- systemd collector -------------------------------------------------
+      # Gives node_systemd_unit_state, i.e. "is k3s/sshd/networkd actually
+      # running right now". The journal (job="journal") reports the *event* of a
+      # unit failing; this reports current *state*, which still tells you the
+      # truth about a unit that failed days ago.
+      #
+      # Getting it working non-root took some doing, so the reasoning is worth
+      # recording:
+      #   * node-exporter dials the D-Bus SYSTEM bus at
+      #     /var/run/dbus/system_bus_socket — not systemd's private socket. That
+      #     path is not mounted by default, hence extraHostVolumeMounts below.
+      #     Mounting at /run/dbus does NOT work; it must be /var/run/dbus.
+      #   * That socket is srw-rw-rw- on the host, so ANY local user can already
+      #     talk to it — the container gains nothing a shell user doesn't have,
+      #     and it can stay read-only.
+      #   * Ubuntu 24.04's AppArmor blocks D-Bus method calls from confined
+      #     containers ("An AppArmor policy prevents this sender..."), so the
+      #     profile has to be Unconfined for this container.
+      #
+      # The alternative was running node-exporter as root against systemd's
+      # PRIVATE socket (/run/systemd/private). Rejected: that socket is a systemd
+      # CONTROL channel — anything holding it can stop k3s — whereas the system
+      # bus is already world-reachable and read-only here. Staying UID 65534 with
+      # a narrower socket beats UID 0 with a wider one.
+      #
+      # NOTE: Unconfined AppArmor violates PodSecurity `baseline`. That is fine
+      # only because `monitoring` is deliberately left at `privileged`; do not
+      # copy this pattern into an app namespace.
+      securityContext:
+        fsGroup: 65534
+        runAsGroup: 65534
+        runAsNonRoot: true
+        runAsUser: 65534
+        appArmorProfile:
+          type: Unconfined
+      extraArgs:
+        # Allowlisted rather than collecting every unit: the default set is
+        # hundreds of units per node and mostly oneshot//dev noise. These are the
+        # ones whose failure actually means something here.
+        # NB control nodes run `k3s.service`, workers run `k3s-node.service`.
+        # There is no containerd.service — k3s embeds containerd in-process.
+        - --collector.systemd
+        - --collector.systemd.unit-include=^(k3s|k3s-node|ssh|cron|systemd-networkd|systemd-timesyncd|qemu-guest-agent|rpcbind)\.service$
+        # Emits node_systemd_service_restart_total. Off by default, and the
+        # chart's stock NodeSystemdServiceCrashlooping rule reads exactly that
+        # metric — without this flag that alert exists but can never fire.
+        - --collector.systemd.enable-restarts-metrics
+      extraHostVolumeMounts:
+        - name: dbus
+          hostPath: /run/dbus
+          mountPath: /var/run/dbus
+          readOnly: true
       resources:
         requests:
           memory: 32Mi

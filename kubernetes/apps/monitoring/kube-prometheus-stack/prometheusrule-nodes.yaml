@@ -1,0 +1,91 @@
+---
+# Node-level alerts for the nine k3s VMs.
+#
+# SCOPE: this file deliberately contains only what the chart does NOT already
+# ship. kube-prometheus-stack's stock `node-exporter` group already provides
+# NodeSystemdServiceFailed (node_systemd_unit_state{state="failed"} == 1) and
+# NodeSystemdServiceCrashlooping (increase(node_systemd_service_restart_total[5m]) > 2),
+# plus filesystem/CPU/memory/clock rules. Those alerts have existed all along but
+# were dead metrics — the systemd collector was off, so they could never fire.
+# Enabling it in the HelmRelease brings them to life; re-implementing them here
+# would just produce duplicate Discord messages.
+#
+# What is left uncovered, and therefore lives here:
+#   1. The collector silently dying — both stock rules read node_systemd_unit_state,
+#      so if that metric disappears they stop firing rather than start firing.
+#   2. k3s being *stopped* rather than *failed* — systemd considers a cleanly
+#      stopped unit "inactive", not "failed", so NodeSystemdServiceFailed misses it.
+#
+# See also loki/rules-truenas.yaml (k3s-nodes.yaml key) for the journal-based
+# counterparts: OOM kills, filesystem errors, sshd/sudo auth failures.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: node-rules
+  namespace: monitoring
+spec:
+  groups:
+    - name: k3s-node.rules
+      rules:
+        # ---------------------------------------------------------------------
+        # Guard: the systemd collector itself
+        # ---------------------------------------------------------------------
+        - alert: NodeSystemdCollectorMissing
+          # The collector depends on a chain that can break silently: a
+          # world-readable /run/dbus socket, an Unconfined AppArmor profile, and
+          # the chart continuing to pass our extraArgs. If any link breaks the
+          # metric vanishes — and a vanished metric makes NodeSystemdServiceFailed
+          # permanently quiet, which reads exactly like "all units healthy".
+          expr: absent(node_systemd_unit_state)
+          for: 15m
+          labels:
+            severity: warning
+            component: node
+          annotations:
+            summary: "node_systemd_unit_state has disappeared cluster-wide"
+            description: >-
+              No node is reporting systemd unit state, so NodeSystemdServiceFailed
+              and NodeSystemdServiceCrashlooping cannot fire. Check
+              node_scrape_collector_success{collector="systemd"} and the
+              node-exporter logs — the usual causes are the /var/run/dbus mount
+              disappearing or the AppArmor profile reverting to confined.
+
+        - alert: NodeSystemdCollectorFailing
+          # Per-node version: the collector is loaded but erroring (e.g. AppArmor
+          # denial on one node only). Catches partial breakage that the
+          # cluster-wide absent() guard above would miss.
+          expr: node_scrape_collector_success{collector="systemd"} == 0
+          for: 15m
+          labels:
+            severity: warning
+            component: node
+          annotations:
+            summary: "systemd collector failing on {{ $labels.instance }}"
+            description: >-
+              node-exporter on {{ $labels.instance }} cannot read systemd state.
+              Its unit metrics are stale or absent, so unit failures on this node
+              will not alert. Check the node-exporter pod logs for a D-Bus or
+              AppArmor error.
+
+        # ---------------------------------------------------------------------
+        # k3s itself
+        # ---------------------------------------------------------------------
+        - alert: NodeK3sServiceNotActive
+          # NodeSystemdServiceFailed only catches state="failed". A unit that was
+          # stopped deliberately (or by a bad upgrade) sits at "inactive", which
+          # is not "failed" — so without this rule, `systemctl stop k3s` is
+          # invisible until the node goes NotReady and KubeNodeNotReady fires
+          # several minutes later.
+          # Control nodes run k3s.service; workers run k3s-node.service.
+          expr: node_systemd_unit_state{name=~"k3s(-node)?\\.service", state="active"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            component: k3s
+          annotations:
+            summary: "{{ $labels.name }} is not active on {{ $labels.instance }}"
+            description: >-
+              {{ $labels.name }} on {{ $labels.instance }} has not been in the
+              active state for 5m. If this is a control node, the cluster has lost
+              an apiserver and an etcd member — check quorum before touching
+              anything else.

@@ -22,12 +22,15 @@ spec:
     remediation:
       retries: 3
   values:
-    # Pod-log collector: one pod per node (DaemonSet), each tailing ONLY its own
-    # node's /var/log/pods. Because the log file for any pod exists on exactly one
-    # node, the file glob naturally shards collection with no duplication and no
-    # need to filter by node name. Kubernetes events are handled by the separate
-    # alloy-events Deployment (see helmrelease-events.yaml) to avoid 1-copy-per-node
-    # duplication.
+    # Node-level log collector: one pod per node (DaemonSet), collecting two
+    # things from the node it runs on:
+    #   1. Pod logs — tailing ONLY its own node's /var/log/pods. Because the log
+    #      file for any pod exists on exactly one node, the file glob naturally
+    #      shards collection with no duplication and no need to filter by node.
+    #   2. The host journal (job="journal") — k3s/kernel/sshd/systemd, i.e.
+    #      everything happening OUTSIDE Kubernetes on that node.
+    # Kubernetes events are handled by the separate alloy-events Deployment (see
+    # helmrelease-events.yaml) to avoid 1-copy-per-node duplication.
     controller:
       type: daemonset
       # Run on control-plane/etcd nodes too so their pod logs are captured.
@@ -95,6 +98,76 @@ spec:
           loki.process "pods" {
             stage.cri {}
             forward_to = [loki.write.default.receiver]
+          }
+
+          // ---------------------------------------------------------------
+          // Node journald
+          // ---------------------------------------------------------------
+          // Pod logs above cover everything running IN Kubernetes. They say
+          // nothing about the node underneath it: k3s/containerd service
+          // failures, kernel OOM kills, filesystem errors, sshd auth failures.
+          // Those only exist in the host journal, which nothing was reading.
+          //
+          // No extra volume is needed — mounts.varlog already gives us
+          // /var/log, and journald on these nodes is persistent
+          // (Storage=auto + /var/log/journal exists, 130-600MB per node).
+          // /etc/machine-id is NOT required; verified reading works without it.
+          //
+          // Volume is small: ~40-360 entries/hour/node, so this is a rounding
+          // error next to pod logs. The bulk is k3s.service, which usefully
+          // carries the embedded apiserver AND etcd logs.
+          discovery.relabel "journal" {
+            targets = []
+
+            rule {
+              source_labels = ["__journal__systemd_unit"]
+              target_label  = "unit"
+            }
+            // CARDINALITY GUARD: systemd mints a brand-new unit name for every
+            // login session (session-8137.scope, session-8140.scope, ...). Left
+            // as-is that is an unbounded `unit` label — a new Loki stream per
+            // login, forever. A 48h sample of one control node already showed 5
+            // distinct session scopes against 8 stable units. Collapse the whole
+            // family to one value. Same for systemd-run transients.
+            rule {
+              source_labels = ["__journal__systemd_unit"]
+              regex         = "session-\\d+\\.scope"
+              replacement   = "session.scope"
+              target_label  = "unit"
+            }
+            rule {
+              source_labels = ["__journal__systemd_unit"]
+              regex         = "run-[a-z0-9]+\\.(scope|service)"
+              replacement   = "run-transient"
+              target_label  = "unit"
+            }
+            rule {
+              source_labels = ["__journal__hostname"]
+              target_label  = "node"
+            }
+            // NB this is the *journal* priority, not the application's own log
+            // level. k3s logs everything at journal priority info and puts its
+            // real level in the message text as klog's I/W/E prefix, so alerting
+            // rules must match message content, not this label.
+            rule {
+              source_labels = ["__journal_priority_keyword"]
+              target_label  = "level"
+            }
+            rule {
+              source_labels = ["__journal_syslog_identifier"]
+              target_label  = "syslog_identifier"
+            }
+          }
+
+          loki.source.journal "node" {
+            path          = "/var/log/journal"
+            // Bounds how far back a fresh pod re-reads. Alloy's positions live on
+            // an emptyDir, so a restart replays up to this window; at these
+            // volumes that is cheap and preferable to missing entries.
+            max_age       = "12h"
+            relabel_rules = discovery.relabel.journal.rules
+            labels        = {job = "journal"}
+            forward_to    = [loki.write.default.receiver]
           }
 
           loki.write "default" {
