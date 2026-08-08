@@ -103,3 +103,15 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/instance: tracearr
+    # Prometheus scraping the redis-exporter sidecar added to the redis controller
+    # in tracearr/helmrelease.yaml. The exporter shares the Redis pod, so it sits
+    # behind this same podSelector — without this rule the scrape fails closed and
+    # reads as a broken exporter rather than a blocked one. Scoped to :9121 so
+    # monitoring still cannot reach Redis itself on :6379.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9121

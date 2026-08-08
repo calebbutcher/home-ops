@@ -43,6 +43,27 @@ spec:
               memory: 64Mi
             limits:
               memory: 256Mi
+        # Metrics sidecar — same pattern as immich/redis.yaml, which carries the full
+        # rationale. localhost to Redis, no credentials (no requirepass here).
+        - name: redis-exporter
+          image: oliver006/redis_exporter:v1.88.0-alpine
+          env:
+            - name: REDIS_ADDR
+              value: redis://localhost:6379
+          ports:
+            - name: metrics
+              containerPort: 9121
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -53,6 +74,9 @@ kind: Service
 metadata:
   name: authentik-redis
   namespace: authentik
+  # Labelled so the ServiceMonitor below can select it.
+  labels:
+    app: authentik-redis
 spec:
   selector:
     app: authentik-redis
@@ -60,3 +84,20 @@ spec:
     - name: redis
       port: 6379
       targetPort: 6379
+    - name: metrics
+      port: 9121
+      targetPort: 9121
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: authentik-redis
+  namespace: authentik
+spec:
+  selector:
+    matchLabels:
+      app: authentik-redis
+  endpoints:
+    - port: metrics
+      interval: 30s
+      scrapeTimeout: 10s

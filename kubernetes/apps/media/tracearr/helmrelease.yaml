@@ -81,6 +81,27 @@ spec:
                 memory: 64Mi
               limits:
                 memory: 256Mi
+          # Metrics sidecar — same pattern as the three plain-Deployment Redises
+          # (immich/authentik/paperless redis.yaml), which carry the full rationale.
+          # Reaches Redis over localhost inside the pod; no credentials needed since
+          # this Redis has no requirepass.
+          exporter:
+            image:
+              repository: oliver006/redis_exporter
+              tag: v1.88.0-alpine
+            env:
+              REDIS_ADDR: redis://localhost:6379
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                cpu: 10m
+                memory: 16Mi
+              limits:
+                memory: 64Mi
     service:
       app:
         controller: tracearr
@@ -92,6 +113,17 @@ spec:
         ports:
           redis:
             port: 6379
+          metrics:
+            port: 9121
+    serviceMonitor:
+      redis:
+        serviceName: tracearr-redis
+        endpoints:
+          - port: metrics
+            scheme: http
+            path: /metrics
+            interval: 30s
+            scrapeTimeout: 10s
     persistence:
       backup:
         existingClaim: tracearr-backup

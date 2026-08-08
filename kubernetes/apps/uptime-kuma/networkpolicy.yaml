@@ -41,8 +41,24 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: mariadb-system
-    # NOTE: no monitoring allow. There is no ServiceMonitor for this MariaDB
-    # today — confirmed live, `kubectl get servicemonitor -n uptime-kuma` is
-    # empty. If a mysqld-exporter is ever added, this policy must gain an allow
-    # for the monitoring namespace on the exporter's port, or the scrape will
-    # fail closed and look like the exporter is broken.
+    # Prometheus scraping the mysqld-exporter, which mariadb.yaml now enables via
+    # spec.metrics. This is the allow the NOTE that used to sit here predicted
+    # would be needed.
+    #
+    # Scoped to :9104 (the exporter) and deliberately NOT :3306 — Prometheus has no
+    # business speaking the MySQL protocol to the database itself.
+    #
+    # The exporter runs as its own Deployment rather than a sidecar, and whether it
+    # matches this policy's podSelector depends on the labels the operator stamps on
+    # it. The rule is correct either way: if the exporter carries the
+    # app.kubernetes.io/instance label it is selected and this rule is what admits
+    # the scrape; if it does not, no policy selects it and the scrape is unrestricted.
+    # The exporter's own connection to MariaDB on :3306 is already covered by the
+    # in-namespace `podSelector: {}` rule above.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9104
