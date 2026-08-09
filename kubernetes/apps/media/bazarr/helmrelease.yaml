@@ -60,12 +60,70 @@ spec:
                 # the SQLite config DB — a restore-from-VolSync event.
                 cpu: "2"
                 memory: 2Gi
+          # --- Prometheus exporter (exportarr): reads Bazarr's API over localhost
+          # (shared pod netns) and serves metrics on :9707, scraped via the
+          # ServiceMonitor below.
+          #
+          # ⚠️ The bazarr collector is the most expensive one exportarr ships. Every
+          # scrape walks ALL series and then batch-fetches their episodes to count
+          # missing/wanted subtitles, and that work happens inside Bazarr, not in the
+          # exporter. v2.3.0 has no switch to disable the episode walk, so the scrape
+          # interval is the only throttle. If Bazarr's API latency suffers, lower
+          # SERIES_BATCH_CONCURRENCY (exportarr defaults it to 10).
+          #
+          # Measured against this library (318 series / 647 movies) before merging:
+          # a cold scrape took 87s, then 57s, then 19s as Bazarr warmed up. Hence the
+          # 2m scrapeTimeout below — sonarr/radarr's 90s would have failed the cold
+          # one. The interval stays at 4m rather than going to 5m, because Prometheus'
+          # 5m lookback-delta would then sit exactly on the scrape period and leave
+          # intermittent gaps in every panel.
+          metrics:
+            image:
+              repository: ghcr.io/onedr0p/exportarr
+              tag: v2.3.0
+            args: ["bazarr"]
+            env:
+              PORT: "9707"
+              URL: http://localhost:6767
+              ENABLE_ADDITIONAL_METRICS: "true"
+              API_KEY:
+                valueFrom:
+                  secretKeyRef:
+                    name: bazarr-exporter-secret
+                    key: API_KEY
+            probes:
+              liveness:
+                enabled: false
+              readiness:
+                enabled: false
+              startup:
+                enabled: false
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                # 256Mi rather than the 128Mi used for the sonarr/radarr exporters:
+                # RSS tracks the largest decoded API payload, and the all-series
+                # episode walk is the biggest one any exporter in this cluster makes.
+                memory: 256Mi
     service:
       app:
         controller: bazarr
         ports:
           http:
             port: 6767
+          metrics:
+            port: 9707
+    serviceMonitor:
+      app:
+        serviceName: bazarr
+        endpoints:
+          - port: metrics
+            scheme: http
+            path: /metrics
+            interval: 4m
+            scrapeTimeout: 2m
     persistence:
       config:
         existingClaim: bazarr-config
