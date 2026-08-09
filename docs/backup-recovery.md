@@ -462,7 +462,7 @@ and the only one that matters on the day it matters.
 | CronJob | Schedule | What it proves |
 | --- | --- | --- |
 | `volsync-restore-verify` | Sun 09:00 UTC | Every restic repository opens with its password, passes `restic check`, and its newest snapshot reads back blob for blob |
-| `postgres-restore-verify` | 1st, 10:00 UTC | Every CNPG cluster bootstraps from `s3://postgres-backups/` into a throwaway Cluster, replays WAL, promotes, and answers a query |
+| `postgres-restore-verify` | Sun 10:00 UTC | Every CNPG cluster bootstraps from `s3://postgres-backups/` into a throwaway Cluster, replays WAL, promotes, and answers a query |
 
 Both **discover** their targets (`kubectl get replicationsources -A`,
 `kubectl get clusters -A`) rather than carrying a list of apps, so a new app is
@@ -471,9 +471,14 @@ in `rbac.yaml` — adding an app means adding its secret there, and forgetting t
 fails the job with a forbidden error rather than silently narrowing coverage.
 
 Alerts live in `prometheusrule-restore-verify.yaml`: `RestoreVerificationFailed`
-(a backup did not restore), `VolSyncRestoreVerificationStale` (10d),
-`PostgresRestoreVerificationStale` (40d), plus suspended / deleted / leftover-PVC
-guards.
+(a backup did not restore), `VolSyncRestoreVerificationStale` and `PostgresRestoreVerificationStale` (10d
+each), plus suspended / deleted / leftover-PVC guards.
+
+Both run weekly. The Postgres sweep was monthly to begin with and that was too
+slow twice over: a database could be unrestorable for a month before anyone
+knew, and Loki keeps only 720h of logs, so a monthly run's own evidence expired
+just as the next one replaced it — leaving the dashboard unable to show the last
+sweep. Weekly costs ~14 minutes of cluster time.
 
 Two properties worth knowing:
 
@@ -488,6 +493,13 @@ Two properties worth knowing:
   a controlling `ownerReference` back to the CronJob, so the controller adopts
   the Job and advances `lastSuccessfulTime`. Triggering a drill by hand both
   proves the mechanism and resets the staleness clock.
+
+Grafana **Backups / Restore Verification** (`uid: backup-verify`) shows the
+schedule from kube-state-metrics and the per-target detail — bytes, files,
+tables, rows — parsed out of the jobs' own `RESULT` log lines in Loki. Note the
+Loki panels are pinned to an 8d window: Loki rejects any query range over 30d1h
+and keeps 720h of logs, and the dashboard's original 45d default put every Loki
+panel over that limit at once.
 
 To run one on demand:
 

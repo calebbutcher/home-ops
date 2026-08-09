@@ -17,7 +17,18 @@
 # ⚠️ Defaults to THANOS. prometheusSpec.retention is 2d, and a weekly job seen
 # through a two-day window is one bar or none. The kube_job_* panels are
 # additionally bounded by object lifetime — those series exist only while the
-# Job does, and successfulJobsHistoryLimit is 3.
+# Job does, and successfulJobsHistoryLimit is 3, so they are empty until a run
+# has happened and go quiet again after three.
+#
+# ⚠️ TWO HARD CEILINGS ON THE LOKI SIDE, and they are lower than they look:
+#     max_query_length   30d1h   a wider range is REJECTED, not truncated —
+#                                "the query time range exceeds the limit"
+#     retention_period    720h   there is nothing older than 30d to find anyway
+# The dashboard originally defaulted to now-45d, which put every Loki panel over
+# the first limit at once and rendered them all as errors. It now defaults to
+# now-14d (two of each weekly sweep), and every Loki table carries an explicit
+# 8d `timeFrom` so widening the picker cannot break them. Only the log panel
+# follows the picker, so that a single run can be zoomed into.
 #
 # ⚠️ The Loki tables read `RESULT ... | logfmt` lines that the jobs emit
 # alongside their human-readable output. logfmt needs every field on ONE line,
@@ -55,7 +66,7 @@ data:
         "restore"
       ],
       "time": {
-        "from": "now-45d",
+        "from": "now-14d",
         "to": "now"
       },
       "refresh": "5m",
@@ -162,7 +173,7 @@ data:
           "id": 3,
           "type": "stat",
           "title": "Postgres \u2014 last verified",
-          "description": "Age of the last successful run of postgres-restore-verify. Turns red at 40d, matching PostgresRestoreVerificationStale. Manual runs count \u2014 see the restic panel.",
+          "description": "Age of the last successful run of postgres-restore-verify. Turns red at 10d, matching PostgresRestoreVerificationStale. Manual runs count \u2014 see the restic panel.",
           "gridPos": {
             "h": 5,
             "w": 5,
@@ -188,11 +199,11 @@ data:
                   },
                   {
                     "color": "yellow",
-                    "value": 2592000
+                    "value": 604800
                   },
                   {
                     "color": "red",
-                    "value": 3456000
+                    "value": 864000
                   }
                 ]
               }
@@ -276,7 +287,7 @@ data:
           "id": 5,
           "type": "stat",
           "title": "Targets that failed to restore",
-          "description": "Count of RESULT lines with status=fail across the dashboard time range, both tiers. Anything above zero means a backup exists and could not be used \u2014 see the tables below for which one and at what stage.",
+          "description": "RESULT lines with status=fail over the last 8d, both tiers \u2014 i.e. the most recent sweep of each. Anything above zero means a backup exists and could not be used; the tables below name it and the stage it died at.",
           "gridPos": {
             "h": 5,
             "w": 4,
@@ -345,7 +356,8 @@ data:
               "queryType": "instant",
               "expr": "sum(count_over_time({namespace=\"backup-verify\"} |= \"RESULT\" | logfmt | status=\"fail\" [$__range]))"
             }
-          ]
+          ],
+          "timeFrom": "8d"
         },
         {
           "id": 6,
@@ -437,7 +449,7 @@ data:
           "id": 8,
           "type": "timeseries",
           "title": "Sweep duration",
-          "description": "Wall-clock per completed Job. In-cluster the restic sweep takes ~2min and the Postgres sweep ~14min. A steady climb usually means the NAS is slow rather than that anything is wrong with the backups.\n\n\u26a0\ufe0f Needs the Thanos datasource for anything older than ~2 days \u2014 prometheusSpec.retention is 2d. This panel and the one beside it are also EMPTY until a Job exists: kube_job_* series only exist while the Job object does, and they age out at successfulJobsHistoryLimit: 3.",
+          "description": "Wall-clock per completed Job. In-cluster the restic sweep takes ~2min and the Postgres sweep ~14min; both run Sunday mornings. A steady climb usually means the NAS is slow rather than that anything is wrong with the backups.\n\n\u26a0\ufe0f Needs the Thanos datasource for anything older than ~2 days \u2014 prometheusSpec.retention is 2d. This panel and the one beside it are also EMPTY until a Job exists: kube_job_* series only exist while the Job object does, and they age out at successfulJobsHistoryLimit: 3.",
           "gridPos": {
             "h": 8,
             "w": 12,
@@ -581,8 +593,8 @@ data:
         {
           "id": 11,
           "type": "table",
-          "title": "Bytes restored, per repository (latest run in range)",
-          "description": "Read from the job's own RESULT lines in Loki, not from any metric \u2014 the per-repository detail exists nowhere else. last_over_time collapses the range to one row per repository, so this stays readable no matter how wide the time range is.\n\nThese are real bytes: restic fetched, decrypted and reassembled every blob in the newest snapshot to produce them.",
+          "title": "Bytes restored, per repository (latest sweep)",
+          "description": "Read from the job's own RESULT lines in Loki, not from any metric \u2014 the per-repository detail exists nowhere else. Pinned to an 8d window rather than the dashboard's time picker, and last_over_time collapses it to one row per repository \u2014 so this always shows the most recent weekly sweep and cannot be widened past what Loki will serve.\n\nThese are real bytes: restic fetched, decrypted and reassembled every blob in the newest snapshot to produce them.",
           "gridPos": {
             "h": 11,
             "w": 12,
@@ -620,7 +632,7 @@ data:
               },
               "queryType": "instant",
               "instant": true,
-              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=restic\" | logfmt | unwrap bytes [$__range]) by (namespace, source)"
+              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=restic\" | logfmt | unwrap bytes [$__range]) by (app_namespace, source)"
             }
           ],
           "transformations": [
@@ -644,26 +656,28 @@ data:
                   "service_name": true,
                   "detected_level": true,
                   "job": true,
-                  "instance": true
+                  "instance": true,
+                  "namespace": true
                 },
                 "renameByName": {
-                  "namespace": "Namespace",
                   "source": "ReplicationSource",
-                  "Value": "Bytes"
+                  "Value": "Bytes",
+                  "app_namespace": "Namespace"
                 },
                 "indexByName": {
-                  "namespace": 0,
+                  "app_namespace": 0,
                   "source": 1,
                   "Value": 2
                 }
               }
             }
-          ]
+          ],
+          "timeFrom": "8d"
         },
         {
           "id": 12,
           "type": "table",
-          "title": "Files restored, per repository (latest run in range)",
+          "title": "Files restored, per repository (latest sweep)",
           "description": "Companion to the bytes table. A repository whose file count collapses while its byte count holds (or vice versa) is worth a look even if the job passed \u2014 the job only asserts 'not literally empty', because a size floor false-positived n8n, whose 160-byte volume is correct.",
           "gridPos": {
             "h": 11,
@@ -702,7 +716,7 @@ data:
               },
               "queryType": "instant",
               "instant": true,
-              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=restic\" | logfmt | unwrap files [$__range]) by (namespace, source)"
+              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=restic\" | logfmt | unwrap files [$__range]) by (app_namespace, source)"
             }
           ],
           "transformations": [
@@ -726,21 +740,23 @@ data:
                   "service_name": true,
                   "detected_level": true,
                   "job": true,
-                  "instance": true
+                  "instance": true,
+                  "namespace": true
                 },
                 "renameByName": {
-                  "namespace": "Namespace",
                   "source": "ReplicationSource",
-                  "Value": "Files"
+                  "Value": "Files",
+                  "app_namespace": "Namespace"
                 },
                 "indexByName": {
-                  "namespace": 0,
+                  "app_namespace": 0,
                   "source": 1,
                   "Value": 2
                 }
               }
             }
-          ]
+          ],
+          "timeFrom": "8d"
         },
         {
           "id": 13,
@@ -822,7 +838,8 @@ data:
                   "service_name": true,
                   "detected_level": true,
                   "job": true,
-                  "instance": true
+                  "instance": true,
+                  "app_namespace": true
                 },
                 "renameByName": {
                   "cluster": "Cluster",
@@ -836,7 +853,8 @@ data:
                 }
               }
             }
-          ]
+          ],
+          "timeFrom": "8d"
         },
         {
           "id": 15,
@@ -905,7 +923,8 @@ data:
                   "service_name": true,
                   "detected_level": true,
                   "job": true,
-                  "instance": true
+                  "instance": true,
+                  "app_namespace": true
                 },
                 "renameByName": {
                   "cluster": "Cluster",
@@ -919,7 +938,8 @@ data:
                 }
               }
             }
-          ]
+          ],
+          "timeFrom": "8d"
         },
         {
           "id": 16,
@@ -988,7 +1008,8 @@ data:
                   "service_name": true,
                   "detected_level": true,
                   "job": true,
-                  "instance": true
+                  "instance": true,
+                  "app_namespace": true
                 },
                 "renameByName": {
                   "cluster": "Cluster",
@@ -1002,7 +1023,8 @@ data:
                 }
               }
             }
-          ]
+          ],
+          "timeFrom": "8d"
         },
         {
           "id": 17,
@@ -1021,7 +1043,7 @@ data:
           "id": 18,
           "type": "logs",
           "title": "Verification log",
-          "description": "The drill record. Every run prints a line per target \u2014 repository, snapshot id, restore size \u2014 so this panel IS the evidence that the backups were exercised, which is what docs/backup-recovery.md used to ask for by hand and never got.",
+          "description": "The drill record. Every run prints a line per target \u2014 repository, snapshot id, restore size \u2014 so this panel IS the evidence that the backups were exercised.\n\n\u26a0\ufe0f This is the one Loki panel that follows the time picker, so you can zoom into a single run. Loki refuses any range over 30d1h and keeps only 720h of logs, so do not widen it past 30d \u2014 the tables above are pinned to 8d and are immune.",
           "gridPos": {
             "h": 14,
             "w": 24,

@@ -13,8 +13,8 @@
 # the signal. That keeps the failure path short: nothing between the assertion
 # and the alert can break without also breaking the alert.
 #
-#   volsync-restore-verify    weekly (Sun 09:00 UTC)     stale after 10d
-#   postgres-restore-verify   monthly (1st, 10:00 UTC)   stale after 40d
+#   volsync-restore-verify    weekly (Sun 09:00 UTC)   stale after 10d
+#   postgres-restore-verify   weekly (Sun 10:00 UTC)   stale after 10d
 #
 # Thresholds are "schedule + one missed run + slack", the same shape as
 # prometheusrule-backups.yaml.
@@ -76,7 +76,11 @@ spec:
               unproven — VolSyncNoRecentSync still says they are running, which
               is a different and weaker claim.
 
-        # Monthly job, so 40 days permits one missed run.
+        # Weekly job, so 10 days permits one missed run — the same shape as the
+        # restic rule above. This was 40d when the job ran monthly; a month
+        # proved too slow to learn that a database would not come back, and it
+        # also outran Loki's 720h retention, so the dashboard could not show the
+        # last sweep.
         #
         # Manual runs count. `kubectl create job --from=cronjob/...` sets a
         # controlling ownerReference back to the CronJob, so the controller
@@ -87,7 +91,7 @@ spec:
           expr: |
             (time() - kube_cronjob_status_last_successful_time{
               namespace="backup-verify", cronjob="postgres-restore-verify"
-            }) > 40 * 86400
+            }) > 10 * 86400
           for: 1h
           labels:
             severity: warning

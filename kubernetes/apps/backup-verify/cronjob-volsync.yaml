@@ -199,8 +199,16 @@ spec:
                   # are two separate log entries with nothing tying them
                   # together, so they cannot be tabulated. Keep values
                   # space-free; logfmt has no way to quote them here.
+                  #
+                  # ⚠️ `app_namespace`, NOT `namespace`. Every line already
+                  # carries a `namespace=backup-verify` STREAM label, and a
+                  # logfmt field of the same name loses — Loki keeps the stream
+                  # label and renames the extracted one to `namespace_extracted`.
+                  # Grouping by `namespace` then files all 15 repositories under
+                  # "backup-verify", which looks like a working table right up
+                  # until you read it.
                   emit() {
-                    echo "RESULT tier=restic namespace=${1} source=${2} status=${3} stage=${4} snapshot=${5:-none} bytes=${6:-0} files=${7:-0}"
+                    echo "RESULT tier=restic app_namespace=${1} source=${2} status=${3} stage=${4} snapshot=${5:-none} bytes=${6:-0} files=${7:-0}"
                   }
 
                   for d in /creds/*/; do

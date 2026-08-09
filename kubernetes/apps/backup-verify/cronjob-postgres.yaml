@@ -1,5 +1,5 @@
 ---
-# Monthly proof that the CNPG base backups in s3://postgres-backups/ can be
+# Weekly proof that the CNPG base backups in s3://postgres-backups/ can be
 # turned back into a running database.
 #
 # This is the real thing, not a checksum: for every Cluster in the cluster it
@@ -31,8 +31,17 @@
 # `.spec.imageName` means an image bump in an app cannot silently break its
 # verification.
 #
-# SCHEDULE: 1st of the month, 10:00 UTC. Base backups run 02:00-07:00 and the
-# weekly restic verification is at 09:00 Sundays; this sits clear of both.
+# SCHEDULE: Sunday 10:00 UTC, an hour after the restic sweep starts (which takes
+# ~2min) and clear of the 02:00-07:00 base backups.
+#
+# Weekly, not monthly. It started monthly and that was too slow twice over: a
+# backup could be unrestorable for a month before anyone knew, and — less
+# obviously — Loki's retention_period is 720h, so a monthly run's own evidence
+# expired at almost exactly the moment the next one produced more. The dashboard
+# could not reliably show the last sweep because the logs describing it were
+# already being deleted. A weekly cadence sits comfortably inside retention and
+# cuts worst-case detection from ~31 days to ~7. It costs ~14 minutes of cluster
+# time a week.
 #
 # The staleness alert this feeds (PostgresRestoreVerificationStale) reads the
 # CronJob's lastSuccessfulTime, and a manual run DOES advance it: `kubectl
@@ -46,7 +55,7 @@ metadata:
   name: postgres-restore-verify
   namespace: backup-verify
 spec:
-  schedule: "0 10 1 * *"
+  schedule: "0 10 * * 0"
   timeZone: Etc/UTC
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 3600
@@ -96,19 +105,23 @@ spec:
                   # real database here is ~14 MB.
                   MIN_BYTES=1048576
 
-                  # Idempotent on purpose — it runs at start-of-job, after every
-                  # cluster, and from both traps below. 60s rather than 180s so
-                  # two back-to-back invocations still fit inside the pod's
-                  # termination grace period.
                   # One machine-readable line per cluster, alongside the
                   # human-readable output. The Grafana dashboard
                   # (monitoring/backup-verify/dashboard.yaml) reads these out of
                   # Loki with `|= "RESULT" | logfmt`, which needs every field on
                   # ONE line. Keep values space-free; logfmt cannot quote here.
+                  #
+                  # ⚠️ `app_namespace`, NOT `namespace` — a logfmt field of that
+                  # name is shadowed by the `namespace=backup-verify` stream
+                  # label. See the same note in cronjob-volsync.yaml.
                   emit() {
-                    echo "RESULT tier=postgres namespace=${1} cluster=${2} status=${3} stage=${4} db=${5:-none} bytes=${6:-0} tables=${7:-0} rows=${8:-0}"
+                    echo "RESULT tier=postgres app_namespace=${1} cluster=${2} status=${3} stage=${4} db=${5:-none} bytes=${6:-0} tables=${7:-0} rows=${8:-0}"
                   }
 
+                  # Idempotent on purpose — it runs at start-of-job, after every
+                  # cluster, and from both traps below. 60s rather than 180s so
+                  # two back-to-back invocations still fit inside the pod's
+                  # termination grace period.
                   cleanup() {
                     kubectl -n "$NS" delete clusters.postgresql.cnpg.io -l "$LABEL" \
                       --ignore-not-found --wait=true --timeout=60s >/dev/null 2>&1 || true
