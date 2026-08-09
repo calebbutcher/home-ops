@@ -13,8 +13,10 @@
 # ⚠️ SAFETY — this job must never be able to damage what it verifies.
 # The scratch Cluster declares NO `.spec.plugins`, so no WAL archiver is
 # attached and PostgreSQL runs with archiving off; `externalClusters[].plugin`
-# is the read path that fetches base backups and WAL, nothing more. As a second
-# line, every scratch cluster is named `verify-<source>` and barman derives its
+# is the read path that fetches base backups and WAL, nothing more — including
+# the `serverName` parameter below, which selects which barman server to READ
+# and has no bearing on where anything is written. As a second line, every
+# scratch cluster is named `verify-<source>` and barman derives an archiver's
 # server folder from the cluster name, so even a misconfiguration that turned
 # archiving on would write to s3://postgres-backups/verify-<source>/ and could
 # not touch the source's own prefix. See postgres-objectstore.yaml, which also
@@ -63,9 +65,11 @@ spec:
         spec:
           restartPolicy: Never
           serviceAccountName: restore-verify
-          # Long enough for the EXIT trap to tear down a scratch cluster if the
-          # Job is cancelled or hits its deadline.
-          terminationGracePeriodSeconds: 120
+          # Long enough for the teardown traps to delete a scratch cluster and
+          # its PVC if the Job is cancelled or hits its deadline. Deleting a
+          # single-instance CNPG cluster takes a few seconds; this is headroom,
+          # and it only applies when the pod is actually being terminated.
+          terminationGracePeriodSeconds: 180
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
@@ -91,17 +95,22 @@ spec:
                   # real database here is ~14 MB.
                   MIN_BYTES=1048576
 
+                  # Idempotent on purpose — it runs at start-of-job, after every
+                  # cluster, and from both traps below. 60s rather than 180s so
+                  # two back-to-back invocations still fit inside the pod's
+                  # termination grace period.
                   cleanup() {
                     kubectl -n "$NS" delete clusters.postgresql.cnpg.io -l "$LABEL" \
-                      --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1 || true
+                      --ignore-not-found --wait=true --timeout=60s >/dev/null 2>&1 || true
                     kubectl -n "$NS" delete pvc -l "$LABEL" \
                       --ignore-not-found >/dev/null 2>&1 || true
                   }
                   # INT/TERM as well as EXIT: activeDeadlineSeconds and a manual
-                  # cancel both arrive as signals, and bash would otherwise die
-                  # without running the EXIT trap, leaving a scratch cluster and
-                  # its PVC behind.
-                  trap cleanup EXIT INT TERM
+                  # cancel both arrive as signals. The handler exits explicitly so
+                  # the job is marked failed rather than falling through and
+                  # reporting success on a partial sweep.
+                  trap cleanup EXIT
+                  trap 'echo "signal received — tearing down"; cleanup; exit 143' INT TERM
 
                   # Anything left by a previous run that was killed.
                   cleanup
@@ -160,6 +169,16 @@ spec:
                           name: barman-cloud.cloudnative-pg.io
                           parameters:
                             barmanObjectName: ${STORE}
+                            # ⚠️ REQUIRED. plugin-barman-cloud does NOT fall back
+                            # to the externalCluster's name, whatever the in-tree
+                            # barmanObjectStore did. Without it every recovery
+                            # dies with "no target backup found" and the cluster
+                            # sits in "Setting up primary" until the timeout,
+                            # which reads exactly like a missing backup rather
+                            # than a missing field. Verified both ways on
+                            # 2026-08-09: absent it, authentik and gitea both
+                            # failed; present, gitea recovered in 60s.
+                            serverName: ${src_name}
                     resources:
                       requests:
                         cpu: 200m
@@ -168,8 +187,18 @@ spec:
                         memory: 1Gi
                   YAML
 
-                    if ! kubectl -n "$NS" wait --for=condition=Ready \
-                         "cluster.postgresql.cnpg.io/${vname}" --timeout="${READY_TIMEOUT}s"; then
+                    # ⚠️ Backgrounded, then waited on. Bash defers a trap until
+                    # the current FOREGROUND command returns, so a plain
+                    # `kubectl wait --timeout=600s` would swallow the SIGTERM
+                    # from a cancelled Job or activeDeadlineSeconds for up to ten
+                    # minutes — long past the grace period — and the pod would be
+                    # SIGKILLed with the cleanup trap never having run, leaving a
+                    # scratch Cluster and its PVC behind. Observed exactly that
+                    # on 2026-08-09. `wait` is interruptible, so the trap fires
+                    # immediately.
+                    kubectl -n "$NS" wait --for=condition=Ready \
+                      "cluster.postgresql.cnpg.io/${vname}" --timeout="${READY_TIMEOUT}s" &
+                    if ! wait $!; then
                       echo "  FAIL bootstrap: not Ready within ${READY_TIMEOUT}s"
                       # The reason is almost always in the Cluster's events —
                       # object store unreachable, no base backup for this server
@@ -205,7 +234,11 @@ spec:
                       # reltuples is a planner estimate and is -1 on a table that
                       # has never been analysed, hence the CASE. Order of
                       # magnitude is all that is wanted: it answers "is the data
-                      # there" without needing to know any app's schema.
+                      # there" without needing to know any app's schema. It does
+                      # survive a physical restore — the restored authentik
+                      # reports ~379k, matching production. Logged, not asserted,
+                      # because gitea legitimately reports 0 (its tables are
+                      # empty), and a floor here would fail it forever.
                       rows=$(q "$db" "SELECT coalesce(sum(CASE WHEN c.reltuples < 0 THEN 0 ELSE c.reltuples END),0)::bigint FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'r' AND n.nspname NOT IN ('pg_catalog','information_schema')" || echo 0)
                       in_recovery=$(q "$db" "SELECT pg_is_in_recovery()" || echo t)
 
