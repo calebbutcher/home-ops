@@ -9,6 +9,9 @@
 #     AppSec pod dies every request sails through uninspected and nothing 500s.
 #   - The bouncer in stream mode serves from a local cache, so a dead LAPI degrades
 #     silently — enforcement keeps using an ever-staler decision list.
+# A third was added after the fact: an agent can be UP, heartbeating and Running while
+# parsing nothing at all (see CrowdSecIngestionStalled). Health checks cannot see it
+# because nothing is unhealthy — the work just stops.
 #
 # Every expression below was checked against live series before being written.
 # Deliberately NOT written: a Traefik config-reload-failure alert. Traefik v3 here
@@ -63,6 +66,37 @@ spec:
               A CrowdSec agent has been unscrapeable for >15m. Traefik access logs on
               that node are not being parsed, so detections from traffic served there
               are lost. Check `kubectl -n crowdsec get pods -o wide`.
+
+        # ⚠️ The failure CrowdSecAgentDown cannot see: agent UP but parsing NOTHING.
+        # On 2026-08-08 every agent wedged on container-log rotation (the acquisition
+        # tailed symlinks under /var/log/containers with inotify, so it missed the
+        # rotation and sat in "Waiting for ... to appear" forever). Log-based detection
+        # was dead for ~24h with zero outward signal — all 8 targets UP, every heartbeat
+        # healthy, pods Running. cs_parser_hits_total simply stopped moving. The root
+        # cause is fixed with poll_without_inotify in the crowdsec HelmRelease; this
+        # alert exists because that failure mode is invisible to every up{} check.
+        #
+        # A frozen counter is the signal, so this is rate == 0 rather than a threshold.
+        # There is no legitimate zero: the blackbox probes alone put a constant floor of
+        # ~30-70 parsed lines/min through Traefik, day and night. If all agents die the
+        # series disappears instead of going to zero and this stops firing — that gap is
+        # CrowdSecAgentDown's job. Aggregating away `source` is deliberate: that label
+        # embeds the pod name and container ID, so every Traefik rollout strands a dead
+        # flat-lined series, and a per-source rule would fire forever on the corpses.
+        - alert: CrowdSecIngestionStalled
+          expr: sum(rate(cs_parser_hits_total[15m])) == 0
+          for: 20m
+          labels:
+            severity: critical
+          annotations:
+            summary: "CrowdSec is not parsing any logs — behavioral detection is blind"
+            description: >-
+              Agents are up and scrapeable but have parsed zero log lines for >20m, so no
+              scenario can fire and no new local bans will be created. Bouncer enforcement
+              of the CAPI/firehol blocklists is unaffected, as is the AppSec WAF. Check for
+              the log-rotation wedge first: `kubectl -n crowdsec logs <agent-pod> | grep
+              "Waiting for"` — if present, the agent lost its file after a rotation and a
+              `kubectl -n crowdsec rollout restart ds/crowdsec-agent` restores ingestion.
 
         # ⚠️ Fails OPEN. crowdsecAppsecUnreachableBlock and crowdsecAppsecFailureBlock
         # are both false (a deliberate detect-first choice), so when AppSec is down
