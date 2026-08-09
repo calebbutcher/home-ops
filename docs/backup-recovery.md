@@ -476,9 +476,11 @@ each), plus suspended / deleted / leftover-PVC guards.
 
 Both run weekly. The Postgres sweep was monthly to begin with and that was too
 slow twice over: a database could be unrestorable for a month before anyone
-knew, and Loki keeps only 720h of logs, so a monthly run's own evidence expired
-just as the next one replaced it — leaving the dashboard unable to show the last
-sweep. Weekly costs ~14 minutes of cluster time.
+knew, and Loki kept only 720h of logs at the time, so a monthly run's own
+evidence expired just as the next one replaced it — leaving the dashboard unable
+to show the last sweep. Loki's pod-log retention is now 180d, so the evidence
+would survive a monthly cadence; the first reason still stands, so the sweep
+stays weekly. Weekly costs ~14 minutes of cluster time.
 
 Two properties worth knowing:
 
@@ -497,9 +499,12 @@ Two properties worth knowing:
 Grafana **Backups / Restore Verification** (`uid: backup-verify`) shows the
 schedule from kube-state-metrics and the per-target detail — bytes, files,
 tables, rows — parsed out of the jobs' own `RESULT` log lines in Loki. Note the
-Loki panels are pinned to an 8d window: Loki rejects any query range over 30d1h
-and keeps 720h of logs, and the dashboard's original 45d default put every Loki
-panel over that limit at once.
+Loki panels are pinned to an 8d window. That started as a workaround — Loki used
+to reject any range over 30d1h and keep only 720h, and the dashboard's original
+45d default put every Loki panel over that limit at once — but the ceilings have
+since been raised (`max_query_length` 366d, pod-log retention 180d). The pins
+stay because two of each weekly sweep is the right amount to look at; widening
+the picker is now safe.
 
 To run one on demand:
 

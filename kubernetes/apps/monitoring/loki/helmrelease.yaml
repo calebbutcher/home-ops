@@ -74,19 +74,58 @@ spec:
           secretAccessKey: ${LOKI_S3_SECRET_KEY}
 
       limits_config:
-        # 30-day retention (enforced by the compactor below). Loki keeps
-        # full-resolution logs — no downsampling tiers like Thanos.
-        retention_period: 720h
+        # Two retention tiers, both enforced by the compactor below. Loki keeps
+        # full-resolution logs at every tier — no downsampling like Thanos.
+        #
+        # DEFAULT = 1y. Streams matching no retention_stream rule land here, and
+        # that is exactly the infra sources: journald ({job="journal"}) and the
+        # TrueNAS/Proxmox syslog feed ({job="syslog"}). Neither carries a
+        # `namespace` label, so the pod-log rule below cannot match them. A year
+        # is what it takes to establish a pattern for an intermittent hardware
+        # fault like the TrueNAS mlx5/bond01 NIC hang, and it is nearly free:
+        # ~120 MiB/day raw, ~11 MiB/day compressed => ~4 GiB/yr.
+        retention_period: 8760h
+        retention_stream:
+          # Kubernetes events are ~1.4 MiB/day and are the best forensic
+          # breadcrumb for "what happened to this node months ago". They DO
+          # carry `namespace`, so this must outrank the pod-log rule below or
+          # it would be demoted to 180d along with it. Higher priority wins.
+          - selector: '{job="loki.source.kubernetes_events"}'
+            priority: 10
+            period: 8760h
+          # All container logs — the only streams with a `namespace` label.
+          # ~904 MiB/day raw (~85 MiB/day compressed), 74% of it monitoring +
+          # traefik. 180d => ~15 GiB.
+          - selector: '{namespace=~".+"}'
+            priority: 1
+            period: 4320h
         reject_old_samples: true
         reject_old_samples_max_age: 168h
 
+        # RETENTION IS NOT THE ONLY CEILING. max_query_length REJECTS — does not
+        # truncate — any range wider than itself ("the query time range exceeds
+        # the limit"), so it has to track the longest retention tier or the extra
+        # year is unqueryable. Loki's default is 30d1h, which is what pinned the
+        # backup-verify dashboard to an 8d window. 366d leaves a day of slack so
+        # an exactly-1y picker range cannot trip it.
+        max_query_length: 8784h
+        # 15m splits would turn a 180d query into ~17k subqueries. 1h quarters
+        # that at no real cost on a 3-replica monolithic deployment.
+        split_queries_by_interval: 1h
+
       compactor:
-        # The compactor deletes chunks/index older than retention_period from S3.
+        # The compactor deletes chunks/index older than the applicable retention
+        # tier from S3 — it reads retention_stream, so both tiers above are
+        # enforced here. Nothing else enforces retention; if this stalls the
+        # bucket grows unbounded (see LokiCompactorStalled in
+        # kube-prometheus-stack/prometheusrule-observability.yaml).
         retention_enabled: true
         delete_request_store: s3
 
       querier:
-        max_concurrent: 4
+        # 4 was sized when no query could span more than 30d. Long-range queries
+        # over the 180d/1y tiers fan out far wider.
+        max_concurrent: 8
 
       # Ruler: evaluate LogQL alerting rules and push firing alerts to the
       # kube-prometheus-stack Alertmanager, which routes them to Discord via the
@@ -146,12 +185,16 @@ spec:
           labelSelector:
             matchLabels:
               loki-ha-member: "true"
+      # Raised alongside the retention increase: at 30d retention these pods sat
+      # at ~300 MiB with a 7d peak of ~690 MiB against the old 1Gi limit (67%).
+      # Longer query ranges plus the memcached client buffers below need more
+      # headroom than that left.
       resources:
         requests:
           cpu: 100m
-          memory: 256Mi
+          memory: 512Mi
         limits:
-          memory: 1Gi
+          memory: 2Gi
 
     # Disable the SimpleScalable / microservices targets — we run monolithic.
     write:
@@ -173,12 +216,23 @@ spec:
         limits:
           memory: 64Mi
 
-    # The chart's default chunk/results memcached tiers request ~1GB each — far
-    # more than a homelab needs. Disable; add back later if query latency warrants.
+    # Enabled alongside the retention increase — this is the "later" the previous
+    # comment here anticipated. Without them every long-range query re-fetches
+    # chunks from RustFS over plain HTTP, and the 180d/1y tiers make those ranges
+    # routine. Sized well below the chart defaults (chunks 8192MB, results
+    # 1024MB), which are aimed at a distributed deployment: at the measured
+    # ~130 MiB/day compressed, 2 GiB of chunk cache holds roughly two weeks —
+    # comfortably covering the windows dashboards actually ask for.
     chunksCache:
-      enabled: false
+      enabled: true
+      allocatedMemory: 2048
+      allocatedCPU: 100m
+      writebackSizeLimit: 100MB
     resultsCache:
-      enabled: false
+      enabled: true
+      allocatedMemory: 512
+      allocatedCPU: 100m
+      writebackSizeLimit: 100MB
 
     # Canary DaemonSet + helm test pod off to keep the pod count lean; the
     # node-outage drill and real queries are our validation instead.

@@ -36,12 +36,13 @@
 #
 # Weekly, not monthly. It started monthly and that was too slow twice over: a
 # backup could be unrestorable for a month before anyone knew, and — less
-# obviously — Loki's retention_period is 720h, so a monthly run's own evidence
-# expired at almost exactly the moment the next one produced more. The dashboard
-# could not reliably show the last sweep because the logs describing it were
-# already being deleted. A weekly cadence sits comfortably inside retention and
-# cuts worst-case detection from ~31 days to ~7. It costs ~14 minutes of cluster
-# time a week.
+# obviously — Loki's retention_period was 720h at the time, so a monthly run's
+# own evidence expired at almost exactly the moment the next one produced more,
+# leaving the dashboard unable to show the last sweep.
+# That second reason has since been retired: Loki now keeps pod logs 180d, so a
+# monthly run's logs would survive comfortably. The first reason stands on its
+# own — a weekly cadence cuts worst-case detection from ~31 days to ~7 — so this
+# stays weekly. It costs ~14 minutes of cluster time a week.
 #
 # The staleness alert this feeds (PostgresRestoreVerificationStale) reads the
 # CronJob's lastSuccessfulTime, and a manual run DOES advance it: `kubectl
