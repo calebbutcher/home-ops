@@ -4,7 +4,7 @@
 # READ THE COVERAGE CAVEAT BEFORE TRUSTING A GREEN RUN.
 #
 # This scans only images written as a literal `image:` in a manifest — currently
-# about 8 of the ~60 images the cluster actually runs. Everything else comes from
+# 7 of the ~60 images the cluster actually runs. Everything else comes from
 # a Helm chart's own defaults (Traefik, Longhorn, cert-manager, CNPG, Authentik,
 # Immich, the *arr apps, ...) and is invisible to a repo-side scan, because the
 # tag lives inside a chart that is only rendered in-cluster.
@@ -41,7 +41,7 @@ jobs:
     name: trivy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Install kustomize + trivy
         run: |
