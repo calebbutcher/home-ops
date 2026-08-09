@@ -88,7 +88,7 @@ spec:
           exporter:
             image:
               repository: oliver006/redis_exporter
-              tag: v1.88.0-alpine
+              tag: v1.89.0-alpine
             env:
               REDIS_ADDR: redis://localhost:6379
             securityContext:
