@@ -136,7 +136,7 @@ extra_agent_args: >-
 # Tracked against the image itself rather than the GitHub release list, so what
 # Renovate offers is exactly what the node would pull.
 # renovate: datasource=docker depName=ghcr.io/kube-vip/kube-vip
-kube_vip_tag_version: v0.8.2
+kube_vip_tag_version: v0.9.2
 
 # tag for kube-vip-cloud-provider manifest
 # kube_vip_cloud_provider_tag_version: "main"
