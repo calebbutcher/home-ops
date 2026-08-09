@@ -24,12 +24,14 @@
 #
 # COVERAGE is discovered, not enumerated: `kubectl get clusters -A` finds all
 # seven, and a new app's Postgres is picked up automatically the month after it
-# lands. The image is read from the source Cluster rather than hard-coded here,
-# which matters more than it looks — recovery is a physical restore, so it only
-# works on the same PostgreSQL major, and immich (VectorChord, PG14) and
-# tracearr (TimescaleDB, PG17) need their own images to even start. Reading
-# `.spec.imageName` means an image bump in an app cannot silently break its
-# verification.
+# lands. Both the image AND the barman server name are read from the source
+# Cluster rather than hard-coded here, which matters more than it looks —
+# recovery is a physical restore, so it only works on the same PostgreSQL major,
+# and immich (VectorChord, PG17) and tracearr (TimescaleDB, PG17) need their own
+# images to even start. Reading `.spec.imageName` means an image bump in an app
+# cannot silently break its verification; reading the plugin's `serverName`
+# means a major upgrade — which forces the archive onto a fresh prefix — cannot
+# leave this job restoring the pre-upgrade archive with the post-upgrade image.
 #
 # SCHEDULE: Sunday 10:00 UTC, an hour after the restic sweep starts (which takes
 # ~2min) and clear of the 02:00-07:00 base backups.
@@ -142,8 +144,18 @@ spec:
                   # Discover. Excluding this namespace matters: without it a
                   # leftover scratch cluster would be discovered as a source and
                   # the job would try to verify its own verification.
+                  #
+                  # The 4th field is the barman server name — the folder under
+                  # s3://postgres-backups/ this cluster archives to. It is READ
+                  # rather than assumed because it only defaults to the cluster
+                  # name: immich sets it explicitly (immich-postgres-pg17) so its
+                  # PG17 archive is separate from the PG14 one it was upgraded
+                  # from. Assuming the cluster name there would point immich's
+                  # verification at a PG14 backup while using its PG17 image, and
+                  # physical recovery is same-major only — it would fail every
+                  # week. Empty for every other cluster; see the fallback below.
                   kubectl get clusters.postgresql.cnpg.io --all-namespaces \
-                    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.spec.imageName}{"\n"}{end}' \
+                    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.spec.imageName}{" "}{.spec.plugins[?(@.name=="barman-cloud.cloudnative-pg.io")].parameters.serverName}{"\n"}{end}' \
                     | grep -v "^${NS} " > /tmp/clusters.txt || true
 
                   total=$(grep -c . /tmp/clusters.txt || true)
@@ -162,10 +174,17 @@ spec:
                   # this loop take input of their own (the heredoc below, and
                   # kubectl exec), and any of them consuming stdin would eat the
                   # rest of the list and silently shrink the coverage.
-                  while read -r src_ns src_name image <&3; do
+                  while read -r src_ns src_name image server <&3; do
                     [ -n "${src_name:-}" ] || continue
+                    # plugin-barman-cloud defaults serverName to the cluster name
+                    # when the parameter is absent, so mirror that default rather
+                    # than passing an empty one — six of the seven clusters
+                    # legitimately leave it unset. `${x:-y}`, not a bare `$server`:
+                    # `set -u` is on and the field is unset, not merely empty, on
+                    # any line where kubectl emitted nothing for it.
+                    server="${server:-$src_name}"
                     vname="verify-${src_name}"
-                    echo "=== ${src_ns}/${src_name}  (${image})"
+                    echo "=== ${src_ns}/${src_name}  (${image}, archive=${server})"
 
                     kubectl apply -f - <<YAML
                   apiVersion: postgresql.cnpg.io/v1
@@ -202,7 +221,13 @@ spec:
                             # than a missing field. Verified both ways on
                             # 2026-08-09: absent it, authentik and gitea both
                             # failed; present, gitea recovered in 60s.
-                            serverName: ${src_name}
+                            #
+                            # Taken from the SOURCE Cluster's plugin parameters
+                            # (see the discovery jsonpath), NOT derived from the
+                            # cluster name — since immich's PG14 to PG17 upgrade
+                            # those two differ, and deriving it would point a
+                            # PG17 image at a frozen PG14 archive.
+                            serverName: ${server}
                     resources:
                       requests:
                         cpu: 200m

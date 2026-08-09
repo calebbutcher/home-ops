@@ -36,12 +36,14 @@
 # ⚠️ cnpg_collector_wal_bytes reads 0 on replicas by design (only a primary writes
 # WAL). That is not a broken panel.
 #
-# ⚠️ MIXED POSTGRES MAJORS — 17 on five clusters, 16 on authentik, 14 on immich
-# (VectorChord). Postgres 17 moved the checkpoint counters out of pg_stat_bgwriter
-# into pg_stat_checkpointer, so the Checkpoints panel queries
-# cnpg_pg_stat_checkpointer_* `or` cnpg_pg_stat_bgwriter_*. Verified live: a
-# checkpointer-only query returns 5 of 7 clusters and leaves authentik and immich
-# permanently blank.
+# ⚠️ MIXED POSTGRES MAJORS — 17 on six clusters, 16 on authentik. Postgres 17
+# moved the checkpoint counters out of pg_stat_bgwriter into pg_stat_checkpointer,
+# so the Checkpoints panel queries cnpg_pg_stat_checkpointer_* `or`
+# cnpg_pg_stat_bgwriter_*. Verified live while immich was still on PG14: a
+# checkpointer-only query returned 5 of 7 clusters and left authentik and immich
+# permanently blank. Immich has since moved to 17, so authentik is the only
+# cluster still relying on the bgwriter half of that fallback — keep it until
+# authentik is upgraded too.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -1498,7 +1500,7 @@ data:
               "range": true
             }
           ],
-          "description": "Requested checkpoints rising above timed ones means max_wal_size is too small for the write rate — Postgres is checkpointing because it ran out of WAL space rather than because the timer expired. The `or` fallback handles the pg_stat_bgwriter -> pg_stat_checkpointer split in Postgres 17: without it this panel is permanently blank on authentik (PG16) and immich (PG14)."
+          "description": "Requested checkpoints rising above timed ones means max_wal_size is too small for the write rate — Postgres is checkpointing because it ran out of WAL space rather than because the timer expired. The `or` fallback handles the pg_stat_bgwriter -> pg_stat_checkpointer split in Postgres 17: without it this panel is permanently blank on authentik (PG16)."
         },
         {
           "type": "timeseries",
