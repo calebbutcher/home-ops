@@ -594,7 +594,7 @@ data:
           "id": 11,
           "type": "table",
           "title": "Bytes restored, per repository (latest sweep)",
-          "description": "Read from the job's own RESULT lines in Loki, not from any metric \u2014 the per-repository detail exists nowhere else. Pinned to an 8d window rather than the dashboard's time picker, and last_over_time collapses it to one row per repository \u2014 so this always shows the most recent weekly sweep and cannot be widened past what Loki will serve.\n\nThese are real bytes: restic fetched, decrypted and reassembled every blob in the newest snapshot to produce them.",
+          "description": "Read from the job's own RESULT lines in Loki, not from any metric \u2014 the per-repository detail exists nowhere else. Pinned to an 8d window rather than the dashboard's time picker, and last_over_time collapses it to one row per repository \u2014 so this always shows the most recent weekly sweep and cannot be widened past what Loki will serve.\n\nThese are real bytes: restic fetched, decrypted and reassembled every blob in the newest snapshot to produce them.\n\n\u26a0\ufe0f `| app_namespace != \"\"` is not decoration. The field was called `namespace` at first, which collided with the `namespace=backup-verify` stream label; renaming it fixed the grouping but left older lines in the window with no such label, and last_over_time treats 'label absent' as its own series \u2014 so every repository appeared twice, once with a blank Namespace, until the old lines aged out. The guard drops them immediately and makes any future rename fail closed instead of silently doubling the table.",
           "gridPos": {
             "h": 11,
             "w": 12,
@@ -632,7 +632,7 @@ data:
               },
               "queryType": "instant",
               "instant": true,
-              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=restic\" | logfmt | unwrap bytes [$__range]) by (app_namespace, source)"
+              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=restic\" | logfmt | app_namespace != \"\" | unwrap bytes [$__range]) by (app_namespace, source)"
             }
           ],
           "transformations": [
@@ -678,7 +678,7 @@ data:
           "id": 12,
           "type": "table",
           "title": "Files restored, per repository (latest sweep)",
-          "description": "Companion to the bytes table. A repository whose file count collapses while its byte count holds (or vice versa) is worth a look even if the job passed \u2014 the job only asserts 'not literally empty', because a size floor false-positived n8n, whose 160-byte volume is correct.",
+          "description": "Companion to the bytes table. A repository whose file count collapses while its byte count holds (or vice versa) is worth a look even if the job passed \u2014 the job only asserts 'not literally empty', because a size floor false-positived n8n, whose 160-byte volume is correct.\n\n\u26a0\ufe0f `| app_namespace != \"\"` is not decoration. The field was called `namespace` at first, which collided with the `namespace=backup-verify` stream label; renaming it fixed the grouping but left older lines in the window with no such label, and last_over_time treats 'label absent' as its own series \u2014 so every repository appeared twice, once with a blank Namespace, until the old lines aged out. The guard drops them immediately and makes any future rename fail closed instead of silently doubling the table.",
           "gridPos": {
             "h": 11,
             "w": 12,
@@ -716,7 +716,7 @@ data:
               },
               "queryType": "instant",
               "instant": true,
-              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=restic\" | logfmt | unwrap files [$__range]) by (app_namespace, source)"
+              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=restic\" | logfmt | app_namespace != \"\" | unwrap files [$__range]) by (app_namespace, source)"
             }
           ],
           "transformations": [
