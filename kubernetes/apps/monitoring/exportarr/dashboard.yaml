@@ -227,7 +227,7 @@ data:
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "time() - container_start_time_seconds{container=\"prowlarr\"}",
+              "expr": "time() - container_start_time_seconds{container=\"app\", pod=~\"prowlarr-.*\"}",
               "instant": true,
               "legendFormat": "Uptime",
               "range": false,
@@ -2166,7 +2166,7 @@ data:
                   },
                   "editorMode": "code",
                   "exemplar": false,
-                  "expr": "time() - container_start_time_seconds{container=\"sabnzbd\"}",
+                  "expr": "time() - container_start_time_seconds{container=\"app\", pod=~\"sabnzbd-.*\"}",
                   "instant": true,
                   "legendFormat": "Uptime",
                   "range": false,
@@ -3258,7 +3258,7 @@ data:
                   },
                   "editorMode": "code",
                   "exemplar": false,
-                  "expr": "time() - container_start_time_seconds{container=\"radarr\"}",
+                  "expr": "time() - container_start_time_seconds{container=\"app\", pod=~\"radarr-.*\"}",
                   "instant": true,
                   "legendFormat": "Uptime",
                   "range": false,
@@ -4130,7 +4130,7 @@ data:
                   },
                   "editorMode": "code",
                   "exemplar": false,
-                  "expr": "time() - container_start_time_seconds{container=\"sonarr\"}",
+                  "expr": "time() - container_start_time_seconds{container=\"app\", pod=~\"sonarr-.*\"}",
                   "instant": true,
                   "legendFormat": "Uptime",
                   "range": false,
@@ -4926,7 +4926,7 @@ data:
                 "h": 4,
                 "w": 4,
                 "x": 0,
-                "y": 7
+                "y": 34
               },
               "options": {
                 "colorMode": "background",
@@ -5017,7 +5017,7 @@ data:
                 "h": 4,
                 "w": 5,
                 "x": 4,
-                "y": 7
+                "y": 34
               },
               "options": {
                 "colorMode": "background",
@@ -5043,7 +5043,7 @@ data:
                   },
                   "editorMode": "code",
                   "exemplar": false,
-                  "expr": "time() - container_start_time_seconds{container=\"bazarr\"}",
+                  "expr": "time() - container_start_time_seconds{container=\"app\", pod=~\"bazarr-.*\"}",
                   "instant": true,
                   "legendFormat": "Uptime",
                   "range": false,
@@ -5080,7 +5080,7 @@ data:
                 "h": 4,
                 "w": 24,
                 "x": 0,
-                "y": 11
+                "y": 38
               },
               "options": {
                 "colorMode": "value",
@@ -5108,21 +5108,7 @@ data:
                   },
                   "editorMode": "code",
                   "exemplar": false,
-                  "expr": "bazarr_queue_total{instance=~\"${bazarr_instance}\"}",
-                  "hide": false,
-                  "instant": false,
-                  "legendFormat": "Queued",
-                  "range": true,
-                  "refId": "B"
-                },
-                {
-                  "datasource": {
-                    "type": "prometheus",
-                    "uid": "prometheus"
-                  },
-                  "editorMode": "code",
-                  "exemplar": false,
-                  "expr": "bazarr_history_total{instance=~\"${bazarr_instance}\"}",
+                  "expr": "bazarr_subtitles_history_total{instance=~\"${bazarr_instance}\"}",
                   "hide": false,
                   "instant": false,
                   "legendFormat": "History",
@@ -5231,7 +5217,7 @@ data:
                 "h": 4,
                 "w": 12,
                 "x": 0,
-                "y": 15
+                "y": 42
               },
               "options": {
                 "colorMode": "value",
@@ -5330,7 +5316,7 @@ data:
                 "h": 4,
                 "w": 12,
                 "x": 12,
-                "y": 15
+                "y": 42
               },
               "options": {
                 "colorMode": "value",
@@ -5477,7 +5463,7 @@ data:
                 "h": 19,
                 "w": 12,
                 "x": 0,
-                "y": 19
+                "y": 46
               },
               "options": {
                 "barRadius": 0.5,
@@ -5553,7 +5539,7 @@ data:
                 "h": 9,
                 "w": 12,
                 "x": 12,
-                "y": 19
+                "y": 46
               },
               "options": {
                 "displayMode": "lcd",
@@ -5622,7 +5608,7 @@ data:
                 "h": 10,
                 "w": 12,
                 "x": 12,
-                "y": 28
+                "y": 55
               },
               "options": {
                 "displayMode": "lcd",
@@ -5722,7 +5708,7 @@ data:
                 "h": 9,
                 "w": 8,
                 "x": 0,
-                "y": 38
+                "y": 65
               },
               "options": {
                 "legend": {
@@ -5827,7 +5813,7 @@ data:
                 "h": 9,
                 "w": 8,
                 "x": 8,
-                "y": 38
+                "y": 65
               },
               "options": {
                 "legend": {
@@ -5946,7 +5932,7 @@ data:
                 "h": 9,
                 "w": 8,
                 "x": 16,
-                "y": 38
+                "y": 65
               },
               "options": {
                 "cellHeight": "sm",
