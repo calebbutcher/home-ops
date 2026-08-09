@@ -1,0 +1,306 @@
+---
+# Permissions for the two verification jobs.
+#
+# Shape of the grant, and why it is shaped this way:
+#
+#   DISCOVERY is cluster-wide and read-only. Both jobs list the objects that
+#   describe what is backed up — ReplicationSources and CNPG Clusters — rather
+#   than carrying a hand-maintained list of apps. A hard-coded list is a silent
+#   footgun: add an app, forget the list, and its backup is never verified while
+#   the job still reports success. Neither CR contains a credential; they only
+#   reference secrets by name.
+#
+#   CREDENTIALS are enumerated by name. The restic repository passwords live in
+#   the app namespaces and stay there — this job reads them, it does not keep a
+#   second copy that could drift out of sync with the real one. `resourceNames`
+#   pins the grant to exactly the 15 restic secrets, so it cannot be used to
+#   read (say) the gitea admin secret or the authentik bootstrap token that sit
+#   in the same namespaces.
+#
+#   The combination is deliberate: discovery is automatic, credential access is
+#   not. Add a new app with a ReplicationSource and the job will find it, try to
+#   read its secret, and FAIL LOUDLY with a forbidden error naming the missing
+#   entry — which is exactly the right failure mode. Silent under-coverage is
+#   the thing being defended against; a noisy permissions error is not.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: restore-verify
+  namespace: backup-verify
+---
+# Discovery: what is backed up. Read-only, no secrets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: restore-verify-discover
+rules:
+  - apiGroups: ["volsync.backube"]
+    resources: ["replicationsources"]
+    verbs: ["get", "list"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: restore-verify-discover
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: restore-verify-discover
+subjects:
+  - kind: ServiceAccount
+    name: restore-verify
+    namespace: backup-verify
+---
+# Everything the Postgres job does happens inside this namespace: it creates a
+# throwaway Cluster that recovers from the object store, waits for it, runs a
+# query through the instance pod, and deletes it again.
+#
+# `create` on pods/exec is the sharpest edge here, but it is scoped to this
+# namespace, which only ever contains the scratch clusters this job itself
+# created. It cannot exec into a production database.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: restore-verify-scratch
+  namespace: backup-verify
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  # CNPG owns the PVCs it provisions and garbage-collects them with the Cluster.
+  # Listed anyway so the job's own belt-and-braces cleanup can run: an orphaned
+  # local-path PVC would sit on a node's disk until someone noticed.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "delete"]
+  # Read-only, for diagnostics. When a recovery fails, the reason is almost
+  # always in the Cluster's events (object store unreachable, image mismatch,
+  # WAL gap) and not in the pod log, so the job prints them before giving up.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: restore-verify-scratch
+  namespace: backup-verify
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: restore-verify-scratch
+subjects:
+  - kind: ServiceAccount
+    name: restore-verify
+    namespace: backup-verify
+---
+# ---------------------------------------------------------------------------
+# Per-namespace read access to the restic repository secrets, one Role/binding
+# pair per namespace that owns one. `resourceNames` must list every secret: a
+# `get` grant without it would hand over every secret in the namespace.
+#
+# When a new app gets a ReplicationSource, add its secret here. Forgetting to
+# does not silently skip it — the weekly job fails on that repository with a
+# forbidden error that names the secret.
+# ---------------------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: restore-verify-read-restic
+  namespace: audiobookshelf
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames:
+      - audiobookshelf-restic-secret
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: restore-verify-read-restic
+  namespace: audiobookshelf
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: restore-verify-read-restic
+subjects:
+  - kind: ServiceAccount
+    name: restore-verify
+    namespace: backup-verify
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: restore-verify-read-restic
+  namespace: gitea
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames:
+      - gitea-restic-secret
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: restore-verify-read-restic
+  namespace: gitea
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: restore-verify-read-restic
+subjects:
+  - kind: ServiceAccount
+    name: restore-verify
+    namespace: backup-verify
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: restore-verify-read-restic
+  namespace: home-assistant
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames:
+      - home-assistant-restic-secret
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: restore-verify-read-restic
+  namespace: home-assistant
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: restore-verify-read-restic
+subjects:
+  - kind: ServiceAccount
+    name: restore-verify
+    namespace: backup-verify
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: restore-verify-read-restic
+  namespace: media
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames:
+      - bazarr-restic-secret
+      - maintainerr-restic-secret
+      - prowlarr-restic-secret
+      - qbittorrent-restic-secret
+      - radarr-restic-secret
+      - sabnzbd-restic-secret
+      - seerr-restic-secret
+      - sonarr-restic-secret
+      - tautulli-restic-secret
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: restore-verify-read-restic
+  namespace: media
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: restore-verify-read-restic
+subjects:
+  - kind: ServiceAccount
+    name: restore-verify
+    namespace: backup-verify
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: restore-verify-read-restic
+  namespace: n8n
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames:
+      - n8n-restic-secret
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: restore-verify-read-restic
+  namespace: n8n
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: restore-verify-read-restic
+subjects:
+  - kind: ServiceAccount
+    name: restore-verify
+    namespace: backup-verify
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: restore-verify-read-restic
+  namespace: pricewatch
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames:
+      - pricewatch-restic-secret
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: restore-verify-read-restic
+  namespace: pricewatch
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: restore-verify-read-restic
+subjects:
+  - kind: ServiceAccount
+    name: restore-verify
+    namespace: backup-verify
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: restore-verify-read-restic
+  namespace: tandoor
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames:
+      - tandoor-restic-secret
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: restore-verify-read-restic
+  namespace: tandoor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: restore-verify-read-restic
+subjects:
+  - kind: ServiceAccount
+    name: restore-verify
+    namespace: backup-verify

@@ -1,0 +1,27 @@
+---
+# Scratch namespace for restore verification. Nothing here is a service — it is
+# a place for backups to be pulled back out and proved, on a schedule, and then
+# thrown away.
+#
+# Until now docs/backup-recovery.md said "periodically restore seerr-config into
+# a scratch PVC and confirm it is intact", which is a hypothesis, not a control:
+# there was no CronJob, no schedule and no drill log. Every backup alert in
+# prometheusrule-backups.yaml answers "did a backup run?" — none of them answer
+# "would it come back?". A repository can be receiving snapshots on time and
+# still be unrestorable: wrong password, missing pack files, a mover that backed
+# up an empty mount.
+#
+# Two jobs live here, and both are read-only against the backup targets:
+#   volsync-restore-verify   weekly  — every restic repository
+#   postgres-restore-verify  monthly — every CNPG cluster, restored for real
+#
+# PodSecurity baseline, matching the other app namespaces. Both job pods run
+# unprivileged non-root with all capabilities dropped, and the CNPG instance
+# pods the Postgres job creates are restricted-compliant already.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backup-verify
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest

@@ -1,0 +1,266 @@
+---
+# Monthly proof that the CNPG base backups in s3://postgres-backups/ can be
+# turned back into a running database.
+#
+# This is the real thing, not a checksum: for every Cluster in the cluster it
+# creates a throwaway single-instance Cluster in this namespace that bootstraps
+# via `recovery` from the object store, waits for PostgreSQL to finish WAL
+# replay and promote itself, connects, asks the restored database how much of
+# it there is, and then deletes it. A pass means barman had a base backup, the
+# WAL chain was complete enough to reach consistency, and Postgres started on
+# the result.
+#
+# ⚠️ SAFETY — this job must never be able to damage what it verifies.
+# The scratch Cluster declares NO `.spec.plugins`, so no WAL archiver is
+# attached and PostgreSQL runs with archiving off; `externalClusters[].plugin`
+# is the read path that fetches base backups and WAL, nothing more. As a second
+# line, every scratch cluster is named `verify-<source>` and barman derives its
+# server folder from the cluster name, so even a misconfiguration that turned
+# archiving on would write to s3://postgres-backups/verify-<source>/ and could
+# not touch the source's own prefix. See postgres-objectstore.yaml, which also
+# deliberately omits `retentionPolicy` for the same reason.
+#
+# COVERAGE is discovered, not enumerated: `kubectl get clusters -A` finds all
+# seven, and a new app's Postgres is picked up automatically the month after it
+# lands. The image is read from the source Cluster rather than hard-coded here,
+# which matters more than it looks — recovery is a physical restore, so it only
+# works on the same PostgreSQL major, and immich (VectorChord, PG14) and
+# tracearr (TimescaleDB, PG17) need their own images to even start. Reading
+# `.spec.imageName` means an image bump in an app cannot silently break its
+# verification.
+#
+# SCHEDULE: 1st of the month, 10:00 UTC. Base backups run 02:00-07:00 and the
+# weekly restic verification is at 09:00 Sundays; this sits clear of both.
+#
+# ⚠️ The staleness alert this feeds (RestorePostgresVerificationStale) can only
+# arm once a scheduled run has succeeded, because it reads the CronJob's
+# lastSuccessfulTime — a Job created by hand with `kubectl create job --from`
+# is not owned by the CronJob and does not advance it. On first deploy there is
+# a blind window until the 1st of the next month.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-restore-verify
+  namespace: backup-verify
+spec:
+  schedule: "0 10 1 * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  # Kept on purpose — see the same note in cronjob-volsync.yaml. A failed
+  # restore verification should keep KubeJobFailed firing until a human deals
+  # with it.
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      # Ceiling, not an expectation: seven ~600 MB databases restore in about
+      # twenty minutes. Sized so that even every cluster hitting its individual
+      # 10-minute bootstrap timeout still finishes inside it.
+      activeDeadlineSeconds: 7200
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: restore-verify
+          # Long enough for the EXIT trap to tear down a scratch cluster if the
+          # Job is cancelled or hits its deadline.
+          terminationGracePeriodSeconds: 120
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: verify
+              image: docker.io/alpine/k8s:1.32.13
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  export HOME=/tmp
+
+                  NS=backup-verify
+                  STORE=postgres-backups-store
+                  LABEL="app.kubernetes.io/name=restore-verify"
+                  READY_TIMEOUT=600
+                  # A restored database smaller than this is not a restore, it
+                  # is an empty cluster that happened to start. The smallest
+                  # real database here is ~14 MB.
+                  MIN_BYTES=1048576
+
+                  cleanup() {
+                    kubectl -n "$NS" delete clusters.postgresql.cnpg.io -l "$LABEL" \
+                      --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1 || true
+                    kubectl -n "$NS" delete pvc -l "$LABEL" \
+                      --ignore-not-found >/dev/null 2>&1 || true
+                  }
+                  # INT/TERM as well as EXIT: activeDeadlineSeconds and a manual
+                  # cancel both arrive as signals, and bash would otherwise die
+                  # without running the EXIT trap, leaving a scratch cluster and
+                  # its PVC behind.
+                  trap cleanup EXIT INT TERM
+
+                  # Anything left by a previous run that was killed.
+                  cleanup
+
+                  # Discover. Excluding this namespace matters: without it a
+                  # leftover scratch cluster would be discovered as a source and
+                  # the job would try to verify its own verification.
+                  kubectl get clusters.postgresql.cnpg.io --all-namespaces \
+                    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.spec.imageName}{"\n"}{end}' \
+                    | grep -v "^${NS} " > /tmp/clusters.txt || true
+
+                  total=$(grep -c . /tmp/clusters.txt || true)
+                  if [ "${total:-0}" -eq 0 ]; then
+                    echo "FATAL: no CNPG clusters discovered — refusing to report"
+                    echo "success on zero databases."
+                    exit 1
+                  fi
+                  echo "discovered ${total} Postgres clusters"
+                  echo
+
+                  failed=""
+                  verified=0
+
+                  # Read the work list on fd 3, not stdin. Several commands in
+                  # this loop take input of their own (the heredoc below, and
+                  # kubectl exec), and any of them consuming stdin would eat the
+                  # rest of the list and silently shrink the coverage.
+                  while read -r src_ns src_name image <&3; do
+                    [ -n "${src_name:-}" ] || continue
+                    vname="verify-${src_name}"
+                    echo "=== ${src_ns}/${src_name}  (${image})"
+
+                    kubectl apply -f - <<YAML
+                  apiVersion: postgresql.cnpg.io/v1
+                  kind: Cluster
+                  metadata:
+                    name: ${vname}
+                    namespace: ${NS}
+                    labels:
+                      app.kubernetes.io/name: restore-verify
+                  spec:
+                    instances: 1
+                    imageName: ${image}
+                    inheritedMetadata:
+                      labels:
+                        app.kubernetes.io/name: restore-verify
+                    storage:
+                      size: 5Gi
+                      storageClass: local-path
+                    bootstrap:
+                      recovery:
+                        source: ${src_name}
+                    externalClusters:
+                      - name: ${src_name}
+                        plugin:
+                          name: barman-cloud.cloudnative-pg.io
+                          parameters:
+                            barmanObjectName: ${STORE}
+                    resources:
+                      requests:
+                        cpu: 200m
+                        memory: 512Mi
+                      limits:
+                        memory: 1Gi
+                  YAML
+
+                    if ! kubectl -n "$NS" wait --for=condition=Ready \
+                         "cluster.postgresql.cnpg.io/${vname}" --timeout="${READY_TIMEOUT}s"; then
+                      echo "  FAIL bootstrap: not Ready within ${READY_TIMEOUT}s"
+                      # The reason is almost always in the Cluster's events —
+                      # object store unreachable, no base backup for this server
+                      # name, a WAL gap — and not in the pod log.
+                      kubectl -n "$NS" get events \
+                        --field-selector "involvedObject.name=${vname}" \
+                        --sort-by=.lastTimestamp 2>/dev/null | tail -15 || true
+                      kubectl -n "$NS" logs -l "cnpg.io/cluster=${vname}" \
+                        --tail=25 --all-containers 2>/dev/null || true
+                      failed="${failed} ${src_name}(bootstrap)"
+                      kubectl -n "$NS" delete cluster "${vname}" --wait=true --timeout=180s >/dev/null 2>&1 || true
+                      kubectl -n "$NS" delete pvc -l "cnpg.io/cluster=${vname}" --ignore-not-found >/dev/null 2>&1 || true
+                      continue
+                    fi
+
+                    pod=$(kubectl -n "$NS" get pod \
+                      -l "cnpg.io/cluster=${vname},cnpg.io/instanceRole=primary" \
+                      -o jsonpath='{.items[0].metadata.name}')
+
+                    # Local connection as the postgres superuser inside the
+                    # instance pod — no credential needed, and none of the
+                    # restored roles' passwords are touched.
+                    q() { kubectl -n "$NS" exec "$pod" -c postgres -- psql -U postgres -d "$1" -Atqc "$2"; }
+
+                    ok=1
+                    db=$(q postgres "SELECT datname FROM pg_database WHERE NOT datistemplate AND datname <> 'postgres' ORDER BY pg_database_size(datname) DESC LIMIT 1" || true)
+                    if [ -z "${db:-}" ]; then
+                      echo "  FAIL query: restored instance has no application database"
+                      ok=0
+                    else
+                      size=$(q "$db" "SELECT pg_database_size(current_database())" || echo 0)
+                      tables=$(q "$db" "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'r' AND n.nspname NOT IN ('pg_catalog','information_schema')" || echo 0)
+                      # reltuples is a planner estimate and is -1 on a table that
+                      # has never been analysed, hence the CASE. Order of
+                      # magnitude is all that is wanted: it answers "is the data
+                      # there" without needing to know any app's schema.
+                      rows=$(q "$db" "SELECT coalesce(sum(CASE WHEN c.reltuples < 0 THEN 0 ELSE c.reltuples END),0)::bigint FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'r' AND n.nspname NOT IN ('pg_catalog','information_schema')" || echo 0)
+                      in_recovery=$(q "$db" "SELECT pg_is_in_recovery()" || echo t)
+
+                      echo "  restored ${db}: ${size} bytes, ${tables} tables, ~${rows} rows"
+
+                      if [ "$in_recovery" != "f" ]; then
+                        echo "  FAIL promote: instance is still in recovery"
+                        ok=0
+                      fi
+                      if [ "${tables:-0}" -lt 1 ]; then
+                        echo "  FAIL empty: no user tables in the restored database"
+                        ok=0
+                      fi
+                      if [ "${size:-0}" -lt "$MIN_BYTES" ]; then
+                        echo "  FAIL empty: restored database is only ${size} bytes"
+                        ok=0
+                      fi
+                    fi
+
+                    if [ "$ok" -eq 1 ]; then
+                      echo "  OK"
+                      verified=$((verified + 1))
+                    else
+                      failed="${failed} ${src_name}(content)"
+                    fi
+
+                    kubectl -n "$NS" delete cluster "${vname}" --wait=true --timeout=180s >/dev/null 2>&1 || true
+                    kubectl -n "$NS" delete pvc -l "cnpg.io/cluster=${vname}" --ignore-not-found >/dev/null 2>&1 || true
+                    echo
+                  done 3< /tmp/clusters.txt
+
+                  if [ -n "$failed" ]; then
+                    echo "RESTORE VERIFICATION FAILED:${failed}"
+                    exit 1
+                  fi
+                  if [ "$verified" -ne "$total" ]; then
+                    echo "RESTORE VERIFICATION INCOMPLETE: verified ${verified} of ${total} clusters"
+                    exit 1
+                  fi
+                  echo "OK ${verified} Postgres clusters restored and queried"
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir:
+                medium: Memory
+                sizeLimit: 16Mi

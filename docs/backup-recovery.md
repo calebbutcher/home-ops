@@ -403,10 +403,16 @@ not one that loudly fails. Thresholds are 26h (schedule + one missed run + slack
 | `EtcdSnapshotS3Stale`, `EtcdSnapshotLocalStale`, `EtcdSnapshotNotReady` | etcd snapshots |
 | `LonghornVolumeNeverBackedUp` | Longhorn coverage |
 | `*MetricsMissing` (one per tier) | the collector itself |
+| `RestoreVerificationFailed`, `*RestoreVerificationStale` | whether any of it restores — see [Restore drill](#restore-drill) |
 
 Each group has an `absent()` guard, because a collector that stops reporting is
 indistinguishable from "everything is fine" — which is precisely how the
 2026-08-06 outage went unnoticed.
+
+Note the split: everything above the last row answers *did a backup run?*. Only
+the last row answers *would it come back?*, and a backup can pass every other
+check while being unrestorable — a rotated repository password, lost pack files,
+or a mover that dutifully backed up an empty mount every night.
 
 ### Manual spot-checks
 
@@ -448,7 +454,56 @@ Use an explicit `name` (not `generateName`) so re-running is idempotent, and omi
 
 ### Restore drill
 
-Periodically restore `seerr-config` into a scratch PVC and confirm
-`db/db.sqlite3` + `settings.json` are intact. **This is still manual and
-unscheduled** — automating it is the remaining gap in this document, since an
-untested backup is only a hypothesis.
+**Automated.** `kubernetes/apps/backup-verify/` restores backups on a schedule
+and fails loudly when one will not come back. Every alert above answers *did a
+backup run?*; these answer *would it restore?*, which is a different question
+and the only one that matters on the day it matters.
+
+| CronJob | Schedule | What it proves |
+| --- | --- | --- |
+| `volsync-restore-verify` | Sun 09:00 UTC | Every restic repository opens with its password, passes `restic check`, and its newest snapshot reads back blob for blob |
+| `postgres-restore-verify` | 1st, 10:00 UTC | Every CNPG cluster bootstraps from `s3://postgres-backups/` into a throwaway Cluster, replays WAL, promotes, and answers a query |
+
+Both **discover** their targets (`kubectl get replicationsources -A`,
+`kubectl get clusters -A`) rather than carrying a list of apps, so a new app is
+covered automatically. The restic job's credential access is enumerated by name
+in `rbac.yaml` — adding an app means adding its secret there, and forgetting to
+fails the job with a forbidden error rather than silently narrowing coverage.
+
+Alerts live in `prometheusrule-restore-verify.yaml`: `RestoreVerificationFailed`
+(a backup did not restore), `VolSyncRestoreVerificationStale` (10d),
+`PostgresRestoreVerificationStale` (40d), plus suspended / deleted / leftover-PVC
+guards.
+
+Two properties worth knowing:
+
+- **Neither job can write to a backup target.** The restic job runs only
+  `snapshots`, `check`, `stats` and `dump` — never `prune`, `forget` or
+  `migrate`. The Postgres job's scratch Clusters declare no `.spec.plugins`, so
+  no WAL archiver is attached, and they are named `verify-<source>` so that even
+  a misconfiguration would write to a different barman server prefix than the
+  source. `backup-verify`'s ObjectStore deliberately has **no**
+  `retentionPolicy`.
+- **`PostgresRestoreVerificationStale` arms only after a scheduled run.** A Job
+  created with `kubectl create job --from=cronjob/...` is not owned by the
+  CronJob and does not advance `lastSuccessfulTime`.
+
+To run one on demand:
+
+```bash
+kubectl -n backup-verify create job --from=cronjob/volsync-restore-verify \
+  volsync-verify-manual-$(date +%Y%m%d)
+kubectl -n backup-verify logs -f job/volsync-verify-manual-$(date +%Y%m%d)
+```
+
+Both print a per-target line, so the log is the drill record: repository, snapshot
+ID, restore size, and `OK` or the stage that failed.
+
+### Still manual
+
+The **MariaDB** dumps (`uptime-kuma`) and the **etcd** snapshots are not covered
+by the jobs above — restoring either means standing up a database or a control
+plane, which is a bigger intervention than a scratch namespace. `mariadb-dump`
+output can be spot-checked by pulling the newest object from
+`s3://mariadb-backups/uptime-kuma/` and reading its header; etcd snapshot
+integrity is asserted by k3s itself and surfaced as `EtcdSnapshotNotReady`.
