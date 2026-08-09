@@ -78,10 +78,11 @@ spec:
 
         # Monthly job, so 40 days permits one missed run.
         #
-        # ⚠️ This can only fire once a SCHEDULED run has succeeded. A Job created
-        # by hand with `kubectl create job --from=cronjob/...` is not owned by
-        # the CronJob and does not advance lastSuccessfulTime, so on first
-        # deploy there is a blind window until the 1st of the following month.
+        # Manual runs count. `kubectl create job --from=cronjob/...` sets a
+        # controlling ownerReference back to the CronJob, so the controller
+        # adopts the Job and advances lastSuccessfulTime — verified on
+        # 2026-08-09, when a hand-triggered sweep armed this rule immediately.
+        # A drill therefore refreshes the clock rather than running beside it.
         - alert: PostgresRestoreVerificationStale
           expr: |
             (time() - kube_cronjob_status_last_successful_time{

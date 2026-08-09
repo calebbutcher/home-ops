@@ -484,9 +484,10 @@ Two properties worth knowing:
   a misconfiguration would write to a different barman server prefix than the
   source. `backup-verify`'s ObjectStore deliberately has **no**
   `retentionPolicy`.
-- **`PostgresRestoreVerificationStale` arms only after a scheduled run.** A Job
-  created with `kubectl create job --from=cronjob/...` is not owned by the
-  CronJob and does not advance `lastSuccessfulTime`.
+- **A manual run counts as a run.** `kubectl create job --from=cronjob/...` sets
+  a controlling `ownerReference` back to the CronJob, so the controller adopts
+  the Job and advances `lastSuccessfulTime`. Triggering a drill by hand both
+  proves the mechanism and resets the staleness clock.
 
 To run one on demand:
 

@@ -1,0 +1,1055 @@
+---
+# Visual confirmation that the restore verification is running and what it got
+# back. Companion to prometheusrule-restore-verify.yaml, which only speaks up
+# when something is wrong — this answers "is it working?" without waiting to be
+# told it is not. Auto-imported by the kube-prometheus-stack Grafana sidecar via
+# the grafana_dashboard label. Jobs live in kubernetes/apps/backup-verify/.
+#
+# TWO DATASOURCES, on purpose:
+#   Prometheus/Thanos  the schedule — last success, next run, duration, outcome.
+#                      All of it from kube-state-metrics; nothing custom.
+#   Loki               the detail — which repository, how many bytes, how many
+#                      tables. This exists NOWHERE ELSE. There is no per-target
+#                      metric and no Pushgateway: the jobs assert everything
+#                      themselves and exit non-zero, so the only per-target
+#                      record is what they print.
+#
+# ⚠️ Defaults to THANOS. prometheusSpec.retention is 2d, and a weekly job seen
+# through a two-day window is one bar or none. The kube_job_* panels are
+# additionally bounded by object lifetime — those series exist only while the
+# Job does, and successfulJobsHistoryLimit is 3.
+#
+# ⚠️ The Loki tables read `RESULT ... | logfmt` lines that the jobs emit
+# alongside their human-readable output. logfmt needs every field on ONE line,
+# which is why those lines exist at all — the "=== repo" header and its "OK
+# restored" line are separate log entries with nothing tying them together. If
+# a table goes blank, check the jobs are still emitting RESULT lines before
+# suspecting Loki.
+#
+# last_over_time(... ) by (...) collapses the range to one row per target, so
+# the tables stay readable at any time range instead of showing every run.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-verify-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  backup-verify.json: |
+    {
+      "annotations": {
+        "list": []
+      },
+      "editable": true,
+      "graphTooltip": 1,
+      "schemaVersion": 39,
+      "version": 1,
+      "id": null,
+      "uid": "backup-verify",
+      "title": "Backups / Restore Verification",
+      "tags": [
+        "backups",
+        "volsync",
+        "cnpg",
+        "restore"
+      ],
+      "time": {
+        "from": "now-45d",
+        "to": "now"
+      },
+      "refresh": "5m",
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "label": "Datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {
+              "text": "Thanos",
+              "value": "thanos",
+              "selected": true
+            },
+            "options": [],
+            "refresh": 1,
+            "regex": "",
+            "hide": 0
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Is it working?",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
+          "panels": []
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "restic \u2014 last verified",
+          "description": "Age of the last successful run of volsync-restore-verify. Turns red at 10d, which is exactly when VolSyncRestoreVerificationStale fires, so the colour here and the alert never disagree.\n\nManual runs count: `kubectl create job --from=cronjob/...` sets a controlling ownerReference, so the CronJob adopts the Job and this resets. A drill refreshes the clock rather than running beside it.",
+          "gridPos": {
+            "h": 5,
+            "w": 5,
+            "x": 0,
+            "y": 1
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 604800
+                  },
+                  {
+                    "color": "red",
+                    "value": 864000
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto",
+            "text": {
+              "valueSize": 28
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "instant": true,
+              "expr": "time() - kube_cronjob_status_last_successful_time{namespace=\"backup-verify\", cronjob=\"volsync-restore-verify\"}"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Postgres \u2014 last verified",
+          "description": "Age of the last successful run of postgres-restore-verify. Turns red at 40d, matching PostgresRestoreVerificationStale. Manual runs count \u2014 see the restic panel.",
+          "gridPos": {
+            "h": 5,
+            "w": 5,
+            "x": 5,
+            "y": 1
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 2592000
+                  },
+                  {
+                    "color": "red",
+                    "value": 3456000
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto",
+            "text": {
+              "valueSize": 28
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "instant": true,
+              "expr": "time() - kube_cronjob_status_last_successful_time{namespace=\"backup-verify\", cronjob=\"postgres-restore-verify\"}"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Next scheduled run",
+          "description": "When each CronJob next fires. Sourced from kube_cronjob_next_schedule_time (seconds), multiplied to ms for the dateTimeFromNow unit.",
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 10,
+            "y": 1
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "text"
+              },
+              "unit": "dateTimeFromNow"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "instant": true,
+              "legendFormat": "{{cronjob}}",
+              "expr": "kube_cronjob_next_schedule_time{namespace=\"backup-verify\"} * 1000"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Targets that failed to restore",
+          "description": "Count of RESULT lines with status=fail across the dashboard time range, both tiers. Anything above zero means a backup exists and could not be used \u2014 see the tables below for which one and at what stage.",
+          "gridPos": {
+            "h": 5,
+            "w": 4,
+            "x": 16,
+            "y": 1
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "mappings": [
+                {
+                  "type": "special",
+                  "options": {
+                    "match": "null",
+                    "result": {
+                      "text": "0",
+                      "color": "green",
+                      "index": 0
+                    }
+                  }
+                }
+              ]
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto",
+            "text": {
+              "valueSize": 40
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "instant": true,
+              "queryType": "instant",
+              "expr": "sum(count_over_time({namespace=\"backup-verify\"} |= \"RESULT\" | logfmt | status=\"fail\" [$__range]))"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Verification suspended",
+          "description": "kube_cronjob_spec_suspend across the namespace. A suspended CronJob is the quietest way to turn this whole thing off: nothing fails, the last-success timestamp just stops moving.",
+          "gridPos": {
+            "h": 5,
+            "w": 4,
+            "x": 20,
+            "y": 1
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "No",
+                      "color": "green",
+                      "index": 0
+                    }
+                  }
+                }
+              ]
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto",
+            "text": {
+              "valueSize": 40
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "instant": true,
+              "expr": "sum(kube_cronjob_spec_suspend{namespace=\"backup-verify\"})"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "type": "row",
+          "title": "Run history",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 6
+          },
+          "panels": []
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "Sweep duration",
+          "description": "Wall-clock per completed Job. In-cluster the restic sweep takes ~2min and the Postgres sweep ~14min. A steady climb usually means the NAS is slow rather than that anything is wrong with the backups.\n\n\u26a0\ufe0f Needs the Thanos datasource for anything older than ~2 days \u2014 prometheusSpec.retention is 2d. This panel and the one beside it are also EMPTY until a Job exists: kube_job_* series only exist while the Job object does, and they age out at successfulJobsHistoryLimit: 3.",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 7
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 60,
+                "lineWidth": 1,
+                "pointSize": 6,
+                "barWidthFactor": 0.4
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "legendFormat": "{{job_name}}",
+              "expr": "kube_job_status_completion_time{namespace=\"backup-verify\"} - on(job_name) group_left kube_job_status_start_time{namespace=\"backup-verify\"}"
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "type": "state-timeline",
+          "title": "Outcome per run",
+          "description": "1 = the Job reported Complete, 0 = Failed. One track per Job. This is the 'has it actually been working' view; the alerts only speak up when it has not.",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 7
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "lineWidth": 0,
+                "fillOpacity": 80
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "1": {
+                      "text": "OK",
+                      "color": "green",
+                      "index": 0
+                    },
+                    "0": {
+                      "text": "FAILED",
+                      "color": "red",
+                      "index": 1
+                    }
+                  }
+                }
+              ],
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showValue": "never",
+            "mergeValues": true,
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": false
+            },
+            "tooltip": {
+              "mode": "single"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "legendFormat": "{{job_name}}",
+              "expr": "max by (job_name) (kube_job_complete{namespace=\"backup-verify\", condition=\"true\"})"
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "type": "row",
+          "title": "restic \u2014 what actually came back",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 15
+          },
+          "panels": []
+        },
+        {
+          "id": 11,
+          "type": "table",
+          "title": "Bytes restored, per repository (latest run in range)",
+          "description": "Read from the job's own RESULT lines in Loki, not from any metric \u2014 the per-repository detail exists nowhere else. last_over_time collapses the range to one row per repository, so this stays readable no matter how wide the time range is.\n\nThese are real bytes: restic fetched, decrypted and reassembled every blob in the newest snapshot to produce them.",
+          "gridPos": {
+            "h": 11,
+            "w": 12,
+            "x": 0,
+            "y": 16
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "align": "auto"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "Bytes",
+                "desc": true
+              }
+            ]
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "queryType": "instant",
+              "instant": true,
+              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=restic\" | logfmt | unwrap bytes [$__range]) by (namespace, source)"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "tier": true,
+                  "stage": true,
+                  "status": true,
+                  "container": true,
+                  "pod": true,
+                  "node": true,
+                  "stream": true,
+                  "filename": true,
+                  "service_name": true,
+                  "detected_level": true,
+                  "job": true,
+                  "instance": true
+                },
+                "renameByName": {
+                  "namespace": "Namespace",
+                  "source": "ReplicationSource",
+                  "Value": "Bytes"
+                },
+                "indexByName": {
+                  "namespace": 0,
+                  "source": 1,
+                  "Value": 2
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "type": "table",
+          "title": "Files restored, per repository (latest run in range)",
+          "description": "Companion to the bytes table. A repository whose file count collapses while its byte count holds (or vice versa) is worth a look even if the job passed \u2014 the job only asserts 'not literally empty', because a size floor false-positived n8n, whose 160-byte volume is correct.",
+          "gridPos": {
+            "h": 11,
+            "w": 12,
+            "x": 12,
+            "y": 16
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "align": "auto"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "Files",
+                "desc": true
+              }
+            ]
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "queryType": "instant",
+              "instant": true,
+              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=restic\" | logfmt | unwrap files [$__range]) by (namespace, source)"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "tier": true,
+                  "stage": true,
+                  "status": true,
+                  "container": true,
+                  "pod": true,
+                  "node": true,
+                  "stream": true,
+                  "filename": true,
+                  "service_name": true,
+                  "detected_level": true,
+                  "job": true,
+                  "instance": true
+                },
+                "renameByName": {
+                  "namespace": "Namespace",
+                  "source": "ReplicationSource",
+                  "Value": "Files"
+                },
+                "indexByName": {
+                  "namespace": 0,
+                  "source": 1,
+                  "Value": 2
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 13,
+          "type": "row",
+          "title": "Postgres \u2014 what actually came back",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 27
+          },
+          "panels": []
+        },
+        {
+          "id": 14,
+          "type": "table",
+          "title": "Restored database size",
+          "description": "Size of each database after a real recovery from s3://postgres-backups \u2014 barman base backup + WAL replay + promotion, then queried. Compare against production: on 2026-08-09 every cluster landed within 0.2%, the difference being same-day writes since the 02:00-07:00 backups. Matching EXACTLY is not the goal and would only happen on an idle database.",
+          "gridPos": {
+            "h": 10,
+            "w": 8,
+            "x": 0,
+            "y": 28
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "align": "auto"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "Bytes",
+                "desc": true
+              }
+            ]
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "queryType": "instant",
+              "instant": true,
+              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=postgres\" | logfmt | unwrap bytes [$__range]) by (cluster, db)"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "tier": true,
+                  "stage": true,
+                  "status": true,
+                  "namespace": true,
+                  "container": true,
+                  "pod": true,
+                  "node": true,
+                  "stream": true,
+                  "filename": true,
+                  "service_name": true,
+                  "detected_level": true,
+                  "job": true,
+                  "instance": true
+                },
+                "renameByName": {
+                  "cluster": "Cluster",
+                  "db": "Database",
+                  "Value": "Bytes"
+                },
+                "indexByName": {
+                  "cluster": 0,
+                  "db": 1,
+                  "Value": 2
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 15,
+          "type": "table",
+          "title": "Restored table count",
+          "description": "User tables in the restored database (pg_catalog and information_schema excluded). The job fails a cluster with zero. tracearr shows ~1000 because TimescaleDB chunks are tables.",
+          "gridPos": {
+            "h": 10,
+            "w": 8,
+            "x": 8,
+            "y": 28
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "align": "auto"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "Tables",
+                "desc": true
+              }
+            ]
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "queryType": "instant",
+              "instant": true,
+              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=postgres\" | logfmt | unwrap tables [$__range]) by (cluster, db)"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "tier": true,
+                  "stage": true,
+                  "status": true,
+                  "namespace": true,
+                  "container": true,
+                  "pod": true,
+                  "node": true,
+                  "stream": true,
+                  "filename": true,
+                  "service_name": true,
+                  "detected_level": true,
+                  "job": true,
+                  "instance": true
+                },
+                "renameByName": {
+                  "cluster": "Cluster",
+                  "db": "Database",
+                  "Value": "Tables"
+                },
+                "indexByName": {
+                  "cluster": 0,
+                  "db": 1,
+                  "Value": 2
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 16,
+          "type": "table",
+          "title": "Restored row estimate",
+          "description": "Sum of pg_class.reltuples, which does survive a physical restore. Logged and shown, never asserted: gitea legitimately reports 0 because its tables are genuinely empty, and a floor here would fail it forever.",
+          "gridPos": {
+            "h": 10,
+            "w": 8,
+            "x": 16,
+            "y": 28
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "align": "auto"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "Rows",
+                "desc": true
+              }
+            ]
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "queryType": "instant",
+              "instant": true,
+              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=postgres\" | logfmt | unwrap rows [$__range]) by (cluster, db)"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "tier": true,
+                  "stage": true,
+                  "status": true,
+                  "namespace": true,
+                  "container": true,
+                  "pod": true,
+                  "node": true,
+                  "stream": true,
+                  "filename": true,
+                  "service_name": true,
+                  "detected_level": true,
+                  "job": true,
+                  "instance": true
+                },
+                "renameByName": {
+                  "cluster": "Cluster",
+                  "db": "Database",
+                  "Value": "Rows"
+                },
+                "indexByName": {
+                  "cluster": 0,
+                  "db": 1,
+                  "Value": 2
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 17,
+          "type": "row",
+          "title": "Raw output",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 38
+          },
+          "panels": []
+        },
+        {
+          "id": 18,
+          "type": "logs",
+          "title": "Verification log",
+          "description": "The drill record. Every run prints a line per target \u2014 repository, snapshot id, restore size \u2014 so this panel IS the evidence that the backups were exercised, which is what docs/backup-recovery.md used to ask for by hand and never got.",
+          "gridPos": {
+            "h": 14,
+            "w": 24,
+            "x": 0,
+            "y": 39
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "options": {
+            "showTime": true,
+            "wrapLogMessage": true,
+            "sortOrder": "Descending",
+            "enableLogDetails": true,
+            "dedupStrategy": "none",
+            "prettifyLogMessage": false
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "expr": "{namespace=\"backup-verify\", container=~\"verify|fetch-credentials\"}"
+            }
+          ]
+        }
+      ]
+    }

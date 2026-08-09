@@ -191,9 +191,24 @@ spec:
                   checked=0
                   failed=""
 
+                  # One machine-readable line per repository, alongside the
+                  # human-readable output. The Grafana dashboard
+                  # (monitoring/backup-verify/dashboard.yaml) reads these out of
+                  # Loki with `|= "RESULT" | logfmt`, which needs every field on
+                  # ONE line — the "=== repo" header and its "OK restored" line
+                  # are two separate log entries with nothing tying them
+                  # together, so they cannot be tabulated. Keep values
+                  # space-free; logfmt has no way to quote them here.
+                  emit() {
+                    echo "RESULT tier=restic namespace=${1} source=${2} status=${3} stage=${4} snapshot=${5:-none} bytes=${6:-0} files=${7:-0}"
+                  }
+
                   for d in /creds/*/; do
                     [ -d "$d" ] || continue
                     repo=$(basename "$d")
+                    # The initContainer names each directory <namespace>__<source>.
+                    ns=${repo%%__*}
+                    src=${repo#*__}
                     echo "=== ${repo}"
 
                     RESTIC_REPOSITORY=$(cat "${d}/RESTIC_REPOSITORY")
@@ -205,6 +220,7 @@ spec:
                     # 1. open the repository and find the newest snapshot
                     if ! snap=$(restic snapshots --latest 1 --json --no-lock 2>&1); then
                       echo "  FAIL open: ${snap}"
+                      emit "$ns" "$src" fail open
                       failed="${failed} ${repo}(open)"
                       continue
                     fi
@@ -213,6 +229,7 @@ spec:
                     when=$(printf '%s' "$snap" | sed -n 's/.*"time":"\([^"]*\)".*/\1/p' | head -1)
                     if [ -z "$id" ]; then
                       echo "  FAIL open: repository has no snapshots"
+                      emit "$ns" "$src" fail no-snapshots
                       failed="${failed} ${repo}(empty)"
                       continue
                     fi
@@ -221,6 +238,7 @@ spec:
                     # 2. structural integrity
                     if ! out=$(restic check --no-lock 2>&1); then
                       echo "  FAIL check: ${out}"
+                      emit "$ns" "$src" fail check "$id"
                       failed="${failed} ${repo}(check)"
                       continue
                     fi
@@ -228,6 +246,7 @@ spec:
                     # 3. what a restore would produce
                     if ! stats=$(restic stats --mode restore-size --json --no-lock "$id" 2>&1); then
                       echo "  FAIL stats: ${stats}"
+                      emit "$ns" "$src" fail stats "$id"
                       failed="${failed} ${repo}(stats)"
                       continue
                     fi
@@ -254,6 +273,7 @@ spec:
                     # data stays visible without crying wolf every week.
                     if [ "${files:-0}" -lt 1 ] || [ "${size:-0}" -lt 1 ]; then
                       echo "  FAIL empty: newest snapshot holds no data at all"
+                      emit "$ns" "$src" fail empty "$id" "${size:-0}" "${files:-0}"
                       failed="${failed} ${repo}(empty)"
                       continue
                     fi
@@ -267,10 +287,12 @@ spec:
                     # `/` and not "$path" — see the note in the file header.
                     if ! restic dump --archive tar --no-lock "$id" / > /dev/null 2>/tmp/dump.err; then
                       echo "  FAIL restore: $(cat /tmp/dump.err)"
+                      emit "$ns" "$src" fail restore "$id" "$size" "$files"
                       failed="${failed} ${repo}(restore)"
                       continue
                     fi
                     echo "  OK restored ${size} bytes"
+                    emit "$ns" "$src" ok none "$id" "$size" "$files"
 
                     checked=$((checked + 1))
                     rm -rf /cache/* 2>/dev/null || true
