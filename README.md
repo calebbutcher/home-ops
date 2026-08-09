@@ -12,7 +12,7 @@ Proxmox VE
    │  Terraform  (clone cloud-init template → VMs)
    ▼
 Ubuntu VMs
-   │  Ansible    (install HA k3s + Cilium)
+   │  Ansible    (install HA k3s + flannel)
    ▼
 k3s cluster
    │  flux bootstrap
@@ -32,8 +32,12 @@ Flux CD ──► infrastructure ──► apps
 ## Stack
 
 - **Compute** — HA k3s (embedded etcd) on Proxmox VMs, base domain `nerdbox.dev`.
-- **Networking** — [Cilium](https://cilium.io/) CNI (kube-proxy replacement, BGP
-  load balancer; k3s flannel disabled).
+- **Networking** — k3s's default **flannel** CNI (VXLAN, pod CIDR `10.42.0.0/16`)
+  with kube-proxy. NetworkPolicies are enforced by k3s's built-in kube-router
+  controller. [MetalLB](https://metallb.io/) (layer 2) provides `LoadBalancer`
+  IPs from `10.2.169.80-90` — k3s servicelb is disabled — and
+  [kube-vip](https://kube-vip.io/) holds the API server VIP at `10.2.169.10`.
+  All three are installed by Ansible, not Flux.
 - **Ingress / TLS** — [Traefik](https://traefik.io/) as the ingress controller,
   [cert-manager](https://cert-manager.io/) issuing Let's Encrypt certs via the
   Cloudflare DNS-01 solver. Services are exposed on `*.int.nerdbox.dev`
@@ -63,7 +67,7 @@ Flux CD ──► infrastructure ──► apps
     ├── bootstrap/flux/       # one-time Flux bootstrap notes
     ├── flux/cluster/         # Flux entrypoint (apps + infrastructure Kustomizations)
     ├── infrastructure/
-    │   ├── controllers/      # cilium, traefik, cert-manager, cnpg, mariadb-operator, volsync, …
+    │   ├── controllers/      # traefik, cert-manager, cnpg, mariadb-operator, volsync, longhorn, …
     │   └── configs/          # ClusterIssuers, Cloudflare token, …
     └── apps/                 # media, monitoring, tools, uptime-kuma
 ```
@@ -73,15 +77,24 @@ Flux applies `kubernetes/infrastructure/` first, then `kubernetes/apps/` (the
 
 ## Cluster add-ons
 
+Everything below is deployed by Flux from
+[`kubernetes/infrastructure/controllers/`](kubernetes/infrastructure/controllers/).
+The CNI, load balancer, and API VIP are *not* here — they are installed by
+Ansible; see **Networking** above.
+
 | Component | Purpose |
 | --- | --- |
-| Cilium | CNI, kube-proxy replacement, BGP load-balancer IPAM |
 | Traefik | Ingress controller |
 | cert-manager | ACME (Let's Encrypt) certificates via Cloudflare DNS-01 |
-| CloudNativePG | Postgres operator (per-app clusters, PITR via barman-cloud) |
-| mariadb-operator | MariaDB operator (per-app instances, native backups) |
+| CrowdSec | IP-reputation bouncer + AppSec WAF in front of Traefik |
+| Longhorn | Distributed block storage — the **default StorageClass** |
 | VolSync | PVC backup/restore (restic → RustFS) |
 | snapshot-controller | CSI volume snapshots (Piraeus chart) |
+| CloudNativePG | Postgres operator (per-app clusters, PITR via barman-cloud) |
+| cnpg-barman-plugin | Barman Cloud plugin backing CNPG backups/PITR |
+| mariadb-operator | MariaDB operator (per-app instances, native backups) |
+| system-upgrade-controller | Rolling k3s version upgrades (see [`docs/updates.md`](docs/updates.md)) |
+| tailscale-operator | Tailscale exit node + LAN subnet router |
 
 ## Applications
 
@@ -101,8 +114,8 @@ Flux applies `kubernetes/infrastructure/` first, then `kubernetes/apps/` (the
 1. **Provision VMs** — `infrastructure/terraform/` clones a cloud-init Ubuntu
    template on Proxmox. See [`infrastructure/terraform/SETUP.md`](infrastructure/terraform/SETUP.md).
 2. **Install k3s** — run the Ansible playbook in [`ansible/`](ansible/)
-   (`ansible-playbook site.yml`) to stand up HA k3s with Cilium and fetch a
-   kubeconfig.
+   (`ansible-playbook site.yml`) to stand up HA k3s with flannel, MetalLB and
+   kube-vip, and fetch a kubeconfig.
 3. **Bootstrap Flux** — point Flux at this repo and create the SOPS age secret so
    it can decrypt secrets. See [`kubernetes/bootstrap/flux/README.md`](kubernetes/bootstrap/flux/README.md).
 4. Flux reconciles `kubernetes/infrastructure/` then `kubernetes/apps/` — done.
@@ -125,10 +138,17 @@ not ansible-vault.
 
 ## Updates
 
-Versions are pinned (exact Helm chart versions and image tags — no `latest`,
-no floating ranges). Renovate opens a PR per available update; merging the PR is
-the approval, and Flux applies it on the next reconcile. Details:
+Versions are pinned — exact Helm chart versions and image tags, no floating
+ranges. Renovate opens a PR per available update; merging the PR is the
+approval, and Flux applies it on the next reconcile. Details:
 [`docs/updates.md`](docs/updates.md).
+
+Exactly **one** image floats:
+[`dgtlmoon/sockpuppetbrowser`](kubernetes/apps/pricewatch/helmrelease.yaml) in
+pricewatch, on `:latest` because upstream's versioned tags have been stale since
+Aug 2025 while `:latest` tracks the maintainer's current build. It is documented
+in-file. (Seerr is also tagged `latest`, but pinned by digest — the digest is
+what resolves, so it is immutable.) Anything else on a moving tag is a bug.
 
 Renovate also covers the pieces that live outside Flux — the k3s version in the
 [system-upgrade-controller Plans](kubernetes/infrastructure/controllers/system-upgrade-controller/plans/),

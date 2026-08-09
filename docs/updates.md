@@ -31,8 +31,15 @@ opens a PR whenever that digest changes.
 The **k3s version itself** (Kubernetes version) is upgraded in-cluster by the
 [System Upgrade Controller](https://docs.k3s.io/upgrades/automated) (SUC), deployed at
 [`kubernetes/infrastructure/controllers/system-upgrade-controller/`](../kubernetes/infrastructure/controllers/system-upgrade-controller/).
-This is separate from the Ansible `k3s_version` pin (which is only the *fresh-install /
-node-join* baseline) and from Renovate (which does not touch k3s).
+This is separate from the Ansible `k3s_version` pin, which is only the *fresh-install /
+node-join* baseline and is inert until the play is re-run.
+
+**Renovate does surface k3s** — `renovate.json` has a `customManagers` entry covering
+both the SUC Plans and the ansible inventory, and a `k3s-io/k3s` rule with
+`separateMultipleMinor` so each minor stream arrives as its own PR. That is deliberate:
+k3s supports only +1 minor of skew, so 1.32 → 1.35 must be walked one minor at a time,
+and four separate PRs is exactly that walk. **Merging one of those PRs upgrades the live
+cluster** — see the warning Renovate puts in the PR body.
 
 **How it works.** Two `Plan` CRs (`k3s-server`, `k3s-agent`) declare a target `version`.
 SUC cordons → swaps the k3s binary via a per-node Job → uncordons, **one node at a
