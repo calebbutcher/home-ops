@@ -68,6 +68,13 @@ Verified by inspecting contents rather than inferred from a PVC list. Do not
 4. **`k3s_token`** — must live in the ansible-vaulted secrets file, never
    committed in plaintext.
 
+> ⚠️ On each control node, `/etc/rancher/k3s/config.yaml` holds items 3 and 4
+> **in plaintext**. It must be `0600 root:root`; the default umask makes it
+> `0644`, which exposes both to any local user. Check with
+> `ls -l /etc/rancher/k3s/config.yaml` on 10.2.169.30/31/32 and see
+> [`secrets-encryption.md`](secrets-encryption.md) for what does — and does not —
+> protect secrets at rest today.
+
 ## Restore: a single app config PVC (VolSync)
 
 1. Suspend the app's HelmRelease and scale the deployment to 0 so nothing holds
@@ -141,9 +148,10 @@ locally (`/var/lib/rancher/k3s/server/db/snapshots/`) **and** uploaded to RustFS
 (`s3://etcd-snapshots`).
 
 The offsite config currently lives in `/etc/rancher/k3s/config.yaml` on each
-control node (root-only, holds the RustFS keys), applied directly + `systemctl
-restart k3s` — not via Ansible, because re-running the server play re-invokes
-`k3s-init` (unsafe on a live cluster). The Ansible `etcd_s3_enabled` toggle in
+control node (holds the RustFS keys — **must be `0600`**, see the warning under
+"Critical secrets" above; it was found `0644` on all three nodes on 2026-08-09),
+applied directly + `systemctl restart k3s` — not via Ansible, because re-running
+the server play re-invokes `k3s-init` (unsafe on a live cluster). The Ansible `etcd_s3_enabled` toggle in
 `group_vars/all.yml` stays `false` until the RustFS creds are ansible-vaulted;
 once vaulted, flip it to `true` so Ansible is the source of truth again. The
 relevant config.yaml keys:
@@ -353,13 +361,23 @@ node-by-node:
    restarted.
 3. **Servers** read their token from `/var/lib/rancher/k3s/server/token` (the
    persistent `k3s.service` has no `--token`). For each server, one at a time,
-   write the new token to config and restart:
+   replace the token line **in place** and restart:
    ```bash
-   sudo tee /etc/rancher/k3s/config.yaml >/dev/null <<EOF
-   token: "<new>"
-   EOF
+   sudo sed -i 's|^token: .*|token: "<new>"|' /etc/rancher/k3s/config.yaml
+   sudo chmod 0600 /etc/rancher/k3s/config.yaml   # see the warning below
    sudo systemctl restart k3s
    ```
+   > ⚠️ **Edit in place — do not `tee` the whole file.** `config.yaml` also holds
+   > `etcd-s3-*` (the offsite snapshot destination and its credentials) and
+   > `etcd-expose-metrics`. Overwriting the file with just a `token:` line
+   > silently disables etcd S3 snapshots and etcd scraping on that node, and
+   > nothing alerts on the *config* — you would find out at restore time.
+   >
+   > ⚠️ **`chmod 0600` matters.** `tee`/`sed` leave the file world-readable
+   > (`0644`) under the default umask, and it contains the cluster join token
+   > *and* the RustFS access/secret keys in plaintext. Any local user on a
+   > control node can then read both. k3s reads the file as root, so `0600` is
+   > fine.
    Verify `EtcdIsVoter=True` + `Ready=True` before moving on
    (`kubectl get node <name> -o jsonpath='{.status.conditions[*].type}'`).
    Do the rotate node last.

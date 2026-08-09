@@ -68,9 +68,13 @@ spec:
             fsGroup: 999
         containers:
           app:
+            # Pinned exactly, matching the three plain-Deployment Redises
+            # (immich/authentik/paperless). `8-alpine` floated: the tag silently
+            # moved across patch releases, so what ran here was whatever Docker
+            # Hub last pushed rather than anything this repo declared.
             image:
               repository: redis
-              tag: 8-alpine
+              tag: 8.10.0-alpine
             command:
               - redis-server
               - --appendonly

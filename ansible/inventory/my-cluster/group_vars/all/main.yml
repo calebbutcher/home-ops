@@ -102,6 +102,23 @@ etcd_snapshot_retention: 14
 # NOT affect the running cluster without re-running the play.
 etcd_expose_metrics: true
 
+# --- secrets at rest ---
+# DELIBERATELY false, and it must stay false until k3s is upgraded. Full
+# reasoning and the enable procedure: docs/secrets-encryption.md.
+#
+# Short version: enabling encryption on an ALREADY-RUNNING cluster is documented
+# only for k3s >= v1.33.10+k3s1, and this cluster is on v1.32.13+k3s1 — the last
+# release of the 1.32 line (2026-03-04), which predates the fix for
+# k3s-io/k3s#13763. On that bug an HA cluster whose server crashes mid-rotation
+# cannot restart, with half the secrets under each key; the reported recovery was
+# hand-decrypting them with a script.
+#
+# On a FRESH install the flag is safe at first start — it is the migration of
+# existing secrets that is dangerous, and a new cluster has none. So a rebuild
+# from this inventory can opt in by flipping this to true; the live cluster
+# cannot, yet.
+secrets_encryption: false
+
 # change these to your liking, the only required are: --disable servicelb, --tls-san {{ apiserver_endpoint }}
 # the contents of the if block is also required if using calico or cilium
 extra_server_args: >-
@@ -125,6 +142,7 @@ extra_server_args: >-
   --etcd-snapshot-retention {{ etcd_snapshot_retention }}
   {% endif %}
   {{ '--etcd-expose-metrics' if etcd_expose_metrics else '' }}
+  {{ '--secrets-encryption' if secrets_encryption else '' }}
 
 extra_agent_args: >-
   {{ extra_args }}
