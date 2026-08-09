@@ -449,11 +449,11 @@ data:
           "id": 8,
           "type": "timeseries",
           "title": "Sweep duration",
-          "description": "Wall-clock per completed Job. In-cluster the restic sweep takes ~2min and the Postgres sweep ~14min; both run Sunday mornings. A steady climb usually means the NAS is slow rather than that anything is wrong with the backups.\n\n\u26a0\ufe0f Needs the Thanos datasource for anything older than ~2 days \u2014 prometheusSpec.retention is 2d. This panel and the one beside it are also EMPTY until a Job exists: kube_job_* series only exist while the Job object does, and they age out at successfulJobsHistoryLimit: 3.",
+          "description": "Wall-clock per sweep, one point per run. Points rather than lines: each Job's series exists only while the Job object does, so there is nothing to join a line across. In-cluster the restic sweep takes ~100s and the Postgres sweep ~850s; a steady climb usually means the NAS is slow rather than that anything is wrong with the backups.\n\n\u26a0\ufe0f `kube_job_owner{owner_kind=\"CronJob\"}` is a filter, not decoration. The Postgres sweep makes CNPG create a scratch Cluster, and CNPG creates its OWN Job to run the recovery \u2014 `verify-<cluster>-1-full-recovery`. Those land in this namespace too, and an unfiltered query charts them alongside the sweeps as if they were sweeps. Joining through kube_job_owner keeps only the Jobs our two CronJobs own.\n\n\u26a0\ufe0f Needs Thanos for anything older than ~2 days (retention is 2d), and series vanish entirely once the Job objects age out at successfulJobsHistoryLimit: 3. For a guaranteed-populated view use the Recent sweeps table beside this.",
           "gridPos": {
             "h": 8,
-            "w": 12,
-            "x": 0,
+            "w": 8,
+            "x": 8,
             "y": 7
           },
           "datasource": {
@@ -464,11 +464,11 @@ data:
             "defaults": {
               "unit": "s",
               "custom": {
-                "drawStyle": "bars",
-                "fillOpacity": 60,
-                "lineWidth": 1,
-                "pointSize": 6,
-                "barWidthFactor": 0.4
+                "drawStyle": "points",
+                "pointSize": 8,
+                "lineWidth": 0,
+                "fillOpacity": 0,
+                "showPoints": "always"
               }
             },
             "overrides": []
@@ -477,7 +477,7 @@ data:
             "legend": {
               "displayMode": "list",
               "placement": "bottom",
-              "showLegend": true
+              "showLegend": false
             },
             "tooltip": {
               "mode": "multi",
@@ -491,8 +491,85 @@ data:
                 "type": "prometheus",
                 "uid": "$datasource"
               },
-              "legendFormat": "{{job_name}}",
-              "expr": "kube_job_status_completion_time{namespace=\"backup-verify\"} - on(job_name) group_left kube_job_status_start_time{namespace=\"backup-verify\"}"
+              "legendFormat": "{{owner_name}}",
+              "expr": "(kube_job_status_completion_time{namespace=\"backup-verify\"} - on(job_name) group_left kube_job_status_start_time{namespace=\"backup-verify\"}) * on(job_name) group_left(owner_name) kube_job_owner{namespace=\"backup-verify\", owner_kind=\"CronJob\"}"
+            }
+          ]
+        },
+        {
+          "id": 100,
+          "type": "table",
+          "title": "Recent sweeps",
+          "description": "Every retained sweep with its duration \u2014 the last three of each CronJob, which is what successfulJobsHistoryLimit keeps. Unlike the graph beside it this cannot be empty while any Job exists, so it is the panel to trust when asking 'did it run and how long did it take'.\n\n\u26a0\ufe0f `kube_job_owner{owner_kind=\"CronJob\"}` is a filter, not decoration. The Postgres sweep makes CNPG create a scratch Cluster, and CNPG creates its OWN Job to run the recovery \u2014 `verify-<cluster>-1-full-recovery`. Those land in this namespace too, and an unfiltered query charts them alongside the sweeps as if they were sweeps. Joining through kube_job_owner keeps only the Jobs our two CronJobs own.",
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 7
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "align": "auto"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "Duration",
+                "desc": true
+              }
+            ]
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "instant": true,
+              "format": "table",
+              "expr": "(kube_job_status_completion_time{namespace=\"backup-verify\"} - on(job_name) group_left kube_job_status_start_time{namespace=\"backup-verify\"}) * on(job_name) group_left(owner_name) kube_job_owner{namespace=\"backup-verify\", owner_kind=\"CronJob\"}"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "namespace": true,
+                  "job": true,
+                  "instance": true,
+                  "container": true,
+                  "pod": true,
+                  "endpoint": true,
+                  "service": true,
+                  "uid": true,
+                  "owner_is_controller": true,
+                  "owner_kind": true,
+                  "__name__": true
+                },
+                "renameByName": {
+                  "owner_name": "Verification",
+                  "job_name": "Run",
+                  "Value": "Duration"
+                },
+                "indexByName": {
+                  "owner_name": 0,
+                  "job_name": 1,
+                  "Value": 2
+                }
+              }
             }
           ]
         },
@@ -500,11 +577,11 @@ data:
           "id": 9,
           "type": "state-timeline",
           "title": "Outcome per run",
-          "description": "1 = the Job reported Complete, 0 = Failed. One track per Job. This is the 'has it actually been working' view; the alerts only speak up when it has not.",
+          "description": "1 = the Job reported Complete, 0 = Failed, one track per CronJob rather than per Job so the tracks stay stable as runs come and go. This is the 'has it actually been working' view; the alerts only speak up when it has not.\n\n\u26a0\ufe0f `kube_job_owner{owner_kind=\"CronJob\"}` is a filter, not decoration. The Postgres sweep makes CNPG create a scratch Cluster, and CNPG creates its OWN Job to run the recovery \u2014 `verify-<cluster>-1-full-recovery`. Those land in this namespace too, and an unfiltered query charts them alongside the sweeps as if they were sweeps. Joining through kube_job_owner keeps only the Jobs our two CronJobs own.",
           "gridPos": {
             "h": 8,
-            "w": 12,
-            "x": 12,
+            "w": 8,
+            "x": 16,
             "y": 7
           },
           "datasource": {
@@ -572,8 +649,8 @@ data:
                 "type": "prometheus",
                 "uid": "$datasource"
               },
-              "legendFormat": "{{job_name}}",
-              "expr": "max by (job_name) (kube_job_complete{namespace=\"backup-verify\", condition=\"true\"})"
+              "legendFormat": "{{owner_name}}",
+              "expr": "max by (owner_name) (kube_job_complete{namespace=\"backup-verify\", condition=\"true\"} * on(job_name) group_left(owner_name) kube_job_owner{namespace=\"backup-verify\", owner_kind=\"CronJob\"})"
             }
           ]
         },
