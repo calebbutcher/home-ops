@@ -48,6 +48,9 @@ resources:
   - sabnzbd/helmrelease.yaml
   - sabnzbd/ingress.yaml
   - sabnzbd/exporter-secret.sops.yaml
+  - bazarr/pvc.yaml
+  - bazarr/helmrelease.yaml
+  - bazarr/ingress.yaml
   - backup/s3-secret.sops.yaml
   - backup/sonarr-replicationsource.yaml
   - backup/radarr-replicationsource.yaml
@@ -61,4 +64,6 @@ resources:
   - backup/qbittorrent-replicationsource.yaml
   - backup/sabnzbd-secret.sops.yaml
   - backup/sabnzbd-replicationsource.yaml
+  - backup/bazarr-secret.sops.yaml
+  - backup/bazarr-replicationsource.yaml
   - networkpolicy.yaml

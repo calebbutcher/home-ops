@@ -1,0 +1,38 @@
+---
+# Single gated Ingress — deliberately no sonarr-style open /api split.
+#
+# Bazarr is a CLIENT of the arrs, not a server to them: it polls Sonarr and Radarr
+# over their ClusterIPs, the blackbox app probe hits bazarr.media directly, and the
+# optional Sonarr/Radarr -> Bazarr webhook is configured against
+# bazarr.media.svc.cluster.local. Nothing outside the cluster calls Bazarr's API, so
+# an unauthenticated router would be exposure with no consumer.
+#
+# No rate-limit or crowdsec middleware either: those are on sonarr/radarr because
+# those two carry PUBLIC *.nerdbox.dev hostnames. This host is internal-only, which
+# matches maintainerr.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bazarr
+  namespace: media
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - bazarr.int.nerdbox.dev
+      secretName: bazarr-tls
+  rules:
+    - host: bazarr.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bazarr
+                port:
+                  number: 6767

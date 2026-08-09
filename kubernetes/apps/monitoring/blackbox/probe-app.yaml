@@ -19,7 +19,7 @@
 #
 # ⚠️ Ports are the Service ports the Ingresses actually route to, not container ports;
 # several differ (audiobookshelf 13378, immich 2283, maintainerr 6246, seerr 5055).
-# All 21 were swept live before writing this file and every one answered.
+# All 22 were swept live before writing this file and every one answered.
 #
 # ⚠️ Service names are not always the app name — gitea is `gitea-app`, tracearr is
 # `tracearr-app`, authentik is `authentik-server`, grafana is the chart's
@@ -43,6 +43,7 @@ spec:
       static:
         - http://audiobookshelf.audiobookshelf:13378
         - http://authentik-server.authentik:80
+        - http://bazarr.media:6767
         - http://gitea-app.gitea:3000
         - http://home-assistant.home-assistant:8123
         - http://immich-server.immich:2283

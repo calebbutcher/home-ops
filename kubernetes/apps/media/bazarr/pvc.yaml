@@ -1,0 +1,14 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bazarr-config
+  namespace: media
+spec:
+  accessModes:
+    - ReadWriteOnce
+  # Explicit on purpose: two StorageClasses on this cluster are marked (default).
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 5Gi

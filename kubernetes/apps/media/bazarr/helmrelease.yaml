@@ -1,0 +1,85 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: bazarr
+  namespace: media
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "5.0.1"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      bazarr:
+        # No pod securityContext on purpose. LinuxServer images must start as root
+        # so s6's init-adduser can chown /config; PUID/PGID below are what the app
+        # actually runs as. maintainerr and unpackerr DO pin runAsUser here because
+        # they are not LSIO images — sonarr, radarr and tautulli leave it empty for
+        # the same reason this does.
+        containers:
+          app:
+            image:
+              repository: lscr.io/linuxserver/bazarr
+              tag: v1.6.0-ls357
+            env:
+              PUID: "1000"
+              PGID: "1000"
+              TZ: "UTC"
+              # No UMASK. The LSIO default (022) writes 0644 subtitles owned by uid
+              # 1000 — the same uid Sonarr and Radarr import as. Group bits buy
+              # nothing here: the TrueNAS export squashes the client gid, so every
+              # file under /media reads back as `abc:nobody`, and every library
+              # directory is already 0777 so create/rename/unlink all succeed.
+              # 0644 also keeps subtitles readable by Plex, which runs outside this
+              # cluster under a different uid.
+            resources:
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                # Deliberately 4x sonarr's memory limit. Bazarr is Python (Flask +
+                # apscheduler + ~40 subliminal providers) and idles well above
+                # 512Mi at this library size. Its ffsubsync subtitle sync decodes
+                # audio to a 16kHz mono array and runs an FFT cross-correlation
+                # over it, which peaks past 1Gi on a feature-length movie. The
+                # asymmetry is the argument: a CPU limit only throttles, but a
+                # memory limit kills, and an OOMKill mid-write to bazarr.db risks
+                # the SQLite config DB — a restore-from-VolSync event.
+                cpu: "2"
+                memory: 2Gi
+    service:
+      app:
+        controller: bazarr
+        ports:
+          http:
+            port: 6767
+    persistence:
+      config:
+        existingClaim: bazarr-config
+        globalMounts:
+          - path: /config
+      # Mounted at /media, NOT the LSIO README's /tv + /movies. Bazarr resolves
+      # every file by the absolute path Sonarr and Radarr report over their APIs
+      # (root folders are /media/tv and /media/movies), so an identical mount point
+      # is exactly what makes in-app Path Mappings unnecessary.
+      media:
+        existingClaim: media-nfs
+        globalMounts:
+          - path: /media
+      # downloads-nfs is deliberately NOT mounted. Both arrs report library paths
+      # only, so Bazarr never needs the download tree — and leaving it out keeps
+      # Bazarr away from the untrusted qBittorrent/SABnzbd extraction area, which
+      # is the same reasoning networkpolicy.yaml documents for this namespace.
