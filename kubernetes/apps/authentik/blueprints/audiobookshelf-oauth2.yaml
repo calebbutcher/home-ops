@@ -1,3 +1,4 @@
+---
 # OIDC SSO for Audiobookshelf — applied automatically by the authentik worker from
 # /blueprints/custom/. The client secret is NOT stored here: it is read from the worker
 # env var AUDIOBOOKSHELF_OAUTH2_CLIENT_SECRET (sourced from the SOPS secret

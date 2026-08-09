@@ -1,3 +1,4 @@
+---
 # Programmatic SSO (OIDC) for Grafana — applied automatically by the authentik
 # worker from /blueprints/custom/. The client secret is NOT stored here: it is
 # read from the worker env var GRAFANA_OAUTH2_CLIENT_SECRET (sourced from the

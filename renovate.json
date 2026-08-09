@@ -11,20 +11,65 @@
   "schedule": ["before 6am on monday"],
   "dependencyDashboard": true,
   "dependencyDashboardTitle": "Renovate Dependency Dashboard",
-  "ignorePaths": ["ansible/**", "infrastructure/**"],
   "labels": ["renovate"],
   "rebaseWhen": "conflicted",
   "pinDigests": true,
+  "ignorePaths": [
+    "ansible/roles/**",
+    "ansible/collections/**",
+    "ansible/molecule/**",
+    "ansible/example/**",
+    "ansible/inventory/sample/**",
+    "ansible/requirements.txt",
+    "ansible/requirements.in",
+    "ansible/galaxy.yml",
+    "infrastructure/**"
+  ],
   "flux": {
     "managerFilePatterns": ["/(^|/)kubernetes/.+\\.ya?ml$/"]
   },
   "helm-values": {
     "managerFilePatterns": ["/(^|/)kubernetes/.+\\.ya?ml$/"]
   },
+  "kubernetes": {
+    "managerFilePatterns": ["/(^|/)kubernetes/.+\\.ya?ml$/"]
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Versions marked with a `# renovate:` comment — CI tool pins and the ansible fresh-install baseline (k3s, kube-vip, MetalLB)",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/[^/]+\\.ya?ml$/",
+        "/^ansible/inventory/my-cluster/group_vars/all/main\\.yml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+[A-Za-z_][A-Za-z0-9_]*: *[\"']?(?<currentValue>[^\"'\\s#]+)"
+      ]
+    },
+    {
+      "customType": "regex",
+      "description": "k3s version in the system-upgrade-controller Plans — the field that actually drives a live cluster upgrade",
+      "managerFilePatterns": [
+        "/^kubernetes/infrastructure/controllers/system-upgrade-controller/plans/[^/]+\\.yaml$/"
+      ],
+      "matchStrings": [
+        "\\n\\s*version: (?<currentValue>v\\d+\\.\\d+\\.\\d+\\+k3s\\d+)"
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "k3s-io/k3s"
+    }
+  ],
   "packageRules": [
     {
       "description": "Never auto-merge anything — every update is reviewed and merged by hand",
-      "matchManagers": ["flux", "helm-values", "helmv3", "github-actions"],
+      "matchManagers": [
+        "flux",
+        "helm-values",
+        "helmv3",
+        "kubernetes",
+        "github-actions",
+        "custom.regex"
+      ],
       "automerge": false
     },
     {
@@ -36,6 +81,63 @@
       "description": "Group app-template (bjw-s) chart bumps across the media apps",
       "matchPackageNames": ["app-template"],
       "groupName": "app-template (bjw-s)"
+    },
+    {
+      "description": "One PR for all digest pins instead of one per image — pinning is bookkeeping, not a decision",
+      "matchUpdateTypes": ["pin", "pinDigest"],
+      "groupName": "image digest pins"
+    },
+    {
+      "description": [
+        "rancher/k3s-upgrade is written WITHOUT a tag in the system-upgrade-controller Plans, on purpose: the controller appends `.spec.version` as the tag when it creates the upgrade Job (v1.32.13+k3s1 -> :v1.32.13-k3s1).",
+        "Left enabled, the kubernetes manager would read it as an untagged image and offer to pin `:latest` — which would sever the version from the Plan and pin every future upgrade to whatever `latest` meant that day. The version is tracked through the `version:` field instead, above."
+      ],
+      "matchPackageNames": ["rancher/k3s-upgrade"],
+      "enabled": false
+    },
+    {
+      "description": "CI tool pins are stored WITHOUT a leading `v` because the workflows add it when building the download URL. extractVersion keeps it that way, so a bump cannot silently produce `.../download/vv0.8.0/...`.",
+      "matchDepNames": [
+        "yannh/kubeconform",
+        "gitleaks/gitleaks",
+        "aquasecurity/trivy"
+      ],
+      "extractVersion": "^v(?<version>.+)$"
+    },
+    {
+      "description": "kustomize lives in a monorepo and tags its releases `kustomize/vX.Y.Z`, alongside `api/…` and `cmd/config/…` tags for sibling modules.",
+      "matchDepNames": ["kubernetes-sigs/kustomize"],
+      "extractVersion": "^kustomize/v(?<version>.+)$"
+    },
+    {
+      "description": [
+        "k3s. Both places the version is written move together: the SUC Plans (which drive the live rolling upgrade) and the ansible inventory (the fresh-install/node-join baseline).",
+        "k3s versions look like v1.32.13+k3s1, which is not semver, hence the regex versioning.",
+        "separateMultipleMinor gives one PR PER MINOR STREAM rather than a single jump to the newest release. That matches the documented upgrade rule — k3s supports only +1 minor of skew, so 1.32 -> 1.36 must be walked one minor at a time, and four separate PRs is exactly that walk."
+      ],
+      "matchDepNames": ["k3s-io/k3s"],
+      "groupName": "k3s",
+      "versioning": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\+k3s(?<build>\\d+)$",
+      "separateMinorPatch": true,
+      "separateMultipleMinor": true,
+      "labels": ["renovate", "type/cluster-upgrade"],
+      "prBodyNotes": [
+        "⚠️ **Merging this upgrades the live cluster.** The system-upgrade-controller acts on every node labelled `k3s-upgrade=true` as soon as Flux applies the new Plan — control-plane nodes first, one at a time, cordoned but not drained. Run `kubectl get nodes -L k3s-upgrade` first to see how much of the cluster that is.",
+        "Take one minor at a time and let the cluster settle in between. Watch with `kubectl -n system-upgrade get jobs -w` and `kubectl get nodes -w`."
+      ]
+    },
+    {
+      "description": [
+        "MariaDB. The operator does not set MARIADB_AUTO_UPGRADE, so the on-disk system tables are NOT migrated automatically, and MariaDB cannot be downgraded in place.",
+        "Patch releases within a minor are routine; anything larger is a database migration."
+      ],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["mariadb", "docker.io/library/mariadb"],
+      "matchUpdateTypes": ["major", "minor"],
+      "labels": ["renovate", "type/database-upgrade"],
+      "prBodyNotes": [
+        "⚠️ **Database version change.** After the pod restarts on the new image, run `mariadb-upgrade` inside it by hand — the operator will not. There is no in-place downgrade, so take a dump first."
+      ]
     }
   ]
 }

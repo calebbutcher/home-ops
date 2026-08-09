@@ -116,7 +116,9 @@ Secrets are committed **encrypted** as `*.sops.yaml` using
 [SOPS](https://github.com/getsops/sops) with an [age](https://github.com/FiloSottile/age)
 key (rules in [`.sops.yaml`](.sops.yaml)). Flux decrypts them in-cluster via the
 `sops-age` secret. The age **private key never lives in Git** — it's kept in a
-password manager with an offline copy. Ansible secrets are ansible-vaulted.
+password manager with an offline copy. Ansible secrets use the same mechanism
+([`ansible/inventory/my-cluster/group_vars/all/secrets.sops.yaml`](ansible/inventory/my-cluster/group_vars/all/secrets.sops.yaml)),
+not ansible-vault.
 
 > ⚠️ Don't run kustomize transformers (top-level `namespace`/`labels`) over
 > `.sops.yaml` files — it corrupts the SOPS MAC and Flux fails to decrypt.
@@ -127,6 +129,36 @@ Versions are pinned (exact Helm chart versions and image tags — no `latest`,
 no floating ranges). Renovate opens a PR per available update; merging the PR is
 the approval, and Flux applies it on the next reconcile. Details:
 [`docs/updates.md`](docs/updates.md).
+
+Renovate also covers the pieces that live outside Flux — the k3s version in the
+[system-upgrade-controller Plans](kubernetes/infrastructure/controllers/system-upgrade-controller/plans/),
+and kube-vip / MetalLB / the k3s install baseline in the
+[ansible inventory](ansible/inventory/my-cluster/group_vars/all/main.yml), which
+are marked with `# renovate:` comments. **A merged k3s PR upgrades the live
+cluster** (system-upgrade-controller acts on every node labelled
+`k3s-upgrade=true`); the ansible pins are inert until the play is re-run.
+
+## CI
+
+Every pull request runs [`.github/workflows/validate.yml`](.github/workflows/validate.yml):
+
+- **`kustomize build` + `kubeconform`** over each Flux Kustomization path, so a
+  manifest that Flux would reject fails on the PR instead of in the cluster.
+- **orphan check** — a manifest sitting next to a `kustomization.yaml` that does
+  not list it is silently never applied; that now fails the build.
+- **yamllint** (narrow: duplicate keys, tabs, unparseable YAML — see
+  [`.yamllint.yaml`](.yamllint.yaml)).
+- **gitleaks** over the working tree *and* the full git history. This repo is
+  public, so a committed credential is an incident.
+
+Two things CI deliberately cannot do: `flux diff` (the cluster is LAN-only, with
+no path in from a hosted runner) and validating SOPS-encrypted Secrets (that
+would mean putting the age private key in GitHub). Encrypted Secrets are reported
+as skipped rather than silently counted as passing.
+
+A weekly [`image-scan.yml`](.github/workflows/image-scan.yml) reports CVEs, but
+only for images pinned directly in a manifest — the chart-managed majority is not
+covered. See that file's header before reading a green run as cluster-wide.
 
 ## Backup & recovery
 

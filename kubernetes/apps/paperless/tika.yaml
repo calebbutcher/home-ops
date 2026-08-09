@@ -1,8 +1,11 @@
 ---
 # Apache Tika — stateless content/metadata extraction (Office docs, email) for
 # paperless. Driven via PAPERLESS_TIKA_ENDPOINT. No state.
-# NOTE: `latest-full` is used for the richer parser set; Renovate can pin this to
-# a digest/version like the other images.
+# The `-full` variant carries the richer parser set (OCR, scientific formats) that
+# paperless wants; the plain tag omits them. Pinned to the exact version that
+# `latest-full` resolved to when this was pinned, so it is a no-op today — Renovate
+# tracks `*-full` tags from here and every change becomes a reviewable PR instead of
+# a silent swap on the next pod restart.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,7 +23,7 @@ spec:
     spec:
       containers:
         - name: tika
-          image: docker.io/apache/tika:latest-full
+          image: docker.io/apache/tika:3.3.1.0-full
           ports:
             - name: http
               containerPort: 9998
