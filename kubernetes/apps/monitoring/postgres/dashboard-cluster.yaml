@@ -455,7 +455,7 @@ data:
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "time() - (max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cnpg_cluster=\"$cluster\"}))",
+              "expr": "time() - (max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cnpg_cluster=\"$cluster\"} > 0))",
               "refId": "A",
               "instant": false,
               "range": true

@@ -124,10 +124,22 @@ spec:
         # that one catches a backup that RAN AND FAILED, this one catches a backup
         # that never ran at all — a deleted or suspended ScheduledBackup, which
         # leaves the LastBackupSucceeded condition frozen on its last good result.
+        #
+        # ⚠️ The `> 0` is load-bearing. The plugin exports this metric per barman
+        # SERVER, and a server with no base backup yet reports a literal 0 — not
+        # an absent series. Without the filter `time() - 0` is ~56 years, so this
+        # rule fires with "no backup in 56.6 years" and the Backup age panels
+        # render a bar that flattens every real cluster to nothing. That is not
+        # hypothetical: immich's PG14->17 upgrade rotated it to a fresh serverName
+        # (see docs/cnpg-major-upgrade.md), and the 18 minutes between the upgrade
+        # completing and its first base backup are permanently in Prometheus as a
+        # 56.6-year spike. It missed paging only because 18m < the `for` below.
+        # Any new app's cluster hits the same window between deploy and first
+        # backup. CNPGBackupNeverRan below covers what this filter excludes.
         - alert: CNPGBackupStale
           expr: |
             (time() - max by (cnpg_cluster) (
-              barman_cloud_cloudnative_pg_io_last_available_backup_timestamp
+              barman_cloud_cloudnative_pg_io_last_available_backup_timestamp > 0
             )) > 26 * 3600
           for: 1h
           labels:
@@ -141,6 +153,36 @@ spec:
               every run since has failed. Check
               `kubectl get scheduledbackup -A` and
               `kubectl get backups.postgresql.cnpg.io -A`.
+
+        # The case CNPGBackupStale's `> 0` filter deliberately drops: the series
+        # EXISTS and reads 0, meaning this barman server has never had a single
+        # successful base backup. Without this rule that state would be silently
+        # unmonitored — absent() below cannot see it (the series is present), and
+        # the staleness rule now filters it out.
+        #
+        # 3h, not the 1h used above, because two legitimate situations pass
+        # through this state briefly: a newly deployed app's cluster before its
+        # first ScheduledBackup fires, and a major upgrade that rotates serverName
+        # (immich's took 18 minutes end to end). Anything still at zero after 3h
+        # is a real "this database is not backed up at all".
+        - alert: CNPGBackupNeverRan
+          expr: |
+            max by (cnpg_cluster) (
+              barman_cloud_cloudnative_pg_io_last_available_backup_timestamp
+            ) == 0
+          for: 3h
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.cnpg_cluster }} has never had a successful base backup"
+            description: >-
+              barman reports no base backup at all for {{ $labels.cnpg_cluster }}
+              — not a stale one, none. Expected briefly for a new cluster or right
+              after a major upgrade rotates its serverName; sustained, it means
+              nothing in s3://postgres-backups can restore this database and PITR
+              is impossible. Check the ScheduledBackup exists and force a one-off
+              `Backup` CR (see docs/cnpg-major-upgrade.md), and confirm the
+              cluster's plugin `serverName` points where you think it does.
 
         # A cluster whose barman series never appears at all. Distinct from the
         # staleness rule above, which can only fire once a series exists.
