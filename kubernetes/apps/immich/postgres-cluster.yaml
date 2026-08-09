@@ -17,12 +17,30 @@ spec:
     enablePodAntiAffinity: true
     topologyKey: kubernetes.io/hostname
     podAntiAffinityType: required
-  # PG14 + vchord 0.4.3 to exactly match the Docker migration: Phase 1 moves the
-  # source DB onto VectorChord via ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
-  # (the newest transition image on the pgvectors-0.2.0 path), so restoring its dump
-  # here is a same-version operation — no VectorChord 1.0 boundary to cross. 0.4.3 is
-  # within Immich's accepted range (>=0.3,<2.0). See docs/immich-migration.md.
-  imageName: ghcr.io/tensorchord/cloudnative-vectorchord:14-0.4.3
+  # PG17 + vchord 0.4.3. The PG14 pin was a migration artefact — it matched the
+  # Docker source image so the 2026-06-28 dump/restore was a same-major, same-vchord
+  # operation (docs/immich-migration.md). That constraint died with the migration,
+  # and PG14 goes EOL 2026-11, leaving this the only 14 in the fleet.
+  #
+  # Crossed with CNPG's declarative offline in-place major upgrade (pg_upgrade
+  # --link), which is legal here for two specific reasons, both of which must be
+  # re-checked before any future major bump:
+  #   1. 17-0.4.3 is the same Debian **bookworm** base as 14-0.4.3 — CNPG only
+  #      supports major upgrades between images built on the same OS distribution.
+  #      (Same base also means the same glibc, so no collation-driven REINDEX.)
+  #   2. It carries the **identical** vchord 0.4.3 .deb, so the extension version
+  #      does not move: no ALTER EXTENSION UPDATE, no vchord 1.0 boundary, and the
+  #      vchordrq index files carry over untouched.
+  # 0.4.3 stays inside Immich's accepted range (>=0.3,<2.0) and PG17.5 inside its
+  # >=14,<20. Rehearsed end-to-end on a restore of the real backup before this
+  # landed. Runbook: docs/cnpg-major-upgrade.md.
+  #
+  # ⚠️ This tag is PG **17.5**, and PostgreSQL 17.0-17.5 cannot be the *target* of
+  # a pg_upgrade while max_slot_wal_keep_size is anything other than -1. Ours is
+  # unset (-1), which is why this worked — do not set it here without reading that
+  # constraint first. Note also that tensorchord has not rebuilt this image line
+  # since 2025-06-20, so 17.5 is not a current 17.x and there is no PG18 tag.
+  imageName: ghcr.io/tensorchord/cloudnative-vectorchord:17-0.4.3
   storage:
     size: 20Gi
     storageClass: local-path
@@ -61,6 +79,24 @@ spec:
       isWALArchiver: true
       parameters:
         barmanObjectName: immich-postgres-store
+        # ⚠️ Load-bearing, and it changed AT the PG14->17 upgrade. Defaults to the
+        # cluster name; immich is the ONE cluster where it does not match.
+        #
+        # pg_upgrade resets the timeline to 1, so a PG17 WAL segment can land on
+        # the same object name as a PG14 one already in
+        # s3://postgres-backups/immich-postgres/ — and that prefix would then hold
+        # two majors' base backups, which are not interchangeable (barman recovery
+        # is physical, so same-major only). A fresh server name gives PG17 an empty
+        # archive to start from, and leaves the PG14 chain intact as the rollback
+        # artefact: nothing archives there any more, so the ObjectStore's 14d
+        # retention no longer runs against it and those backups persist until
+        # deleted by hand.
+        #
+        # It belongs HERE, not on the ObjectStore: the plugin's docs say
+        # ObjectStore.spec.configuration.serverName exists only for API
+        # compatibility with the in-tree barmanObjectStore and must be left empty.
+        # backup-verify/cronjob-postgres.yaml reads this field off the Cluster.
+        serverName: immich-postgres-pg17
   bootstrap:
     initdb:
       database: immich

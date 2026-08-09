@@ -80,7 +80,7 @@ Do one app per PR, and verify each reaches `READY 3` before starting the next.
 | 2 | paperless | `kubernetes/apps/paperless/postgres-cluster.yaml` | plain PG17 — trivial |
 | 3 | n8n | `kubernetes/apps/n8n/postgres-cluster.yaml` | plain PG17 — trivial |
 | 4 | tracearr | `kubernetes/apps/media/tracearr/postgres-cluster.yaml` | TimescaleDB — validate replicas load the extension |
-| 5 | immich | `kubernetes/apps/immich/postgres-cluster.yaml` | **last**: PG14 + VectorChord + SUPERUSER, 20Gi. Validate `vchord` loads on replicas |
+| 5 | immich | `kubernetes/apps/immich/postgres-cluster.yaml` | **last**: PG17 + VectorChord + SUPERUSER, 20Gi (was PG14 — see `cnpg-major-upgrade.md`). Validate `vchord` loads on replicas |
 
 TimescaleDB and VectorChord both support physical/streaming replication, so CNPG replicas
 work — the note is only to confirm the extension loads on the new replicas.
