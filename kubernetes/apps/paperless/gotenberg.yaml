@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: gotenberg
-          image: docker.io/gotenberg/gotenberg:8
+          image: docker.io/gotenberg/gotenberg:8.34.0
           # paperless's recommended hardening: disable JS, restrict file access.
           command:
             - gotenberg

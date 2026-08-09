@@ -1,0 +1,49 @@
+# gitleaks config for home-ops.
+#
+# This repo is PUBLIC, so a plaintext credential reaching `main` is a real
+# incident, not a style problem. Secrets belong in `*.sops.yaml` (age-encrypted,
+# see .sops.yaml) — everything else is fair game for the scanner.
+#
+# Baseline when this was added: gitleaks 8.28 over all 338 commits of history
+# found exactly one hit, the false positive allowlisted below. No credential has
+# ever been committed to this repo.
+#
+# Deliberately NOT allowlisted:
+#   *.sops.yaml — the ciphertext produces zero findings today, and leaving these
+#     files in scope means a secret that was saved with a .sops.yaml name but
+#     never actually encrypted still gets caught. That is the exact mistake worth
+#     catching, so the files stay in scope.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+Kubernetes secretKeyRef/configMapKeyRef `key:` fields NAME a secret key, they do
+not contain one — e.g. unpackerr's `key: UN_SONARR_0_API_KEY`, which points at a
+key inside the `unpackerr-secret` Secret. gitleaks' generic-api-key rule matches
+on the word "key" plus a high-entropy-looking value and cannot see the
+surrounding structure.
+
+Scoped tightly on purpose: the value must be bare SCREAMING_SNAKE_CASE, which is
+what a Kubernetes Secret data key looks like in this repo and what a real
+credential essentially never looks like. A lowercase, mixed-case, quoted, or
+symbol-bearing value on a `key:` line is still reported.
+"""
+regexTarget = "line"
+regexes = [
+  '''^\s*key:\s+[A-Z][A-Z0-9_]{2,}\s*$''',
+]
+
+[[allowlists]]
+description = """
+Vendored/tooling directories that are gitignored and therefore absent from a CI
+checkout, but present in a local working tree. Listed so that a developer running
+`gitleaks dir .` by hand gets the same clean result CI does, instead of ~110
+findings from Ansible collection test fixtures.
+"""
+paths = [
+  '''^\.ansible/''',
+  '''^\.claude/''',
+  '''^infrastructure/terraform/\.terraform/''',
+]

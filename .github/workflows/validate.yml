@@ -1,0 +1,180 @@
+---
+# Pre-merge validation for the GitOps tree.
+#
+# Flux applies whatever lands on `main`, so until now the first thing to notice a
+# broken manifest was the cluster. These jobs move that check to the pull request.
+#
+# What is deliberately NOT here:
+#   * `flux diff` — it needs a live connection to the cluster, and the cluster is
+#     on a private LAN with no ingress for GitHub runners. There is no honest way
+#     to run it from a hosted runner, so nothing pretends to.
+#   * SOPS decryption — that would mean putting the age private key into GitHub
+#     Actions secrets. The key is deliberately offline (see README "Secrets"), and
+#     the repo is public. Encrypted Secrets are therefore skipped by kubeconform
+#     rather than validated; see the note in the `manifests` job.
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A new push to a PR makes the previous run's answer irrelevant.
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Pinned so a CI result is reproducible. Kept current by the `ci-tools`
+  # customManager in renovate.json.
+  # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize
+  KUSTOMIZE_VERSION: 5.8.1
+  # renovate: datasource=github-releases depName=yannh/kubeconform
+  KUBECONFORM_VERSION: 0.8.0
+  # renovate: datasource=github-releases depName=gitleaks/gitleaks
+  GITLEAKS_VERSION: 8.30.1
+  # renovate: datasource=pypi depName=yamllint
+  YAMLLINT_VERSION: 1.38.0
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Does every Kustomization still build, and is the output valid Kubernetes?
+  # ---------------------------------------------------------------------------
+  manifests:
+    name: kustomize build + kubeconform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Install kustomize + kubeconform
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP/bin" kustomize
+          curl -sSfL \
+            "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP/bin" kubeconform
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Build and validate every Flux Kustomization
+        run: |
+          set -euo pipefail
+
+          # Mirrors kubernetes/flux/cluster/*.yaml — one entry per Flux
+          # Kustomization `path:`. Add a line here when you add a Kustomization.
+          TARGETS="
+          kubernetes/apps
+          kubernetes/infrastructure
+          kubernetes/infrastructure/controllers/longhorn/config
+          kubernetes/infrastructure/controllers/tailscale-operator/config
+          "
+
+          # Schema sources: upstream Kubernetes for core/built-in types, plus the
+          # community CRD catalog for the ~40 custom kinds this cluster runs
+          # (HelmRelease, Kustomization, PrometheusRule, ServiceMonitor, Cluster,
+          # MariaDB, ReplicationSource, Middleware, ...).
+          SCHEMAS=(
+            -schema-location default
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          )
+
+          # -ignore-missing-schemas is required for two reasons:
+          #   1. SOPS-encrypted Secrets have their `kind:` encrypted too, so they
+          #      arrive as an unresolvable kind. (In the cluster this is fine:
+          #      kustomize-controller decrypts BEFORE it labels and applies.
+          #      It is also why `flux build` cannot be used here — its label
+          #      transformer parses `kind:` and dies on the ciphertext.)
+          #   2. A handful of vendored CRDs are not in the catalog.
+          # -verbose puts every resource in the JSON, which the report script
+          # needs to tell reason 1 from reason 2 and print the latter.
+          rc=0
+          for target in $TARGETS; do
+            echo "::group::$target"
+            # `continue` on a build failure rather than falling through: /tmp/build.yaml
+            # would still hold the PREVIOUS target's output, and kubeconform would
+            # happily re-validate that and report this target as clean.
+            if ! kustomize build --load-restrictor LoadRestrictionsNone "$target" > /tmp/build.yaml; then
+              echo "kustomize build FAILED for $target"
+              rc=1
+              echo "::endgroup::"
+              continue
+            fi
+            kubeconform -strict -summary -verbose -ignore-missing-schemas \
+              -kubernetes-version 1.32.0 "${SCHEMAS[@]}" \
+              -output json /tmp/build.yaml > /tmp/result.json || rc=1
+            python3 .github/scripts/kubeconform-report.py /tmp/result.json || rc=1
+            echo "::endgroup::"
+          done
+
+          # kubernetes/flux/cluster has no kustomization.yaml — Flux builds that
+          # path in directory-scan mode, so validate the files directly.
+          echo "::group::kubernetes/flux/cluster (directory scan)"
+          kubeconform -strict -summary -verbose -ignore-missing-schemas \
+            -kubernetes-version 1.32.0 "${SCHEMAS[@]}" \
+            -output json kubernetes/flux/cluster > /tmp/result.json || rc=1
+          python3 .github/scripts/kubeconform-report.py /tmp/result.json || rc=1
+          echo "::endgroup::"
+
+          exit $rc
+
+      - name: Every manifest is wired into a kustomization
+        run: python3 .github/scripts/check-orphaned-manifests.py kubernetes
+
+  # ---------------------------------------------------------------------------
+  # YAML hygiene. Narrow by design — see .yamllint.yaml for why each rule is on.
+  # ---------------------------------------------------------------------------
+  yaml:
+    name: yamllint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Install yamllint
+        run: |
+          set -euo pipefail
+          pipx install "yamllint==${YAMLLINT_VERSION}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # --strict promotes warnings to failures. The config turns off everything
+      # cosmetic, so what is left (duplicate keys, tabs, trailing whitespace,
+      # unparseable YAML) is worth failing on.
+      - name: Lint
+        run: yamllint --strict kubernetes/ ansible/inventory/ .github/
+
+  # ---------------------------------------------------------------------------
+  # The repo is public. A committed credential is an incident, not a nit.
+  # ---------------------------------------------------------------------------
+  secrets:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          # Full history: on a public repo, a credential that was committed and
+          # then "removed" in a later commit is still published forever. Scanning
+          # only the tip would call that clean.
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP/bin" gitleaks
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # Two passes: history (has anything ever been committed?) and working tree
+      # (does the checkout contain one now?). Baseline at time of writing: both
+      # clean across all 338 commits.
+      - name: Scan git history
+        run: gitleaks git . --config .gitleaks.toml --redact --no-banner --verbose
+
+      - name: Scan working tree
+        run: gitleaks dir . --config .gitleaks.toml --redact --no-banner --verbose

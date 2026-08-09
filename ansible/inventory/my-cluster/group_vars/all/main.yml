@@ -3,6 +3,7 @@
 # by System Upgrade Controller (see kubernetes/.../system-upgrade-controller + docs/updates.md).
 # Keep roughly in sync with the SUC Plans' target so a freshly-joined node lands within
 # the +1 minor skew window (never re-run site.yml just to bump this — it has no serial:).
+# renovate: datasource=github-releases depName=k3s-io/k3s
 k3s_version: v1.32.13+k3s1
 # this is the user that has ssh access to thee machines
 ansible_user: ubuntu
@@ -128,7 +129,13 @@ extra_server_args: >-
 extra_agent_args: >-
   {{ extra_args }}
 
-# image tag for kube-vip
+# image tag for kube-vip. This is the ONLY place the running kube-vip version is
+# declared — it is deployed as a static pod by the k3s_server role, not by Flux —
+# so without the annotation below nothing surfaces its updates at all.
+# Applying a bump means re-running the ansible play; merging the PR alone does nothing.
+# Tracked against the image itself rather than the GitHub release list, so what
+# Renovate offers is exactly what the node would pull.
+# renovate: datasource=docker depName=ghcr.io/kube-vip/kube-vip
 kube_vip_tag_version: v0.8.2
 
 # tag for kube-vip-cloud-provider manifest
@@ -149,8 +156,14 @@ metal_lb_mode: layer2
 # metal_lb_bgp_peer_asn: "64512"
 # metal_lb_bgp_peer_address: "192.168.30.1"
 
-# image tag for metal lb
+# image tag for metal lb. Same situation as kube-vip above: MetalLB is deployed by
+# the k3s_server role, not by Flux, so these two lines are the only declaration of
+# the running version. Keep them equal — they are one release, split across two images.
+# Tracked per-image (not via GitHub releases, whose tag list mixes in
+# `metallb-chart-*` Helm chart versions that have nothing to do with these).
+# renovate: datasource=docker depName=quay.io/metallb/speaker
 metal_lb_speaker_tag_version: v0.14.8
+# renovate: datasource=docker depName=quay.io/metallb/controller
 metal_lb_controller_tag_version: v0.14.8
 
 # metallb ip range for load balancer
