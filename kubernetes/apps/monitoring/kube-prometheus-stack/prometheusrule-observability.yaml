@@ -214,10 +214,22 @@ spec:
         #
         # compaction_interval is 10m, so 6h means genuinely stuck, not slow.
         # (The boltdb_shipper name is legacy — this is the TSDB compactor.)
+        #
+        # `for: 1h` is deliberately long, and NOT redundant with the 6h
+        # threshold. On restart the metric resets to 0 on every replica, so
+        # time() - max(...) is instantly enormous and the alert goes pending at
+        # once — the `for` is the only thing standing between a routine rollout
+        # and a false page. The elected compactor then sits in a mandatory
+        # "waiting 10m0s for ring to stay stable" delay before its first run
+        # (measured 2026-08-09: elected 20:39:18, first compaction 20:49:19), and
+        # that timer RESTARTS if the ring changes — so a rollout that disturbs
+        # the ring can stack several 10m waits. 30m left too little margin.
+        # Detection of a genuine stall lands at ~7h instead of ~6.5h, which is
+        # immaterial for a bucket growing at ~130 MiB/day.
         - alert: LokiCompactorStalled
           expr: |
             time() - max(loki_boltdb_shipper_compact_tables_operation_last_successful_run_timestamp_seconds{job="monitoring/loki"}) > 21600
-          for: 30m
+          for: 1h
           labels:
             severity: warning
           annotations:
