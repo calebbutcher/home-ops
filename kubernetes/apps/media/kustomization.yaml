@@ -51,6 +51,7 @@ resources:
   - bazarr/pvc.yaml
   - bazarr/helmrelease.yaml
   - bazarr/ingress.yaml
+  - bazarr/exporter-secret.sops.yaml
   - backup/s3-secret.sops.yaml
   - backup/sonarr-replicationsource.yaml
   - backup/radarr-replicationsource.yaml
