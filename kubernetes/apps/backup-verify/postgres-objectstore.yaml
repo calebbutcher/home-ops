@@ -1,0 +1,49 @@
+---
+# The barman-cloud object store, seen from the verification side.
+#
+# Recovery in CloudNativePG is namespace-local: a Cluster can only recover from
+# an ObjectStore that lives beside it. The seven app ObjectStores all point at
+# the same bucket and differ only in which namespace they sit in, so this is a
+# read-side view of the same s3://postgres-backups/ that
+# kubernetes/apps/*/postgres-objectstore.yaml write to. barman namespaces
+# backups by server name (the source cluster's name), and the scratch Clusters
+# select a server through `externalClusters`, so one ObjectStore here serves all
+# seven.
+#
+# ⚠️ NO `retentionPolicy`. The app-side stores set 14d, and retention is applied
+# by whichever cluster owns the store — deleting backups that have aged out. A
+# retention policy on the verification side would be a job whose purpose is to
+# prove the backups are good quietly deleting them. It is omitted on purpose;
+# do not copy the app-side block in here.
+#
+# ⚠️ This is the one place in the repo where a mistake could damage the thing it
+# is checking, so the scratch Clusters are built to make writing impossible
+# rather than merely unlikely:
+#   1. They declare no `.spec.plugins`, so no WAL archiver is attached and
+#      PostgreSQL comes up with archiving off. `externalClusters[].plugin` is a
+#      read path only — it is how recovery fetches base backups and WAL.
+#   2. They are named `verify-<source>`, and barman derives the server name from
+#      the cluster name. So even if (1) were somehow wrong, archived WAL would
+#      land under s3://postgres-backups/verify-gitea-postgres/ and could not
+#      overwrite gitea-postgres/. Worst case is wasted space, visible as an
+#      unexpected key in `kubectl get objectstore -o jsonpath='{.status}'`.
+#
+# The credentials are the same shared RustFS key the app namespaces use. If
+# RustFS ever grows per-key policies, pointing this one secret at a read-only
+# key would close the loop properly — the rest of this file needs no change.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: postgres-backups-store
+  namespace: backup-verify
+spec:
+  configuration:
+    destinationPath: s3://postgres-backups/
+    endpointURL: http://10.2.40.10:30292
+    s3Credentials:
+      accessKeyId:
+        name: cnpg-rustfs-creds
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: cnpg-rustfs-creds
+        key: ACCESS_SECRET_KEY

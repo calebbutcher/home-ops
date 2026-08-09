@@ -1,0 +1,42 @@
+---
+# Default-deny ingress for the whole namespace.
+#
+# Nothing here serves anyone: the two verification pods only make outbound
+# connections (API server, RustFS), and the scratch Postgres clusters exist for
+# minutes at a time and are reached exclusively through `kubectl exec`, which
+# goes via the kubelet and is not pod-network traffic at all.
+#
+# It is worth having despite being short-lived, because for those minutes this
+# namespace holds a full copy of a production database — and unlike the app
+# namespaces, that copy has no application in front of it. A namespace-wide
+# default-deny is affordable here precisely because nothing legitimately
+# connects in; the same policy in an app namespace would be a breakage risk,
+# which is why the ones in kubernetes/apps/*/networkpolicy.yaml select only the
+# datastore pods.
+#
+# Egress is unrestricted: recovery needs the object store and the job needs the
+# API server. Kubelet health probes are not subject to ingress rules, so the
+# CNPG readiness probes still work under this policy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: backup-verify
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    # The CloudNativePG operator polls each instance manager (:8000) to drive
+    # bootstrap and promotion. Without this the scratch cluster never reaches
+    # Ready and every verification fails identically — which would read as
+    # "the backups are broken" rather than "the policy is wrong".
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+    # Instance-to-instance within the namespace. Single-instance clusters do not
+    # need it today, but a future two-instance scratch cluster would, and the
+    # failure mode would be obscure.
+    - from:
+        - podSelector: {}

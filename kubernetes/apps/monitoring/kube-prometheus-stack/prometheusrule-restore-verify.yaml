@@ -1,0 +1,155 @@
+---
+# Alerts for the restore verification in kubernetes/apps/backup-verify/.
+#
+# prometheusrule-backups.yaml answers "did a backup run?" for every tier. These
+# answer the question that actually matters on the day it matters: "would it
+# come back?" — and, just as importantly, "is anyone still asking?". A
+# verification job that has quietly stopped running is worse than no
+# verification at all, because the last thing it said was "fine".
+#
+# There is no custom metric here and no Pushgateway. The Jobs assert everything
+# themselves and exit non-zero if any repository or database fails, so the
+# CronJob's own success timestamp — already collected by kube-state-metrics — is
+# the signal. That keeps the failure path short: nothing between the assertion
+# and the alert can break without also breaking the alert.
+#
+#   volsync-restore-verify    weekly (Sun 09:00 UTC)     stale after 10d
+#   postgres-restore-verify   monthly (1st, 10:00 UTC)   stale after 40d
+#
+# Thresholds are "schedule + one missed run + slack", the same shape as
+# prometheusrule-backups.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: restore-verify
+  namespace: monitoring
+spec:
+  groups:
+    - name: restore-verify.rules
+      rules:
+        # ⚠️ Deliberately overlaps kube-prometheus-stack's own KubeJobFailed,
+        # which fires on the same series cluster-wide. The duplicate is the
+        # point: KubeJobFailed says "a Job failed", which for every other Job in
+        # the cluster is the whole story. Here it is not — the useful sentence
+        # is that a backup has just been proven unrestorable, and that belongs
+        # in the notification rather than in whatever runbook someone finds
+        # afterwards.
+        #
+        # kube_job_failed (the Job's Failed condition), NOT
+        # kube_job_status_failed (a count of failed pods). Both Jobs run with
+        # backoffLimit: 1, so a first attempt that dies on a transient S3 error
+        # and a second that succeeds leaves status.failed = 1 on a Job that
+        # ultimately passed — that metric would alert on a success.
+        - alert: RestoreVerificationFailed
+          expr: kube_job_failed{namespace="backup-verify"} > 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Restore verification {{ $labels.job_name }} failed — a backup did not restore"
+            description: >-
+              The job could not restore at least one backup. This is not a
+              backup that failed to run; it is a backup that exists and cannot
+              be used. `kubectl -n backup-verify logs job/{{ $labels.job_name }}`
+              names the repository or database and the stage it failed at
+              (open / check / restore for restic, bootstrap / content for
+              Postgres). The failed Job is retained on purpose, so this keeps
+              firing until someone deletes it.
+
+        # Weekly job, so 10 days permits one missed run. The failure this
+        # catches is not a failing verification but an absent one: a Job that
+        # cannot be scheduled, a suspended CronJob, or an image that stopped
+        # pulling. All of those are silent — the last success just stops moving.
+        - alert: VolSyncRestoreVerificationStale
+          expr: |
+            (time() - kube_cronjob_status_last_successful_time{
+              namespace="backup-verify", cronjob="volsync-restore-verify"
+            }) > 10 * 86400
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "restic restore verification last succeeded {{ $value | humanizeDuration }} ago"
+            description: >-
+              No successful weekly verification of the VolSync restic
+              repositories in over 10 days. The PVC backups are back to being
+              unproven — VolSyncNoRecentSync still says they are running, which
+              is a different and weaker claim.
+
+        # Monthly job, so 40 days permits one missed run.
+        #
+        # ⚠️ This can only fire once a SCHEDULED run has succeeded. A Job created
+        # by hand with `kubectl create job --from=cronjob/...` is not owned by
+        # the CronJob and does not advance lastSuccessfulTime, so on first
+        # deploy there is a blind window until the 1st of the following month.
+        - alert: PostgresRestoreVerificationStale
+          expr: |
+            (time() - kube_cronjob_status_last_successful_time{
+              namespace="backup-verify", cronjob="postgres-restore-verify"
+            }) > 40 * 86400
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres restore verification last succeeded {{ $value | humanizeDuration }} ago"
+            description: >-
+              No successful monthly restore of a CNPG cluster from
+              s3://postgres-backups in over 40 days. CNPGBackupStale still
+              confirms backups are being written; nothing currently confirms
+              they can be read.
+
+        # Suspending a CronJob is the quietest way to turn this off: nothing
+        # fails, the last-success timestamp simply stops advancing, and the
+        # staleness rules above would notice 10 or 40 days later. This names the
+        # cause immediately.
+        - alert: RestoreVerificationSuspended
+          expr: kube_cronjob_spec_suspend{namespace="backup-verify"} == 1
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Restore verification {{ $labels.cronjob }} is suspended"
+            description: >-
+              {{ $labels.cronjob }} is suspended, so backups are no longer being
+              proven restorable. Resume it, or delete it and remove these rules —
+              a verification that is off but still believed in is the worst of
+              both.
+
+        # Deleting the CronJob outright removes the series the staleness rules
+        # subtract from, and `time() - <nothing>` produces no result rather than
+        # an alert. absent() is the only thing that catches that, and it is safe
+        # here because the object exists from the moment Flux applies it —
+        # unlike the success timestamp, which does not.
+        - alert: RestoreVerificationMissing
+          expr: |
+            absent(kube_cronjob_spec_suspend{namespace="backup-verify", cronjob="volsync-restore-verify"})
+            or
+            absent(kube_cronjob_spec_suspend{namespace="backup-verify", cronjob="postgres-restore-verify"})
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "A restore verification CronJob has disappeared"
+            description: >-
+              One of the two CronJobs in backup-verify no longer exists, so its
+              staleness alert can never fire again. Either Flux failed to apply
+              kubernetes/apps/backup-verify or it was deleted by hand.
+
+        # The Postgres job creates a real PVC per scratch cluster and is
+        # responsible for removing it; its EXIT/INT/TERM trap does that even on
+        # cancellation. If one survives, the trap did not run, and the PVC is
+        # local-path — no quota, pinned to one node's disk. That is precisely
+        # what pushed worker-06 into DiskPressure before, so it gets its own
+        # alert rather than being left to NodeFilesystemAlmostOutOfSpace.
+        - alert: RestoreVerificationLeftovers
+          expr: kube_persistentvolumeclaim_info{namespace="backup-verify"}
+          for: 6h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Scratch PVC {{ $labels.persistentvolumeclaim }} left behind by restore verification"
+            description: >-
+              A verification PVC has existed for over 6h; the job that created
+              it should have deleted it within minutes. Check for a stuck
+              Cluster with `kubectl -n backup-verify get cluster,pvc` and delete
+              both — it is holding node-local disk that nothing will reclaim.

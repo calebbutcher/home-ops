@@ -72,3 +72,4 @@ resources:
   - redis/dashboard.yaml
   - kube-prometheus-stack/prometheusrule-datastores.yaml
   - kube-prometheus-stack/prometheusrule-security.yaml
+  - kube-prometheus-stack/prometheusrule-restore-verify.yaml

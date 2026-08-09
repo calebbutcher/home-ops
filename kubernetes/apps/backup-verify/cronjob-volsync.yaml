@@ -1,0 +1,321 @@
+---
+# Weekly proof that every VolSync restic repository can actually give the data
+# back.
+#
+# WHAT THIS ADDS OVER prometheusrule-backups.yaml
+# The existing VolSync alerts read VolSync's own opinion of itself: did a sync
+# complete, was an interval missed. All of that can be green while the
+# repository is unusable — a rotated RESTIC_PASSWORD, pack files lost to a
+# RustFS disk fault, or a mover that faithfully backed up an empty mount every
+# night. Those failures are invisible until the day you need the data, which is
+# the worst possible day to discover them.
+#
+# WHAT IT DOES, PER REPOSITORY
+#   1. restic snapshots --latest 1   opens the repo: endpoint reachable, S3
+#                                    credentials valid, RESTIC_PASSWORD decrypts
+#                                    the master key, at least one snapshot exists
+#   2. restic check                  structural integrity: the index agrees with
+#                                    the pack files that exist, and every
+#                                    snapshot's tree loads
+#   3. restic stats --mode restore-size   what a restore would produce
+#   4. restic dump --archive tar <id> / > /dev/null
+#                                    reads, decrypts and reassembles EVERY blob
+#                                    in the newest snapshot
+#
+# ⚠️ Step 4 dumps `/`, not the path the snapshot records. VolSync's mover mounts
+# the PVC at /data and runs restic there, so `paths` reads ["/data"] — but the
+# snapshot TREE is rooted at the PVC contents, and `restic dump <id> /data`
+# fails with "path not found in snapshot". Verified against
+# volsync/prowlarr: `restic ls` shows /Backups, /Definitions, … at the top
+# level. The recorded path is logged for context and nothing more.
+#
+# Step 4 is the real restore. Writing it to /dev/null rather than to a PVC is
+# deliberate and is not a shortcut: the same bytes are fetched from S3,
+# decrypted and streamed through the tar writer, so a missing or corrupt blob
+# fails exactly as it would on a real restore — but nothing lands on a node's
+# disk. The config PVCs here total tens of gigabytes and local-path has no
+# quota (it is what pushed worker-06 into DiskPressure), so a verification job
+# that needed scratch disk would be a new outage source of its own.
+#
+# It is also piped to nothing. `restic dump | wc -c` would report the exit
+# status of `wc`, so a dump that died halfway would still look like a pass; the
+# byte count comes from `restic stats` instead and `dump` keeps its own exit
+# status.
+#
+# ⚠️ EVERY COMMAND RUNS WITH --no-lock, and that is not cosmetic. `restic check`
+# takes an EXCLUSIVE repository lock by default; a verification job holding one
+# would block a VolSync mover or its 7-day prune, and a job killed mid-check
+# leaves a lock that keeps failing backups for the 30 minutes restic takes to
+# consider it stale. A control that can cause the outage it is meant to detect
+# is not worth having. Confirmed on restic 0.19.1: snapshots, check, stats and
+# dump all accept --no-lock and leave zero locks behind.
+#
+# SNAPSHOT AGE IS NOT CHECKED HERE. VolSyncNoRecentSync and VolSyncOutOfSync
+# already answer "is it fresh?" within 26h and do it from the operator's own
+# metrics. This job answers the different question — "does it restore?" — and
+# the snapshot time is logged rather than asserted so the two controls stay
+# independent.
+#
+# SCHEDULE: Sunday 09:00 UTC, an hour clear of the last ReplicationSource
+# (03:00-07:50). With --no-lock that is about not competing for NAS bandwidth
+# rather than about correctness.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: volsync-restore-verify
+  namespace: backup-verify
+spec:
+  schedule: "0 9 * * 0"
+  timeZone: Etc/UTC
+  # A verification run is not worth doubling up on: if one is somehow still
+  # going when the next fires, skip rather than contend for repository locks.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  # Failed Jobs are kept, and kept deliberately. kube-prometheus-stack's
+  # KubeJobFailed fires on `kube_job_failed > 0` and keeps firing for as long as
+  # the failed Job object exists, so an unverifiable backup nags until a human
+  # looks at it and deletes the Job. That is the correct amount of persistence
+  # for this particular failure.
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # One retry, for a transient S3 blip. Not more: a genuine failure should
+      # surface, not be papered over by a third attempt.
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: restore-verify
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            # emptyDir mounts are root-owned 0755 until fsGroup makes them
+            # group-writable — without this the restic cache and /tmp are
+            # unwritable at uid 1000 and every repository fails identically.
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            # Split out because the two halves need different tools: kubectl to
+            # find the repositories and read their credentials, restic to use
+            # them. Credentials land on a memory-backed emptyDir that never
+            # touches a disk and dies with the pod.
+            - name: fetch-credentials
+              image: docker.io/alpine/k8s:1.32.13
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  export HOME=/tmp
+
+                  # Discover rather than enumerate. A hard-coded app list would
+                  # go stale the first time an app is added and report success
+                  # while silently covering less than it claims.
+                  kubectl get replicationsources.volsync.backube --all-namespaces \
+                    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.spec.restic.repository}{"\n"}{end}' \
+                    > /tmp/sources.txt
+
+                  n=0
+                  # fd 3, not stdin: kubectl reading stdin inside the loop would
+                  # swallow the rest of the list and quietly reduce coverage.
+                  while read -r ns name secret <&3; do
+                    if [ -z "${ns:-}" ] || [ -z "${secret:-}" ]; then
+                      continue
+                    fi
+                    echo "discovered ${ns}/${name} -> secret ${secret}"
+                    d="/creds/${ns}__${name}"
+                    mkdir -p "$d"
+                    # One file per field rather than a sourceable env file: the
+                    # values are arbitrary bytes and shell-quoting them
+                    # correctly is a bug waiting to happen. go-template emits
+                    # the decoded value with no trailing newline, and restic
+                    # reads the password straight from the file via
+                    # RESTIC_PASSWORD_FILE.
+                    for k in RESTIC_REPOSITORY RESTIC_PASSWORD AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+                      kubectl get secret -n "$ns" "$secret" \
+                        -o go-template="{{ index .data \"${k}\" | base64decode }}" > "${d}/${k}"
+                      if [ ! -s "${d}/${k}" ]; then
+                        echo "FATAL: secret ${ns}/${secret} has no ${k}"
+                        exit 1
+                      fi
+                    done
+                    n=$((n + 1))
+                  done 3< /tmp/sources.txt
+
+                  if [ "$n" -eq 0 ]; then
+                    echo "FATAL: no restic-backed ReplicationSources found — either"
+                    echo "VolSync is gone or the discovery RBAC was revoked. Refusing"
+                    echo "to report success on zero repositories."
+                    exit 1
+                  fi
+                  # The verify container cross-checks this, so a repository that
+                  # is skipped for any reason counts as a failure rather than
+                  # quietly shrinking the coverage.
+                  echo "$n" > /creds/expected
+                  echo "prepared ${n} repositories"
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: creds
+                  mountPath: /creds
+                - name: tmp
+                  mountPath: /tmp
+          containers:
+            - name: verify
+              # Pinned, and newer than the restic that VolSync 0.16.0's mover
+              # writes with (0.18.1, per program_version in the snapshots).
+              # That direction is safe — restic reads older repository formats —
+              # and every command used here is read-only, so there is no chance
+              # of an implicit format migration. Never run `restic prune`,
+              # `forget` or `migrate` from this job.
+              image: docker.io/restic/restic:0.19.1
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  export RESTIC_CACHE_DIR=/cache
+                  export HOME=/tmp
+
+                  expected=$(cat /creds/expected)
+                  checked=0
+                  failed=""
+
+                  for d in /creds/*/; do
+                    [ -d "$d" ] || continue
+                    repo=$(basename "$d")
+                    echo "=== ${repo}"
+
+                    RESTIC_REPOSITORY=$(cat "${d}/RESTIC_REPOSITORY")
+                    AWS_ACCESS_KEY_ID=$(cat "${d}/AWS_ACCESS_KEY_ID")
+                    AWS_SECRET_ACCESS_KEY=$(cat "${d}/AWS_SECRET_ACCESS_KEY")
+                    RESTIC_PASSWORD_FILE="${d}/RESTIC_PASSWORD"
+                    export RESTIC_REPOSITORY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY RESTIC_PASSWORD_FILE
+
+                    # 1. open the repository and find the newest snapshot
+                    if ! snap=$(restic snapshots --latest 1 --json --no-lock 2>&1); then
+                      echo "  FAIL open: ${snap}"
+                      failed="${failed} ${repo}(open)"
+                      continue
+                    fi
+                    id=$(printf '%s' "$snap" | sed -n 's/.*"short_id":"\([^"]*\)".*/\1/p' | head -1)
+                    path=$(printf '%s' "$snap" | sed -n 's/.*"paths":\["\([^"]*\)".*/\1/p' | head -1)
+                    when=$(printf '%s' "$snap" | sed -n 's/.*"time":"\([^"]*\)".*/\1/p' | head -1)
+                    if [ -z "$id" ]; then
+                      echo "  FAIL open: repository has no snapshots"
+                      failed="${failed} ${repo}(empty)"
+                      continue
+                    fi
+                    echo "  snapshot ${id} of ${path:-?} taken ${when}"
+
+                    # 2. structural integrity
+                    if ! out=$(restic check --no-lock 2>&1); then
+                      echo "  FAIL check: ${out}"
+                      failed="${failed} ${repo}(check)"
+                      continue
+                    fi
+
+                    # 3. what a restore would produce
+                    if ! stats=$(restic stats --mode restore-size --json --no-lock "$id" 2>&1); then
+                      echo "  FAIL stats: ${stats}"
+                      failed="${failed} ${repo}(stats)"
+                      continue
+                    fi
+                    size=$(printf '%s' "$stats" | sed -n 's/.*"total_size":\([0-9]*\).*/\1/p' | head -1)
+                    files=$(printf '%s' "$stats" | sed -n 's/.*"total_file_count":\([0-9]*\).*/\1/p' | head -1)
+                    echo "  restore size ${size:-0} bytes in ${files:-0} files"
+
+                    # A snapshot can be structurally perfect and still worthless
+                    # if the mover backed up an empty mount, so "not empty" is
+                    # asserted — but only literally.
+                    #
+                    # This started as a 1 KiB floor and n8n failed it. Its whole
+                    # PVC is 160 bytes across 9 entries — an 88-byte config and
+                    # a handful of zero-length event logs — because n8n's real
+                    # state is in Postgres and its encryption key comes from env,
+                    # not the volume (see "Restore: n8n" in
+                    # docs/backup-recovery.md). The backup was correct; the
+                    # threshold was wrong. Tiny is not the same as empty, and a
+                    # size floor cannot tell them apart without per-app knowledge
+                    # that would go stale the moment an app changed.
+                    #
+                    # So: fail only on genuinely nothing, and print a NOTE for
+                    # anything under a KiB so an app that really did lose its
+                    # data stays visible without crying wolf every week.
+                    if [ "${files:-0}" -lt 1 ] || [ "${size:-0}" -lt 1 ]; then
+                      echo "  FAIL empty: newest snapshot holds no data at all"
+                      failed="${failed} ${repo}(empty)"
+                      continue
+                    fi
+                    if [ "$size" -lt 1024 ]; then
+                      echo "  NOTE: under 1 KiB. Expected for n8n, whose state lives in"
+                      echo "        Postgres; worth a look for anything else."
+                    fi
+
+                    # 4. the restore itself — read, decrypt and reassemble every
+                    # blob. No pipe: the exit status has to be restic's own.
+                    # `/` and not "$path" — see the note in the file header.
+                    if ! restic dump --archive tar --no-lock "$id" / > /dev/null 2>/tmp/dump.err; then
+                      echo "  FAIL restore: $(cat /tmp/dump.err)"
+                      failed="${failed} ${repo}(restore)"
+                      continue
+                    fi
+                    echo "  OK restored ${size} bytes"
+
+                    checked=$((checked + 1))
+                    rm -rf /cache/* 2>/dev/null || true
+                  done
+
+                  echo
+                  if [ -n "$failed" ]; then
+                    echo "RESTORE VERIFICATION FAILED:${failed}"
+                    exit 1
+                  fi
+                  if [ "$checked" -ne "$expected" ]; then
+                    echo "RESTORE VERIFICATION INCOMPLETE: verified ${checked} of ${expected} repositories"
+                    exit 1
+                  fi
+                  echo "OK ${checked} restic repositories verified end to end"
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 200m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+              volumeMounts:
+                - name: creds
+                  mountPath: /creds
+                  readOnly: true
+                - name: cache
+                  mountPath: /cache
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            # tmpfs — the repository passwords never reach a node's disk.
+            - name: creds
+              emptyDir:
+                medium: Memory
+                sizeLimit: 1Mi
+            # restic's metadata cache. Cleared between repositories so a run
+            # across every app cannot accumulate into node disk pressure.
+            - name: cache
+              emptyDir:
+                sizeLimit: 2Gi
+            - name: tmp
+              emptyDir:
+                medium: Memory
+                sizeLimit: 16Mi
