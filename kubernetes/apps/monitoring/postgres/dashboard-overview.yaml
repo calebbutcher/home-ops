@@ -400,7 +400,7 @@ data:
                 "uid": "prometheus"
               },
               "editorMode": "code",
-              "expr": "max(time() - (max by (cnpg_cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp)))",
+              "expr": "max(time() - (max by (cnpg_cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp > 0)))",
               "refId": "A",
               "instant": false,
               "range": true
@@ -795,7 +795,7 @@ data:
                 "uid": "prometheus"
               },
               "editorMode": "code",
-              "expr": "time() - (max by (cnpg_cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp))",
+              "expr": "time() - (max by (cnpg_cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp > 0))",
               "refId": "G",
               "instant": true,
               "range": false,
@@ -1448,7 +1448,7 @@ data:
                 "uid": "prometheus"
               },
               "editorMode": "code",
-              "expr": "time() - (max by (cnpg_cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp))",
+              "expr": "time() - (max by (cnpg_cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp > 0))",
               "refId": "A",
               "legendFormat": "{{cnpg_cluster}}",
               "instant": false,
