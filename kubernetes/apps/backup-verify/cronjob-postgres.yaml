@@ -34,11 +34,12 @@
 # SCHEDULE: 1st of the month, 10:00 UTC. Base backups run 02:00-07:00 and the
 # weekly restic verification is at 09:00 Sundays; this sits clear of both.
 #
-# ⚠️ The staleness alert this feeds (RestorePostgresVerificationStale) can only
-# arm once a scheduled run has succeeded, because it reads the CronJob's
-# lastSuccessfulTime — a Job created by hand with `kubectl create job --from`
-# is not owned by the CronJob and does not advance it. On first deploy there is
-# a blind window until the 1st of the next month.
+# The staleness alert this feeds (PostgresRestoreVerificationStale) reads the
+# CronJob's lastSuccessfulTime, and a manual run DOES advance it: `kubectl
+# create job --from=cronjob/...` sets a controlling ownerReference back to the
+# CronJob, so the controller adopts the Job and records its success. Triggering
+# one by hand therefore both proves the mechanism and arms the alert — there is
+# no blind window between deploying this and the first scheduled run.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -99,6 +100,15 @@ spec:
                   # cluster, and from both traps below. 60s rather than 180s so
                   # two back-to-back invocations still fit inside the pod's
                   # termination grace period.
+                  # One machine-readable line per cluster, alongside the
+                  # human-readable output. The Grafana dashboard
+                  # (monitoring/backup-verify/dashboard.yaml) reads these out of
+                  # Loki with `|= "RESULT" | logfmt`, which needs every field on
+                  # ONE line. Keep values space-free; logfmt cannot quote here.
+                  emit() {
+                    echo "RESULT tier=postgres namespace=${1} cluster=${2} status=${3} stage=${4} db=${5:-none} bytes=${6:-0} tables=${7:-0} rows=${8:-0}"
+                  }
+
                   cleanup() {
                     kubectl -n "$NS" delete clusters.postgresql.cnpg.io -l "$LABEL" \
                       --ignore-not-found --wait=true --timeout=60s >/dev/null 2>&1 || true
@@ -208,6 +218,7 @@ spec:
                         --sort-by=.lastTimestamp 2>/dev/null | tail -15 || true
                       kubectl -n "$NS" logs -l "cnpg.io/cluster=${vname}" \
                         --tail=25 --all-containers 2>/dev/null || true
+                      emit "$src_ns" "$src_name" fail bootstrap
                       failed="${failed} ${src_name}(bootstrap)"
                       kubectl -n "$NS" delete cluster "${vname}" --wait=true --timeout=180s >/dev/null 2>&1 || true
                       kubectl -n "$NS" delete pvc -l "cnpg.io/cluster=${vname}" --ignore-not-found >/dev/null 2>&1 || true
@@ -260,8 +271,10 @@ spec:
 
                     if [ "$ok" -eq 1 ]; then
                       echo "  OK"
+                      emit "$src_ns" "$src_name" ok none "$db" "$size" "$tables" "$rows"
                       verified=$((verified + 1))
                     else
+                      emit "$src_ns" "$src_name" fail content "${db:-none}" "${size:-0}" "${tables:-0}" "${rows:-0}"
                       failed="${failed} ${src_name}(content)"
                     fi
 
