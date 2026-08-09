@@ -165,6 +165,20 @@ spec:
         - namespace: traefik
           podName: traefik-*
           program: traefik
+          # REQUIRED, else ingestion silently dies on container-log rotation. The files
+          # under /var/log/containers/ are SYMLINKS into /var/log/pods/, and the chart
+          # otherwise renders `force_inotify: true` + `poll_without_inotify: false`. The
+          # agent warns about exactly this at startup ("File ... is a symlink, but inotify
+          # polling is enabled. Crowdsec will not be able to detect rotation"). When k3s
+          # rotates the log, the tailer logs "Re-opening moved/deleted file ..." and then
+          # "Waiting for ... to appear..." — and never recovers. It sometimes wins the
+          # race ("Successfully reopened"), which is why this is intermittent and survived
+          # days before wedging: on 2026-08-08 every agent got stuck and cs_parser_hits_total
+          # sat frozen at 64,709 for ~24h while Traefik kept logging thousands of lines.
+          # Nothing else showed it — all 8 targets stayed UP and every agent heartbeat was
+          # healthy, so only the CrowdSecIngestionStalled alert (added alongside this) catches
+          # a recurrence. Polling instead of inotify is the documented fix for symlinked logs.
+          poll_without_inotify: true
         # NOTE: no Authentik acquisition. Authentik writes auth events to its DB, not stdout
         # (its logs are only authentik.asgi request logs), so a log-based CrowdSec parser has
         # nothing to match — SSO brute-force is handled by Authentik's own Reputation policy.
