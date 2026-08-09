@@ -20,15 +20,18 @@
 # Job does, and successfulJobsHistoryLimit is 3, so they are empty until a run
 # has happened and go quiet again after three.
 #
-# ⚠️ TWO HARD CEILINGS ON THE LOKI SIDE, and they are lower than they look:
-#     max_query_length   30d1h   a wider range is REJECTED, not truncated —
-#                                "the query time range exceeds the limit"
-#     retention_period    720h   there is nothing older than 30d to find anyway
-# The dashboard originally defaulted to now-45d, which put every Loki panel over
-# the first limit at once and rendered them all as errors. It now defaults to
-# now-14d (two of each weekly sweep), and every Loki table carries an explicit
-# 8d `timeFrom` so widening the picker cannot break them. Only the log panel
-# follows the picker, so that a single run can be zoomed into.
+# ⚠️ THE LOKI-SIDE CEILINGS USED TO BE THE BINDING CONSTRAINT HERE. They were
+# max_query_length 30d1h (a wider range is REJECTED, not truncated — "the query
+# time range exceeds the limit") and retention_period 720h. The dashboard
+# originally defaulted to now-45d, which put every Loki panel over the first
+# limit at once and rendered them all as errors.
+# Both were raised in loki/helmrelease.yaml — max_query_length is now 8784h
+# (366d) and retention is tiered: 4320h (180d) for pod logs, 8760h (1y) for
+# infra streams. These job logs are pod logs, so 180d.
+# The now-14d default and the explicit 8d `timeFrom` on every Loki table are
+# KEPT — not as a safety measure any more, but because two of each weekly sweep
+# is the right amount to look at. Widening the picker is now safe. Only the log
+# panel follows the picker, so that a single run can be zoomed into.
 #
 # ⚠️ The Loki tables read `RESULT ... | logfmt` lines that the jobs emit
 # alongside their human-readable output. logfmt needs every field on ONE line,
@@ -1120,7 +1123,7 @@ data:
           "id": 18,
           "type": "logs",
           "title": "Verification log",
-          "description": "The drill record. Every run prints a line per target \u2014 repository, snapshot id, restore size \u2014 so this panel IS the evidence that the backups were exercised.\n\n\u26a0\ufe0f This is the one Loki panel that follows the time picker, so you can zoom into a single run. Loki refuses any range over 30d1h and keeps only 720h of logs, so do not widen it past 30d \u2014 the tables above are pinned to 8d and are immune.",
+          "description": "The drill record. Every run prints a line per target \u2014 repository, snapshot id, restore size \u2014 so this panel IS the evidence that the backups were exercised.\n\nThis is the one Loki panel that follows the time picker, so you can zoom into a single run. Widening it is safe up to 180d \u2014 that is how long Loki keeps pod logs, and max_query_length allows 366d. The tables above are pinned to 8d.",
           "gridPos": {
             "h": 14,
             "w": 24,

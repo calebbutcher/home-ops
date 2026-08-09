@@ -79,8 +79,9 @@ spec:
         # Weekly job, so 10 days permits one missed run — the same shape as the
         # restic rule above. This was 40d when the job ran monthly; a month
         # proved too slow to learn that a database would not come back, and it
-        # also outran Loki's 720h retention, so the dashboard could not show the
-        # last sweep.
+        # also outran Loki's retention (720h at the time — now 180d for pod
+        # logs, so only the detection-speed argument still applies), leaving the
+        # dashboard unable to show the last sweep.
         #
         # Manual runs count. `kubectl create job --from=cronjob/...` sets a
         # controlling ownerReference back to the CronJob, so the controller

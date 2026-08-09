@@ -202,6 +202,32 @@ spec:
               ({{ printf "%.0f" $value }}%). Affects ingestion if this is a push
               route, or Grafana/ruler queries if it is a query route.
 
+        # The compactor is the ONLY thing that enforces retention. While it is
+        # stuck nothing is deleted from the RustFS `loki` bucket and it grows
+        # without bound — a silent failure with no other symptom until the NAS
+        # fills. That matters more since retention went to 180d pods / 1y infra.
+        #
+        # max() across replicas for the same reason as LokiRulerNoRuleManagers
+        # below: compaction is a ring-elected singleton, so exactly one of the
+        # three Monolithic replicas ever runs it and the other two report 0
+        # forever. A bare time() - <metric> would fire permanently on those two.
+        #
+        # compaction_interval is 10m, so 6h means genuinely stuck, not slow.
+        # (The boltdb_shipper name is legacy — this is the TSDB compactor.)
+        - alert: LokiCompactorStalled
+          expr: |
+            time() - max(loki_boltdb_shipper_compact_tables_operation_last_successful_run_timestamp_seconds{job="monitoring/loki"}) > 21600
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Loki compactor has not completed a run in 6h"
+            description: >-
+              Retention is no longer being enforced — chunks past their tier are
+              piling up in the RustFS `loki` bucket. Check
+              `kubectl -n monitoring logs -l app.kubernetes.io/name=loki -c loki | grep -i compact`
+              and the "compactor last run" panel on the Loki Health dashboard.
+
         # The ruler is what turns loki/rules-truenas.yaml into actual alerts. If it
         # stops loading them, those 12 LogQL rules go silent with no other symptom.
         #
