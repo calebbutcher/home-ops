@@ -29,11 +29,25 @@ Three properties decide everything else about the procedure:
   check: `cloudnative-vectorchord:14-0.4.3` and `:17-0.4.3` are both Debian
   bookworm, same upstream build revision. Same base also means the same glibc,
   so the `C` collation carries over with no reindex.
-- **Extensions must exist, at compatible versions, in the target image.** The
-  safest shape is the one immich used: hold every extension version *constant*
-  and move only the PostgreSQL major, so the upgrade has exactly one variable.
-  If an extension version does move, `pg_upgrade` may leave an
-  `update_extensions.sql` in PGDATA — CNPG logs it, and you must run it.
+- **Extensions must exist, at compatible versions, in the target image.** Hold
+  the versions you *chose* constant — for immich, vchord 0.4.3 on both sides — so
+  the PostgreSQL major is the only variable you control.
+
+  ⚠️ **You do not control all of them.** A new major ships new versions of the
+  *bundled contrib* extensions, and `pg_upgrade` will not update them for you: it
+  leaves an **`update_extensions.sql`** in PGDATA and expects you to run it. This
+  bit immich — PG17 ships `earthdistance` **1.2** where PG14 shipped 1.1, so the
+  upgraded database sat on 1.1 with a script waiting. Always check, on every
+  major, even when you believe you pinned everything:
+
+  ```sh
+  kubectl -n <ns> exec <primary> -c postgres -- \
+    cat /var/lib/postgresql/data/pgdata/update_extensions.sql
+  kubectl -n <ns> exec <primary> -c postgres -- psql -U postgres -d <db> -Atc \
+    "SELECT e.extname, e.extversion, a.default_version
+       FROM pg_extension e JOIN pg_available_extensions a ON a.name = e.extname
+      WHERE e.extversion <> a.default_version"
+  ```
 - **`.spec.postgresql.parameters` must be non-empty.** The upgrade path writes
   `max_slot_wal_keep_size=-1` into that map; CNPG's mutating webhook materialises
   it server-side so it is populated in practice even when the manifest sets none.
@@ -116,7 +130,7 @@ Restore-from-backup 89s; the upgrade itself ~75s on a 390 MB database. PG 14.18 
 17.5; `vchord` stayed 0.4.3 and `vector` 0.8.0; every row count identical
 (`asset` 14396, `asset_face` 15284, `smart_search` 13238, `face_search` 15279,
 `person` 577, `geodata_places` 227901); `clip_index` 67 MB and `face_index` 43 MB
-both intact and both still serving Index Scans. No `update_extensions.sql`.
+both intact and both still serving Index Scans.
 
 It also settled the one genuine unknown: the upgrade job **does** render
 `shared_preload_libraries = vchord.so` into the new PGDATA before starting the
@@ -127,6 +141,15 @@ And a number worth keeping: `vacuumdb --analyze-in-stages` took **3.7s**, after
 which the same CLIP query went from 313 ms to 3 ms. `pg_upgrade` carries no
 optimizer statistics — skipping ANALYZE does not break anything, it just makes
 the application look broken.
+
+**What the rehearsal missed, and why that matters more than what it caught.** It
+never looked for `update_extensions.sql`, so nobody noticed until production that
+PG17 ships `earthdistance` 1.2 against PG14's 1.1. The rehearsal would have shown
+it — the file was surely there too — but an assertion list only proves the things
+on it. Production ran fine on the stale 1.1 in the meantime, which is precisely
+what makes this class of miss easy to keep: nothing fails, the extension is just
+quietly a version behind its binaries. **Add every post-step to the rehearsal's
+assertion list, not just the ones you are worried about.**
 
 ## The serverName rule
 
@@ -200,16 +223,24 @@ your rollback artefact; delete the prefix once the new major has proven itself.
    completion signal. Replica PVCs being destroyed is expected, not a failure.
    `archive_command` failures *inside the job log* are also expected — the plugin
    sidecar is not in the upgrade job.
-7. **`vacuumdb --analyze-in-stages`** before letting the app back in.
-8. **Force a base backup on the NEW serverName.** Until it exists there is no PITR
-   for the new major, and restore verification has nothing to restore.
-9. Confirm `ContinuousArchiving=True`, `LastBackupSucceeded=True`, all instances
-   ready, and that replicas load any preloaded extension.
-10. **Un-quiesce**, then validate the app against whatever the extensions actually
+7. **Run `update_extensions.sql` if `pg_upgrade` left one** (see the extensions
+   prerequisite — it is easy to assume there isn't one). `cat` it first, run the
+   `ALTER EXTENSION ... UPDATE` statements it contains against the named database,
+   then confirm no extension is left below its `default_version`.
+8. **`vacuumdb --all --analyze-in-stages`** before letting the app back in.
+9. **Force a base backup on the NEW serverName.** Until it exists there is no PITR
+   for the new major, and restore verification has nothing to restore. Confirm it
+   landed in the right prefix — `kubectl -n <ns> get objectstore <store>
+   -o jsonpath='{.status.serverRecoveryWindow}'` should show the old prefix frozen
+   and the new one fresh — and that WAL is flowing there, which the
+   `plugin-barman-cloud` sidecar log names explicitly.
+10. Confirm `ContinuousArchiving=True`, `LastBackupSucceeded=True`, all instances
+    ready, and that replicas load any preloaded extension.
+11. **Un-quiesce**, then validate the app against whatever the extensions actually
     serve — for immich that is CLIP search and People, plus a fresh upload (index
     *insert* is a different code path from index *scan*; a stale index can read
     fine and fail to write).
-11. **Trigger restore verification by hand** rather than waiting for Sunday:
+12. **Trigger restore verification by hand** rather than waiting for Sunday:
     `kubectl -n backup-verify create job --from=cronjob/postgres-restore-verify <name>`.
     It proves the new serverName, the new image, and the CronJob change in one
     shot — and because the Job carries a controlling ownerReference back to the
@@ -246,7 +277,7 @@ migrated its schema forward, restoring the old major stops being a rollback.
 
 | Cluster | Major | Notes |
 |---|---|---|
-| immich | **17** | 14 → 17 on 2026-08-09. VectorChord (`vchord.so` preloaded), SUPERUSER app role. `serverName: immich-postgres-pg17`; `immich-postgres/` is a frozen PG14 archive restorable only with a PG14 image. |
+| immich | **17** | 14 → 17 on 2026-08-09 (PR #297). VectorChord (`vchord.so` preloaded), SUPERUSER app role. `serverName: immich-postgres-pg17`; `immich-postgres/` is a frozen PG14 archive (last good base backup 04:00 that day) restorable only with a PG14 image. Needed `ALTER EXTENSION "earthdistance" UPDATE` afterwards. Confirmed live that the timeline did reset to 1 — the first post-upgrade segment archived as `000000010000000E00000080`, which is exactly the name collision the serverName rotation exists to prevent. |
 | authentik | 16 | Next. Plain `cloudnative-pg/postgresql`, only `pg_trgm` — much simpler, but it is the SSO dependency for everything, so not on a day anything else is moving. |
 | gitea, n8n, paperless, tandoor, tracearr | 17 | tracearr is TimescaleDB and pins `timescaledb VERSION '2.19.3'`; a base image change there needs `ALTER EXTENSION timescaledb UPDATE` and its own rehearsal. |
 
