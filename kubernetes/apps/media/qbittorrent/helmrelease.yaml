@@ -24,6 +24,29 @@ spec:
   values:
     controllers:
       qbittorrent:
+        pod:
+          # Group label for the VPN'd download clients (qBittorrent + SABnzbd). The
+          # anti-affinity below selects on it rather than on the other app's name, so
+          # adding a third client is a one-line label rather than an edit to every peer.
+          labels:
+            download-client: "true"
+          # --- Keep the download clients off the same worker ---
+          # Each runs its own PIA WireGuard tunnel and each saturates the node it lands
+          # on: uplink bandwidth, CPU (torrent hashing here vs. par2 repair/unrar in SAB)
+          # and the shared downloads NFS mount. Co-scheduled, one worker becomes the
+          # bottleneck for every download path at once.
+          #
+          # `required` rather than `preferred` is safe here: 6 untainted workers, and both
+          # configs live on Longhorn (network-attached), so neither pod is pinned to a node
+          # the way a local-path PVC would pin it. Self-selecting on the group label also
+          # spreads replicas if either is ever scaled past 1.
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels:
+                      download-client: "true"
         initContainers:
           # --- VPN native sidecar: owns the pod netns, does all PIA rotation + PF +
           # kill-switch. restartPolicy Always => runs for the pod's lifetime and starts
