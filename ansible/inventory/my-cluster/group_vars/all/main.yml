@@ -180,7 +180,7 @@ metal_lb_mode: layer2
 # Tracked per-image (not via GitHub releases, whose tag list mixes in
 # `metallb-chart-*` Helm chart versions that have nothing to do with these).
 # renovate: datasource=docker depName=quay.io/metallb/speaker
-metal_lb_speaker_tag_version: v0.14.8
+metal_lb_speaker_tag_version: v0.16.1
 # renovate: datasource=docker depName=quay.io/metallb/controller
 metal_lb_controller_tag_version: v0.16.1
 
