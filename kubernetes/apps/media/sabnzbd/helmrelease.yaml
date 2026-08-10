@@ -24,6 +24,19 @@ spec:
   values:
     controllers:
       sabnzbd:
+        pod:
+          # Group label for the VPN'd download clients — see qBittorrent's helmrelease.yaml
+          # for the full rationale. The rule is symmetric on purpose: whichever of the two
+          # is scheduled second must see the constraint regardless of roll order.
+          labels:
+            download-client: "true"
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels:
+                      download-client: "true"
         initContainers:
           # --- VPN native sidecar: owns the pod netns, brings up the PIA WireGuard tunnel
           # + fail-closed kill-switch. restartPolicy Always => runs for the pod's lifetime and
