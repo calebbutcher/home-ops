@@ -6,20 +6,41 @@
 # every agent WAIT until the control-plane upgrade has finished — enforcing the
 # correct order (servers before agents) even if you label everything at once.
 #
-# Workers are DRAINED (movable pods evicted before the binary swap) now that the
-# CloudNativePG clusters are HA (instances: 3) — see docs/cnpg-ha.md.
+# Workers are CORDONED ONLY (no drain) — same as the server Plan. concurrency:1 →
+# one worker at a time.
 #
-# CRITICAL: the drain EXCLUDES CNPG pods (podSelector: cnpg.io/cluster DoesNotExist).
-# Reasons: (1) their PVCs are node-local (local-path) so a drained replica can't move
-# anyway, and (2) draining a node with a CNPG *primary* would force a switchover, which
-# on a busy DB re-triggers plugin-barman-cloud #828 (the "Expected empty archive" WAL
-# stall we hit on immich). Excluding them means CNPG just restarts in place on the k3s
-# restart (no switchover, no #828), exactly like the old cordon-only behaviour, while
-# everything movable migrates gracefully. concurrency:1 → one worker at a time.
+# CRITICAL: do NOT re-add a `drain:` block. It deadlocks against Longhorn.
 #
-# NOTE: other single-instance local-path apps (Prometheus, MariaDB, *arr configs) still
-# can't relocate, so they blip/down for the node's upgrade window — that's the inherent
-# cost of draining on a node-local-storage cluster; cordon-only avoided it.
+# Longhorn's `node-drain-policy` is `block-if-contains-last-replica`, and it enforces
+# that by holding a PodDisruptionBudget (minAvailable:1) over each node's single
+# `instance-manager` pod. Every worker currently holds the last healthy replica of at
+# least one `longhorn-single` volume (the 3 tracearr-postgres members plus
+# audiobookshelf-metadata and the VolSync `*-cache` PVCs), so every worker's PDB sits at
+# 0 allowed disruptions — verified to persist across a cordon, and a dry-run eviction
+# returns `429 TooManyRequests: Cannot evict pod as it would violate the pod's
+# disruption budget`.
+#
+# That pod is owned by an `InstanceManager` CR, NOT a DaemonSet, so `ignoreDaemonSets`
+# does not skip it, and `force: true` only permits *including* unmanaged pods — it does
+# not bypass PDBs. The drain therefore blocks forever on the first worker it touches,
+# and concurrency:1 stalls the remaining five behind it.
+#
+# The drain was added in e8993e6 when CNPG went HA, which predates the Longhorn
+# migration (volumes created 2026-08-05/06; the last k3s hop ran 2026-07-28), so it has
+# never actually run against this storage layer.
+#
+# Cordon-only costs little here anyway: the drain already excluded CNPG pods, and the
+# `longhorn-single` volumes are node-pinned by design, so draining could not relocate
+# their workloads regardless. k3s's embedded containerd keeps the shims (and therefore
+# the containers) alive across the binary swap — pods see a brief kubelet gap, not a
+# stop/start.
+#
+# If drain is ever genuinely needed, the options are: exclude instance-manager via the
+# drain podSelector (`longhorn.io/component NotIn [instance-manager]`), or switch
+# node-drain-policy to `block-for-eviction-if-contains-last-replica` and accept a full
+# replica rebuild per node. Do NOT use `always-allow`: CNPG pods are excluded from the
+# drain and keep running, so evicting instance-manager underneath them yanks storage out
+# from under a live database.
 apiVersion: upgrade.cattle.io/v1
 kind: Plan
 metadata:
@@ -39,15 +60,5 @@ spec:
   prepare:
     image: rancher/k3s-upgrade
     args: ["prepare", "k3s-server"]
-  drain:
-    force: true                    # evict bare/standalone pods too
-    ignoreDaemonSets: true         # node-exporter, metallb speaker, etc. stay
-    deleteEmptydirData: true       # allow evicting pods backed by emptyDir
-    skipWaitForDeleteTimeout: 60   # don't hang on already-unreachable pods
-    # Do NOT drain CNPG pods — they're node-local and draining the primary forces a
-    # switchover that can re-trigger #828 (see header). They restart in place instead.
-    podSelector:
-      matchExpressions:
-        - { key: cnpg.io/cluster, operator: DoesNotExist }
   upgrade:
     image: rancher/k3s-upgrade

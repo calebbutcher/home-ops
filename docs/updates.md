@@ -46,15 +46,31 @@ SUC cordons → swaps the k3s binary via a per-node Job → uncordons, **one nod
 time** (`concurrency: 1`). The agent Plan's `prepare` step blocks on the server Plan,
 so **control-plane upgrades fully before any worker**.
 
-**Both Plans are cordon-only (no drain) — on purpose.** Every worker hosts
-single-instance CloudNativePG clusters on node-local `local-path` storage, whose
-`-primary` PodDisruptionBudget allows **0** disruptions. A drain can therefore never
-evict them (no replica to fail over to) and `kubectl drain` deadlocks forever; and
-because the storage is node-local the DB can only come back on the *same* node, so
-draining buys nothing. k3s's embedded containerd keeps pods running across the binary
-swap (only a brief blip). If the Postgres clusters are ever moved to HA
-(`instances: 3`) or replicated storage, draining can be re-enabled (add `drain:` back
-to the agent Plan, plus `deleteEmptyDirData: true`).
+**Both Plans are cordon-only (no drain) — on purpose.** A worker drain deadlocks
+against Longhorn. Longhorn's `node-drain-policy` is `block-if-contains-last-replica`,
+enforced via a PodDisruptionBudget (`minAvailable: 1`) over each node's single
+`instance-manager` pod. Every worker holds the last healthy replica of at least one
+`longhorn-single` volume, so every one of those PDBs sits at **0** allowed disruptions
+— it survives a cordon, and a dry-run eviction returns `429 TooManyRequests: Cannot
+evict pod as it would violate the pod's disruption budget`. That pod is owned by an
+`InstanceManager` CR rather than a DaemonSet, so `ignoreDaemonSets` does not skip it,
+and `force: true` only permits *including* unmanaged pods — it does not bypass PDBs.
+`kubectl drain` therefore blocks forever on the first worker, and `concurrency: 1`
+stalls the rest behind it.
+
+A drain was briefly enabled (`e8993e6`, when CNPG went HA) and removed again before it
+ever ran — that commit predates the Longhorn migration. It costs little: the drain
+already excluded CNPG pods, and `longhorn-single` volumes are node-pinned by design, so
+draining cannot relocate their workloads anyway. k3s's embedded containerd keeps the
+shims (and their containers) alive across the binary swap — a brief kubelet gap, not a
+stop/start.
+
+If drain is ever genuinely needed: exclude instance-manager from the drain
+`podSelector` (`longhorn.io/component NotIn [instance-manager]`), or set
+node-drain-policy to `block-for-eviction-if-contains-last-replica` and accept a full
+replica rebuild per node. **Never** `always-allow` — CNPG pods are excluded from the
+drain and keep running, so evicting instance-manager underneath them pulls storage out
+from under a live database.
 
 **Nothing upgrades until you opt a node in.** Both Plans are gated on a node label, so
 merging only installs the controller:
