@@ -131,6 +131,11 @@ spec:
         type: LoadBalancer
         annotations:
           metallb.universe.tf/loadBalancerIPs: 10.2.169.82
+          # A record to this LoadBalancer's own IP. Deliberately NO `target`
+          # annotation: this must resolve to 10.2.169.82 directly, not CNAME to
+          # the Traefik ingress record — SSH does not pass through Traefik, and
+          # pointing it there would break git clone over SSH entirely.
+          external-dns.alpha.kubernetes.io/hostname: gitea-ssh.int.nerdbox.dev
         ports:
           ssh:
             port: 22

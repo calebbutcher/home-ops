@@ -8,6 +8,11 @@ metadata:
   name: radarr
   namespace: media
   annotations:
+    # CNAME to the single self-healing ingress record (see the Traefik Service)
+    # rather than a second A record, so a Traefik IP change moves one record.
+    # BOTH Ingresses here claim the same host — they must agree, or external-dns
+    # flaps the record between CNAME and A.
+    external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     # Bouncer first (cheap IP-reputation check), then Authentik forward-auth.
@@ -51,6 +56,11 @@ metadata:
   name: radarr-api
   namespace: media
   annotations:
+    # CNAME to the single self-healing ingress record (see the Traefik Service)
+    # rather than a second A record, so a Traefik IP change moves one record.
+    # BOTH Ingresses here claim the same host — they must agree, or external-dns
+    # flaps the record between CNAME and A.
+    external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     # CrowdSec IP-reputation bouncer in front of the open (unauthenticated) API paths.
     traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-rate-limit@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd
