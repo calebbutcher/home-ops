@@ -50,6 +50,13 @@ spec:
               # be fronted by Traefik (which would terminate TLS and break DANE).
               DNS_SERVER_WEB_SERVICE_HTTPS_PORT: "53443"
               DNS_SERVER_WEB_SERVICE_ENABLE_HTTPS: "true"
+              # Required, not optional: ENABLE_HTTPS on its own brings up nothing
+              # because the web service has no certificate to present, and the
+              # listener silently never binds. This self-signed cert IS the
+              # DANE-EE identity the other cluster members pin, so it must be
+              # self-signed rather than a Let's Encrypt cert — and it must live on
+              # the PVC (/etc/dns) so a rescheduled pod keeps the same identity.
+              DNS_SERVER_WEB_SERVICE_USE_SELF_SIGNED_CERT: "true"
               # Recursion is served, but only to RFC1918 clients — this member has
               # a LAN-reachable IP and must not become an open resolver. Forwarders
               # are deliberately left unset so it resolves from the root hints;
