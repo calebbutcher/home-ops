@@ -1,0 +1,103 @@
+---
+# Routes technitium.int.nerdbox.dev to the Technitium cluster PRIMARY (dns-01,
+# 10.2.30.251) — a VM on VLAN 30, outside the cluster.
+#
+# Why this exists: Technitium clustering is active-active for serving but
+# active-passive for administration. Config writes only take on the primary;
+# secondaries are read-only and have their config overwritten by cluster sync.
+# The k3s member is a permanent secondary, so pointing the friendly hostname at
+# it (as this app originally did) aimed the nicest URL at the one node where no
+# change can be made. That ingress now lives at technitium-k3s.int.nerdbox.dev.
+#
+# Deliberately NOT pointed at the keepalived VIP (10.2.30.250): the VIP follows
+# whichever node is VRRP master, so after a failover the admin URL would silently
+# land on the read-only secondary.
+#
+# Service with no selector + a hand-maintained EndpointSlice is how a
+# Kubernetes-native Ingress fronts an off-cluster address. First use of this
+# pattern in this repo.
+apiVersion: v1
+kind: Service
+metadata:
+  name: technitium-primary
+  namespace: technitium
+  annotations:
+    # Traefik must speak HTTPS to the backend: the admin session carries
+    # credentials across VLAN 169 -> 30, and :5380 is plaintext. 53443 is the
+    # same web service over TLS.
+    traefik.ingress.kubernetes.io/service.serversscheme: https
+    traefik.ingress.kubernetes.io/service.serverstransport: technitium-technitium-primary@kubernetescrd
+spec:
+  # No selector: endpoints are supplied manually below. Kubernetes will not
+  # manage (or garbage-collect) them.
+  ports:
+    - name: https
+      port: 53443
+      targetPort: 53443
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: technitium-primary
+  namespace: technitium
+  labels:
+    # Binds this slice to the Service above. Without this label the Service has
+    # no endpoints and Traefik returns 503.
+    kubernetes.io/service-name: technitium-primary
+addressType: IPv4
+ports:
+  - name: https
+    port: 53443
+    protocol: TCP
+endpoints:
+  # dns-01 only. If the primary is ever moved or replaced (see the promotion
+  # runbook), this address must be updated to match — it is not discovered.
+  - addresses:
+      - 10.2.30.251
+    conditions:
+      ready: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: technitium-primary
+  namespace: technitium
+spec:
+  # The backend presents Technitium's self-signed certificate — the same one the
+  # cluster peers pin via DANE-EE, issued for dns-01.int.nerdbox.dev rather than
+  # the ingress hostname. Traefik cannot chain-validate it, so verification is
+  # skipped for this route only. The hop is LAN-internal and this does not affect
+  # the peers' own pinning, which happens directly between nodes.
+  insecureSkipVerify: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: technitium-primary
+  namespace: technitium
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # Rate limit on top of the usual headers: this fronts an admin login form.
+    # No forwardAuth — Technitium has its own session login, and an auth hop
+    # would break the API the admin UI calls.
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-rate-limit@kubernetescrd
+    external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - technitium.int.nerdbox.dev
+      secretName: technitium-primary-tls
+  rules:
+    - host: technitium.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: technitium-primary
+                port:
+                  number: 53443
