@@ -1,0 +1,52 @@
+---
+# Guard against the silent-ciphertext trap.
+#
+# ansible.cfg enables the community.sops vars plugin, which is what decrypts
+# group_vars/**/*.sops.yaml at runtime. Ansible only loads ansible.cfg from the
+# CURRENT WORKING DIRECTORY (or ANSIBLE_CONFIG), so running a playbook from the
+# repo root instead of ansible/ silently disables the plugin. The .sops.yaml file
+# then parses as ordinary YAML and every secret resolves to its raw ciphertext —
+# the literal string "ENC[AES256_GCM,data:...,type:str]".
+#
+# Nothing errors. The play runs green. Services come up configured with a
+# 150-character ciphertext where their password should be. This has already
+# happened once: both DNS VMs were provisioned with the ciphertext as the
+# Technitium admin password, and keepalived with its first 8 characters as the
+# VRRP auth_pass (VRRPv2 truncates to 8 — and because both nodes derived the
+# same wrong value, VRRP authenticated and the fault stayed invisible).
+#
+# Import this as a pre_task in any play that consumes SOPS-sourced variables.
+#
+#   pre_tasks:
+#     - name: Assert SOPS variables decrypted
+#       ansible.builtin.import_tasks: tasks/assert_sops_decrypted.yml
+
+- name: Assert ansible.cfg was loaded
+  ansible.builtin.assert:
+    that:
+      # default('', true) collapses both undefined AND None to '' — without the
+      # second argument this raises a NoneType error before fail_msg can render,
+      # which is exactly when the operator most needs to read it.
+      - (ansible_config_file | default('', true)) | length > 0
+    fail_msg: >-
+      No ansible.cfg was loaded, so the community.sops vars plugin is disabled
+      and every SOPS-encrypted variable will resolve to raw ciphertext.
+      Run this playbook from the ansible/ directory (cd ansible && ansible-playbook ...)
+      or set ANSIBLE_CONFIG=/path/to/ansible/ansible.cfg.
+    success_msg: "ansible.cfg loaded from {{ ansible_config_file | default('?') }}"
+    quiet: true
+
+- name: Assert SOPS-sourced variables are decrypted, not ciphertext
+  ansible.builtin.assert:
+    that:
+      - not (lookup('vars', item, default='') is string
+             and lookup('vars', item, default='') is search('^ENC\[AES256_GCM'))
+    fail_msg: >-
+      Variable '{{ item }}' is still SOPS ciphertext. The community.sops vars
+      plugin did not run — see the note above; you are almost certainly running
+      from the repo root rather than ansible/. Refusing to continue: proceeding
+      would configure services with the ciphertext as their credential.
+    success_msg: "{{ item }} decrypted"
+    quiet: true
+  loop: "{{ sops_guarded_vars | default([]) }}"
+  when: lookup('vars', item, default='') | length > 0

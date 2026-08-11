@@ -4,10 +4,17 @@
 #
 # site.yml only targets the k3s groups, so this is a separate playbook.
 #
-# Usage:
+# Usage — RUN FROM THE ansible/ DIRECTORY, not the repo root:
+#   cd ansible
 #   ansible-galaxy collection install -r collections/requirements.yml
 #   ansible-playbook technitium.yml
 #   ansible-playbook technitium.yml --limit 10.2.30.252   # one VM only
+#
+# The cd matters. Ansible loads ansible.cfg from the current working directory,
+# and that file is what enables the community.sops vars plugin. Run this from the
+# repo root and the plugin is off, secrets resolve to raw ciphertext, and the
+# play still reports success — see tasks/assert_sops_decrypted.yml, which now
+# refuses to continue when that happens.
 #
 # serial: 1 is deliberate — the role restarts keepalived and briefly interrupts
 # DNS on the host it is touching. Rolling one at a time keeps the VIP (and the
@@ -23,5 +30,12 @@
   become: true
   gather_facts: true
   environment: "{{ proxy_env | default({}) }}"
+  vars:
+    sops_guarded_vars:
+      - vault_technitium_admin_password
+      - vault_keepalived_auth_pass
+  pre_tasks:
+    - name: Assert SOPS variables actually decrypted
+      ansible.builtin.import_tasks: tasks/assert_sops_decrypted.yml
   roles:
     - role: technitium
