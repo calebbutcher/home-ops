@@ -1,0 +1,71 @@
+---
+# Stock Ubuntu 24.04 runs systemd-resolved, which binds 127.0.0.53:53 and
+# 127.0.0.54:53. Technitium runs with network_mode: host and binds 0.0.0.0:53 —
+# on Linux a wildcard bind collides with an existing specific bind on the same
+# port, so the container would fail to start. Port 53 has to be freed first.
+#
+# We MASK resolved rather than just setting DNSStubListener=no. Turning the stub
+# off frees the port, but systemd-resolved still gives per-link DHCP-supplied
+# nameservers precedence over the global DNS= in resolved.conf. After the cutover
+# repoints the DHCP scope at the VIP, these VMs would pick that up on eth0 and
+# start resolving through themselves — the exact boot-time dependency loop we are
+# trying to avoid, and it would strand block-list downloads behind a server that
+# has not finished starting.
+#
+# A static /etc/resolv.conf is safe here: there is no resolvconf package, no
+# cloud-init resolv_conf module, and systemd-networkd only ever writes under
+# /run/systemd/resolve/. Nothing will rewrite the file behind us.
+#
+# To reverse: unmask + enable systemd-resolved and restore the
+# /run/systemd/resolve/stub-resolv.conf symlink.
+
+- name: Check whether systemd-resolved is present
+  ansible.builtin.systemd:
+    name: systemd-resolved
+  register: technitium_resolved_unit
+  failed_when: false
+
+- name: Disable and mask systemd-resolved so it cannot reclaim port 53
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: stopped
+    enabled: false
+    masked: true
+  when: technitium_resolved_unit.status is defined
+
+- name: Replace the resolv.conf stub symlink with a static file
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    state: absent
+  when: technitium_resolved_unit.status is defined
+
+- name: Pin the host's own resolvers
+  ansible.builtin.template:
+    src: resolv.conf.j2
+    dest: /etc/resolv.conf
+    owner: root
+    group: root
+    mode: u=rw,g=r,o=r
+
+- name: Verify the host can still resolve names
+  ansible.builtin.command: getent hosts github.com
+  register: technitium_resolv_check
+  changed_when: false
+  retries: 3
+  delay: 2
+  until: technitium_resolv_check.rc == 0
+
+- name: Read listeners on port 53
+  ansible.builtin.command: ss -lnup sport = :53
+  register: technitium_port53
+  changed_when: false
+
+- name: Assert the systemd-resolved stub has released port 53
+  ansible.builtin.assert:
+    that:
+      - "'127.0.0.53' not in technitium_port53.stdout"
+    fail_msg: >-
+      systemd-resolved is still listening on 127.0.0.53:53. Technitium cannot
+      bind 0.0.0.0:53 while that holds — the container would crash-loop.
+      Investigate before continuing.
+    success_msg: Port 53 is free for Technitium.

@@ -257,3 +257,12 @@ custom_registries_yaml: |
 #   HTTP_PROXY: "http://proxy.domain.local:3128"
 #   HTTPS_PROXY: "http://proxy.domain.local:3128"
 #   NO_PROXY: "*.domain.local,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+# Technitium DNS Server image tag for the standalone VLAN 30 VMs.
+# Lives here rather than in roles/technitium/defaults/main.yml because Renovate's
+# custom regex manager only scans this file (see renovate.json).
+# MUST match the tag in kubernetes/apps/technitium/helmrelease.yaml — Technitium
+# clustering expects version parity across all members. Bump the VMs (primary)
+# first, then the k3s member.
+# renovate: datasource=docker depName=technitium/dns-server
+technitium_version: 15.4.0

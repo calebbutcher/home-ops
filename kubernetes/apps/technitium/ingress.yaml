@@ -1,0 +1,39 @@
+---
+# Web UI only, on the plain-HTTP port 5380.
+#
+# Deliberately NOT exposing 53443 here: that port carries the cluster/DANE-EE
+# channel, where peers pin this member's self-signed certificate. Traefik would
+# terminate TLS and present its own Let's Encrypt cert, breaking the pin and with
+# it the cluster join. 53443 stays reachable only directly on 10.2.169.84.
+#
+# No forward-auth middleware — Technitium has its own session login, and a
+# forwardAuth hop would break the API used by the admin UI.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: technitium
+  namespace: technitium
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd
+    # CNAME to the single self-healing ingress record rather than a second A
+    # record — see Surface B. Harmless before external-dns exists.
+    external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - technitium.int.nerdbox.dev
+      secretName: technitium-tls
+  rules:
+    - host: technitium.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: technitium
+                port:
+                  number: 5380

@@ -1,0 +1,30 @@
+---
+# Technitium's entire state: server config, zone files, the cluster identity, and
+# the DANE-EE certificate the other cluster members pin. Losing it is not fatal —
+# a secondary can be re-joined and the cluster catalog re-syncs its zones from the
+# primary — but re-joining is manual, so this is backed up by VolSync anyway.
+#
+# RWO is sufficient and deliberate: the controller uses strategy: Recreate with a
+# single replica, so the old pod is fully gone before the new one starts and there
+# is never a second writer. Longhorn detaches from the old node and reattaches
+# wherever the pod is rescheduled, which is what lets this member migrate freely.
+#
+# The 2-replica default class, NOT longhorn-single: this data is neither disposable
+# nor replicated at the app layer (Technitium's cluster sync flows primary →
+# secondary, and this member is a permanent secondary that never becomes a source
+# of truth).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: technitium-config
+  namespace: technitium
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      # Config + zones are a few hundred MB at most; the growth driver is the
+      # query log's SQLite database. Set a retention limit in the query-log app
+      # rather than growing this. The class allows expansion if that changes.
+      storage: 10Gi

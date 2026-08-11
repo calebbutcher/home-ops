@@ -1,0 +1,27 @@
+---
+# Technitium DNS Server on the two standalone VLAN 30 VMs (Docker) + keepalived
+# VRRP for the 10.2.30.250 VIP.
+#
+# site.yml only targets the k3s groups, so this is a separate playbook.
+#
+# Usage:
+#   ansible-galaxy collection install -r collections/requirements.yml
+#   ansible-playbook technitium.yml
+#   ansible-playbook technitium.yml --limit 10.2.30.252   # one VM only
+#
+# serial: 1 is deliberate — the role restarts keepalived and briefly interrupts
+# DNS on the host it is touching. Rolling one at a time keeps the VIP (and the
+# other cluster member) answering throughout.
+#
+# The third cluster member is the k3s pod, managed by Flux, not by this playbook:
+# see kubernetes/apps/technitium/. Cluster formation itself is a manual one-time
+# step in the admin UI (docs/technitium-deploy.md).
+
+- name: Deploy Technitium DNS Server and keepalived
+  hosts: standalone_vms
+  serial: 1
+  become: true
+  gather_facts: true
+  environment: "{{ proxy_env | default({}) }}"
+  roles:
+    - role: technitium

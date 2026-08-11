@@ -4,3 +4,9 @@ collections:
   - name: community.general
   - name: ansible.posix
   - name: kubernetes.core
+  # Technitium runs as a Docker container on the standalone DNS VMs.
+  - name: community.docker
+  # Used by the community.sops vars plugin enabled in ansible.cfg to decrypt
+  # group_vars/*.sops.yaml at runtime. It was already a hard requirement — it
+  # just was not declared here.
+  - name: community.sops

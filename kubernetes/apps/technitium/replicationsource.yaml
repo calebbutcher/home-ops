@@ -1,0 +1,34 @@
+---
+# Backs up the k3s member's /etc/dns (config, zones, cluster identity, DANE-EE
+# cert). Belt-and-braces rather than critical: a lost secondary can be re-joined
+# to the cluster and the catalog zone re-syncs its zones from the primary. What
+# this actually saves is the manual re-join and the local query-log history.
+#
+# Technitium runs as root and writes /etc/dns as root, so the mover runs
+# privileged (uid 0) like gitea's — a uid-1000 mover could not read the files.
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationSource
+metadata:
+  name: technitium-config
+  namespace: technitium
+spec:
+  sourcePVC: technitium-config
+  trigger:
+    # Off-peak, and clear of the 07:00 CNPG base backups / 07:35 tandoor window.
+    schedule: "50 7 * * *"
+  restic:
+    repository: technitium-restic-secret
+    copyMethod: Direct
+    cacheCapacity: 1Gi
+    cacheStorageClassName: longhorn-single
+    pruneIntervalDays: 7
+    retain:
+      daily: 7
+      weekly: 4
+      monthly: 3
+    # Technitium runs as root; a uid-1000 mover could not read /etc/dns.
+    # Same as gitea / pricewatch.
+    moverSecurityContext:
+      runAsUser: 0
+      runAsGroup: 0
+      fsGroup: 0

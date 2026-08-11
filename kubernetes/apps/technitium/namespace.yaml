@@ -1,0 +1,15 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: technitium
+  labels:
+    # PodSecurity baseline — same rationale as the other app namespaces. Note this
+    # pod DOES run as root: Technitium binds :53, a privileged port, and the
+    # upstream image has no non-root variant. 'baseline' permits that (only
+    # 'restricted' would demand runAsNonRoot) while still blocking the
+    # container-escape primitives. Nothing here needs host namespaces or hostPath:
+    # unlike the VM members (Docker, network_mode: host) this member reaches the
+    # LAN through a MetalLB LoadBalancer, so the pod network stays normal.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest

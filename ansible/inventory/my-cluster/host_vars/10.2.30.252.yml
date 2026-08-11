@@ -1,0 +1,12 @@
+---
+# dns-02 — Technitium cluster secondary and keepalived BACKUP.
+#
+# Takes the VIP when dns-01's health check fails. Note that taking the VIP does
+# NOT make it the Technitium cluster primary: it will serve queries from its
+# synced copy, but config writes (including external-dns record creation) stay
+# paused until dns-01 returns or is manually replaced. See the promotion runbook
+# in docs/technitium-deploy.md.
+technitium_server_domain: dns-02.int.nerdbox.dev
+
+technitium_keepalived_state: BACKUP
+technitium_keepalived_priority: 100

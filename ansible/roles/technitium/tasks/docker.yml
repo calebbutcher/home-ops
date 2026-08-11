@@ -1,0 +1,63 @@
+---
+# Docker CE from the official repo (Ubuntu's docker.io is older). Only the engine
+# is needed — no compose plugin, since the container is declared by
+# community.docker.docker_container rather than a compose file.
+
+- name: Install prerequisites for the Docker apt repository
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+
+- name: Create the apt keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: u=rwx,g=rx,o=rx
+
+- name: Fetch the Docker GPG key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: u=rw,g=r,o=r
+
+- name: Add the Docker apt repository
+  # deb822 format, not apt_repository: the latter is deprecated and slated for
+  # removal in ansible-core 2.25.
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: [deb]
+    uris: https://download.docker.com/linux/ubuntu
+    suites: ["{{ ansible_distribution_release }}"]
+    components: [stable]
+    architectures: ["{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}"]
+    signed_by: /etc/apt/keyrings/docker.asc
+    state: present
+    enabled: true
+
+- name: Install Docker CE
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+    state: present
+    update_cache: true
+
+- name: Ensure Docker is enabled and running
+  ansible.builtin.service:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Install the Docker SDK for Python (required by community.docker)
+  ansible.builtin.apt:
+    name: python3-docker
+    state: present
