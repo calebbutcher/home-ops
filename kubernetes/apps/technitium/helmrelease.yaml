@@ -1,0 +1,133 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: technitium
+  namespace: technitium
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "5.0.1"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      technitium:
+        # Single RWO config PVC holding the cluster identity + DANE-EE cert. The
+        # old pod must be fully gone before the new one starts — two Technitium
+        # processes sharing /etc/dns would corrupt state and confuse the cluster
+        # peers. This is also what makes RWO (rather than RWX) correct.
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: technitium/dns-server
+              # Pinned, never `latest`: Technitium clustering expects version
+              # parity across members, so this MUST equal technitium_version in
+              # ansible/inventory/my-cluster/group_vars/all/main.yml. Bump both
+              # together, VMs first (the primary), then this member.
+              tag: "15.4.0"
+            env:
+              TZ: UTC
+              # Stable identity for this member. The pod's hostname is random and
+              # changes on every reschedule, which would otherwise make the server
+              # rename itself out from under the cluster.
+              DNS_SERVER_DOMAIN: dns-k3s.int.nerdbox.dev
+              DNS_SERVER_WEB_SERVICE_HTTP_PORT: "5380"
+              # The cluster/DANE-EE channel. Peers connect to this directly over
+              # the LoadBalancer IP and pin the self-signed cert, so it can never
+              # be fronted by Traefik (which would terminate TLS and break DANE).
+              DNS_SERVER_WEB_SERVICE_HTTPS_PORT: "53443"
+              DNS_SERVER_WEB_SERVICE_ENABLE_HTTPS: "true"
+              # Recursion is served, but only to RFC1918 clients — this member has
+              # a LAN-reachable IP and must not become an open resolver. Forwarders
+              # are deliberately left unset so it resolves from the root hints;
+              # that setting syncs from the primary once clustered anyway.
+              DNS_SERVER_RECURSION: AllowOnlyForPrivateNetworks
+              DNS_SERVER_ADMIN_PASSWORD:
+                valueFrom:
+                  secretKeyRef:
+                    name: technitium-secret
+                    key: DNS_SERVER_ADMIN_PASSWORD
+            probes:
+              # /api/user/session/get answers 200 with a JSON error when
+              # unauthenticated, so it proves the web service AND the API layer are
+              # up without needing a token.
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/user/session/get
+                    port: 5380
+                  periodSeconds: 5
+                  failureThreshold: 30
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/user/session/get
+                    port: 5380
+                  periodSeconds: 30
+                  failureThreshold: 5
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/user/session/get
+                    port: 5380
+                  periodSeconds: 15
+                  failureThreshold: 3
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                # Headroom for block lists. If the Advanced Blocking app grows to
+                # several per-client groups (each holding its own list structures)
+                # this is the number to raise.
+                memory: 1Gi
+    service:
+      app:              # controller == release name ⇒ Service "technitium"
+        controller: technitium
+        type: LoadBalancer
+        annotations:
+          # .81 Traefik, .82 Gitea SSH, .83 alloy-syslog ⇒ .84 in the MetalLB pool
+          # (10.2.169.80-.90). Clients are handed this alongside the VM VIP
+          # 10.2.30.250, so it must never move.
+          metallb.universe.tf/loadBalancerIPs: 10.2.169.84
+        # Preserve real client source IPs. Technitium's query log and any
+        # per-client blocking rules are worthless if every query appears to come
+        # from a node IP.
+        externalTrafficPolicy: Local
+        ports:
+          dns-udp:
+            port: 53
+            protocol: UDP
+          dns-tcp:
+            port: 53
+            protocol: TCP
+          admin-https:
+            port: 53443
+            protocol: HTTPS
+          http:
+            port: 5380
+            protocol: HTTP
+    persistence:
+      config:
+        existingClaim: technitium-config
+        globalMounts:
+          - path: /etc/dns

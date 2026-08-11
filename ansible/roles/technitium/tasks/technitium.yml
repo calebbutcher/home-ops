@@ -1,0 +1,63 @@
+---
+# network_mode: host is required, not a convenience. Technitium must see real
+# client source IPs (query logs, per-client blocking) and must own :53 on the
+# VM's LAN address so the keepalived VIP resolves to it on failover. Docker's
+# userland proxy would rewrite every source address to the bridge gateway.
+
+- name: Create the Technitium config directory
+  ansible.builtin.file:
+    path: "{{ technitium_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: u=rwx,g=rx,o=rx
+
+- name: Run the Technitium DNS Server container
+  community.docker.docker_container:
+    name: technitium
+    image: "{{ technitium_image }}:{{ technitium_image_tag }}"
+    # Pinned tag — clustering expects version parity across all members, so this
+    # must match the tag in kubernetes/apps/technitium/helmrelease.yaml.
+    pull: true
+    network_mode: host
+    restart_policy: unless-stopped
+    volumes:
+      - "{{ technitium_config_dir }}:/etc/dns"
+    env:
+      TZ: "{{ technitium_timezone }}"
+      DNS_SERVER_DOMAIN: "{{ technitium_server_domain }}"
+      DNS_SERVER_ADMIN_PASSWORD: "{{ vault_technitium_admin_password }}"
+      DNS_SERVER_WEB_SERVICE_HTTP_PORT: "5380"
+      # Cluster / DANE-EE channel. Peers pin this member's self-signed cert, so
+      # it must be reachable directly — never through a reverse proxy.
+      DNS_SERVER_WEB_SERVICE_HTTPS_PORT: "53443"
+      DNS_SERVER_WEB_SERVICE_ENABLE_HTTPS: "true"
+      # Serve recursion to RFC1918 clients only — these VMs hold a LAN address
+      # and must not become open resolvers. Forwarders are deliberately unset so
+      # resolution walks down from the root hints.
+      DNS_SERVER_RECURSION: AllowOnlyForPrivateNetworks
+  register: technitium_container
+
+- name: Wait for the Technitium web service to answer
+  ansible.builtin.uri:
+    url: http://127.0.0.1:5380/api/user/session/get
+    status_code: 200
+  register: technitium_web
+  retries: 30
+  delay: 2
+  until: technitium_web.status is defined and technitium_web.status == 200
+
+- name: Read listeners on port 53
+  ansible.builtin.command: ss -lnup sport = :53
+  register: technitium_dns_listener
+  changed_when: false
+
+- name: Assert Technitium is serving DNS on all interfaces
+  ansible.builtin.assert:
+    that:
+      - "'0.0.0.0:53' in technitium_dns_listener.stdout or '*:53' in technitium_dns_listener.stdout"
+    fail_msg: >-
+      Technitium is not listening on 0.0.0.0:53 on {{ inventory_hostname }}.
+      Check `docker logs technitium` — the usual cause is something else still
+      holding port 53.
+    success_msg: Technitium is serving DNS on 0.0.0.0:53.

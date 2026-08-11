@@ -1,0 +1,52 @@
+---
+# VRRP floats 10.2.30.250 across the two VMs. This is the ONLY automatic failover
+# in the design: Technitium's own cluster promotion is manual, so without the VIP
+# a dead VM1 would mean clients waiting on resolver timeouts.
+
+- name: Assert the VRRP interface exists on this host
+  ansible.builtin.assert:
+    that:
+      - technitium_keepalived_interface in ansible_interfaces
+    fail_msg: >-
+      Interface '{{ technitium_keepalived_interface }}' not found on {{ inventory_hostname }}
+      (has: {{ ansible_interfaces | join(', ') }}). keepalived would start and
+      silently never bring up the VIP. Set technitium_keepalived_interface for this host.
+    success_msg: "VRRP will run on {{ technitium_keepalived_interface }}."
+
+- name: Install keepalived and the health-check dependencies
+  ansible.builtin.apt:
+    name:
+      - keepalived
+      # curl + dig are used by check_technitium.sh. Present on these VMs today,
+      # but the health check silently fails closed without them — which would
+      # park the VIP on whichever node happens to win the election.
+      - curl
+      - dnsutils
+    state: present
+    update_cache: true
+
+- name: Deploy the Technitium health-check script
+  ansible.builtin.copy:
+    src: check_technitium.sh
+    dest: /usr/local/bin/check_technitium.sh
+    owner: root
+    group: root
+    # Must NOT be group/world writable — keepalived's enable_script_security
+    # refuses to run scripts that are.
+    mode: u=rwx,g=rx,o=rx
+  notify: Restart keepalived
+
+- name: Deploy the keepalived configuration
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: u=rw,g=,o=
+  notify: Restart keepalived
+
+- name: Ensure keepalived is enabled and running
+  ansible.builtin.service:
+    name: keepalived
+    enabled: true
+    state: started

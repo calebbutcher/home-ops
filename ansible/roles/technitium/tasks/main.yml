@@ -1,0 +1,15 @@
+---
+# Order matters: resolved.yml must free 0.0.0.0:53 before the container starts,
+# and the container must be answering on 5380 before keepalived's health check
+# can pass (otherwise the VIP flaps on first boot).
+- name: Free port 53 from systemd-resolved
+  ansible.builtin.import_tasks: resolved.yml
+
+- name: Install Docker
+  ansible.builtin.import_tasks: docker.yml
+
+- name: Deploy Technitium DNS Server
+  ansible.builtin.import_tasks: technitium.yml
+
+- name: Configure keepalived VRRP
+  ansible.builtin.import_tasks: keepalived.yml

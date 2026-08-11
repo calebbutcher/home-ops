@@ -1,0 +1,49 @@
+---
+# Image tag. Kept in group_vars/all/main.yml (technitium_version) so Renovate's
+# custom regex manager can see it — that manager only scans that one file. This
+# default is just a safety net; it MUST match the tag in
+# kubernetes/apps/technitium/helmrelease.yaml, since Technitium clustering
+# expects version parity across members.
+technitium_image: technitium/dns-server
+technitium_image_tag: "{{ technitium_version | default('15.4.0') }}"
+
+# Host path bind-mounted to /etc/dns inside the container. Holds config, zones,
+# the cluster identity and the DANE-EE cert.
+technitium_config_dir: /opt/technitium/config
+
+technitium_timezone: UTC
+
+# Resolvers for the VM ITSELF (apt, docker pulls, and Technitium's own HTTPS
+# fetches for block lists / update checks). Deliberately NOT the VIP and NOT
+# 127.0.0.1: pointing the host at the service it is hosting is a boot-time
+# dependency loop, and it strands block-list downloads behind a server that has
+# not finished starting. Fixed public resolvers also survive the cutover that
+# repoints DHCP at the VIP.
+technitium_host_resolvers:
+  - 1.1.1.1
+  - 8.8.8.8
+
+# --- keepalived / VRRP -----------------------------------------------------
+# VRID 30 verified free on the VLAN 30 segment (a 30s capture of IP proto 112
+# saw zero VRRP/CARP advertisements — pfSense is not running CARP there).
+technitium_keepalived_vrid: 30
+technitium_keepalived_vip: 10.2.30.250
+technitium_keepalived_vip_cidr: 24
+# Both VMs came up as eth0 (not ens18). If a rebuilt VM ever names its NIC
+# differently, keepalived silently fails to bring up the VIP — hence the assert
+# in tasks/keepalived.yml rather than a bare default.
+technitium_keepalived_interface: eth0
+technitium_keepalived_state: BACKUP
+technitium_keepalived_priority: 100
+# Health-check penalty applied when Technitium stops answering locally. This MUST
+# exceed the MASTER/BACKUP priority gap (150-100=50) or the VIP would never move:
+# at -40 a failed master sits at 110, still above the backup's 100, and keeps the
+# VIP while serving nothing. -60 puts it at 90 and hands over, with 10 points of
+# margin.
+technitium_keepalived_health_weight: -60
+# VRRPv2 auth_pass is truncated to 8 characters — do not lengthen it.
+technitium_keepalived_auth_pass: "{{ vault_keepalived_auth_pass }}"
+
+# This member's DNS Server Domain (its identity in the admin UI / SOA records).
+# Overridden per host in host_vars.
+technitium_server_domain: dns.int.nerdbox.dev

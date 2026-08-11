@@ -1,0 +1,45 @@
+! Managed by Ansible (roles/technitium) — do not edit by hand.
+!
+! Floats {{ technitium_keepalived_vip }} across the two Technitium VMs. Technitium's own
+! cluster promotion is manual, so this VIP is what gives clients automatic
+! failover on the query path.
+
+global_defs {
+    enable_script_security
+    script_user root
+}
+
+vrrp_script check_technitium {
+    script "/usr/local/bin/check_technitium.sh"
+    interval 5
+    timeout 3
+    ! Consecutive results before the state flips — avoids flapping the VIP on a
+    ! single slow response during, say, a block-list reload.
+    rise 2
+    fall 3
+    weight {{ technitium_keepalived_health_weight }}
+}
+
+vrrp_instance TECHNITIUM {
+    state {{ technitium_keepalived_state }}
+    interface {{ technitium_keepalived_interface }}
+    ! Verified free on this segment: a 30s capture of IP proto 112 saw zero VRRP
+    ! and zero pfSense CARP advertisements.
+    virtual_router_id {{ technitium_keepalived_vrid }}
+    priority {{ technitium_keepalived_priority }}
+    advert_int 1
+
+    authentication {
+        auth_type PASS
+        ! VRRPv2 truncates this to 8 characters.
+        auth_pass {{ technitium_keepalived_auth_pass }}
+    }
+
+    virtual_ipaddress {
+        {{ technitium_keepalived_vip }}/{{ technitium_keepalived_vip_cidr }}
+    }
+
+    track_script {
+        check_technitium
+    }
+}

@@ -1,0 +1,11 @@
+---
+# dns-01 — Technitium cluster PRIMARY and keepalived MASTER.
+#
+# This host stays the primary permanently. It has the stable address that
+# external-dns targets for RFC2136 dynamic updates (writes must go to the
+# primary; the VIP would land on a read-only secondary after a failover), and
+# Technitium cluster promotion is manual anyway.
+technitium_server_domain: dns-01.int.nerdbox.dev
+
+technitium_keepalived_state: MASTER
+technitium_keepalived_priority: 150

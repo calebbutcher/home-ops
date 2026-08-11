@@ -1,0 +1,14 @@
+# Managed by Ansible (roles/technitium) — do not edit by hand.
+#
+# These are the resolvers the VM ITSELF uses (apt, docker pulls, and Technitium's
+# own HTTPS fetches for block lists and update checks). They are deliberately NOT
+# the keepalived VIP and NOT 127.0.0.1: pointing this host at the DNS server it is
+# hosting is a startup dependency loop.
+#
+# This is unrelated to how Technitium answers client queries — that is configured
+# in the admin UI and resolves recursively from the root hints.
+{% for resolver in technitium_host_resolvers %}
+nameserver {{ resolver }}
+{% endfor %}
+# Fail over to the second resolver quickly rather than stalling apt/docker.
+options timeout:2 attempts:2
