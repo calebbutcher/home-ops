@@ -1,17 +1,29 @@
 ---
-# Web UI only, on the plain-HTTP port 5380.
+# Web UI of the k3s cluster member, on the plain-HTTP port 5380.
+#
+# This is a permanent SECONDARY: it answers queries but its configuration is
+# read-only and overwritten by cluster sync, so it is NOT the admin URL. The
+# friendly technitium.int.nerdbox.dev name points at the primary — see
+# primary-ingress.yaml. What this UI is genuinely good for is query logs, which
+# are per-node and never replicated: to see what a client actually asked, you
+# need the UI of whichever node answered it.
 #
 # Deliberately NOT exposing 53443 here: that port carries the cluster/DANE-EE
 # channel, where peers pin this member's self-signed certificate. Traefik would
 # terminate TLS and present its own Let's Encrypt cert, breaking the pin and with
 # it the cluster join. 53443 stays reachable only directly on 10.2.169.84.
 #
+# The hostname deliberately avoids dns-k3s.int.nerdbox.dev — that is this node's
+# own cluster identity, and the cluster maintains an A record for it. An Ingress
+# claiming the same name would put external-dns in a fight with the DNS server
+# over its own record.
+#
 # No forward-auth middleware — Technitium has its own session login, and a
 # forwardAuth hop would break the API used by the admin UI.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: technitium
+  name: technitium-k3s
   namespace: technitium
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
@@ -24,10 +36,10 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - technitium.int.nerdbox.dev
-      secretName: technitium-tls
+        - technitium-k3s.int.nerdbox.dev
+      secretName: technitium-k3s-tls
   rules:
-    - host: technitium.int.nerdbox.dev
+    - host: technitium-k3s.int.nerdbox.dev
       http:
         paths:
           - path: /

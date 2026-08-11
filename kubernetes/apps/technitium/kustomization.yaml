@@ -12,3 +12,4 @@ resources:
   - replicationsource.yaml
   - helmrelease.yaml
   - ingress.yaml
+  - primary-ingress.yaml
