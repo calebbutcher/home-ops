@@ -13,4 +13,5 @@ resources:
   - controllers/mariadb-operator
   - controllers/system-upgrade-controller
   - controllers/tailscale-operator
+  - controllers/external-dns
   - configs

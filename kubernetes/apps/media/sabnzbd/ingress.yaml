@@ -11,6 +11,9 @@ metadata:
   name: sabnzbd
   namespace: media
   annotations:
+    # CNAME to the single self-healing ingress record (see the Traefik Service)
+    # rather than a second A record, so a Traefik IP change moves one record.
+    external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd

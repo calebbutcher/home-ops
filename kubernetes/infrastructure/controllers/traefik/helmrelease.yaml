@@ -32,6 +32,14 @@ spec:
       replicas: 2
 
     service:
+      # The ONE A record external-dns manages by IP. Every app hostname is a CNAME
+      # to ingress.int.nerdbox.dev (see the app Ingresses), so if this LoadBalancer
+      # ever lands on a different address, external-dns rewrites this single record
+      # and every app follows automatically — no per-app churn.
+      # Deliberately no `target` annotation here: this one must resolve to the real
+      # IP, and a CNAME cannot sit at the end of the chain.
+      annotations:
+        external-dns.alpha.kubernetes.io/hostname: ingress.int.nerdbox.dev
       # externalTrafficPolicy: Local preserves the REAL client source IP. Under the
       # chart-default `Cluster` policy, kube-proxy SNATs every external client to a node
       # flannel IP (10.42.x.0 / RFC1918) before Traefik sees it — which the CrowdSec

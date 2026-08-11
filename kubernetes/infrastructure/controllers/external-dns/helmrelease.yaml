@@ -1,0 +1,77 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: external-dns
+  namespace: external-dns
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: external-dns
+      version: "1.21.1"
+      sourceRef:
+        kind: HelmRepository
+        name: external-dns
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    provider:
+      name: rfc2136
+    # Ingresses are the point of this; Services are included so non-Traefik
+    # LoadBalancers (gitea-ssh, and Technitium's own DNS service) can publish
+    # their real IPs.
+    sources:
+      - ingress
+      - service
+    # Hard boundary. This instance may only ever touch the internal zone —
+    # nothing here should be able to write a public record.
+    domainFilters:
+      - int.nerdbox.dev
+    # START HERE. upsert-only never issues a delete, so a mistake in ownership or
+    # filtering cannot remove a record that something depends on. Flip to `sync`
+    # only after watching it create and update records correctly for a while —
+    # see docs/technitium-deploy.md.
+    policy: upsert-only
+    registry: txt
+    txtOwnerId: k3s-internal
+    # Ownership TXTs land at k8s.<host> rather than <host>. Without the prefix the
+    # TXT would collide with the CNAME at the same name — CNAME cannot coexist
+    # with other record types at a node (RFC 1034).
+    txtPrefix: "k8s."
+    # Two minutes is plenty for a homelab and keeps the log readable while we are
+    # still watching what it does.
+    interval: 2m
+    logLevel: info
+    extraArgs:
+      # The PRIMARY's own address, deliberately not the keepalived VIP: RFC2136
+      # updates are config writes and only the primary accepts them. After a
+      # failover the VIP lands on a read-only secondary, so pointing here would
+      # silently start refusing every update. If dns-01 is ever promoted away,
+      # this is one of the values the promotion runbook says to change.
+      - --rfc2136-host=10.2.30.251
+      - --rfc2136-port=53
+      - --rfc2136-zone=int.nerdbox.dev
+      - --rfc2136-tsig-keyname=externaldns-key
+      - --rfc2136-tsig-secret-alg=hmac-sha256
+      - --rfc2136-tsig-axfr
+    env:
+      - name: EXTERNAL_DNS_RFC2136_TSIG_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: external-dns-tsig
+            key: tsig-secret
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+    serviceMonitor:
+      enabled: true

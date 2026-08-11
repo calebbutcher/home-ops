@@ -48,6 +48,20 @@ lives only on the primary (from where it replicates).
 | Cluster domain | `int.nerdbox.dev` | **Permanent — Technitium cannot change it.** Changing it means tearing the cluster down and re-joining every node. |
 | Zone transfer ACL (`int.nerdbox.dev`, `cluster-catalog.int.nerdbox.dev`) | `10.2.30.251`, `10.2.30.252`, `10.2.169.84`, **`10.2.169.40`–`.45`** | The worker IPs are load-bearing — see "k3s member egress" below. **Add a line here when you add a worker node**, or the k3s member's zone transfers start failing whenever it lands on the new one. |
 | Recursion | `AllowOnlyForPrivateNetworks` | These hold LAN addresses; must not become open resolvers. |
+| TSIG key `externaldns-key` (hmac-sha256) | secret = `vault_technitium_tsig_secret` | Must equal `kubernetes/infrastructure/controllers/external-dns/external-dns-tsig.sops.yaml`. **`tsigKeys` in the API replaces the whole list** — read the existing keys back and resubmit them, or you delete the cluster's own `cluster-catalog.int.nerdbox.dev` key. |
+| `int.nerdbox.dev` dynamic updates | `UseSpecifiedNetworkACL`, ACL `10.2.169.40`–`.45`, policy `externaldns-key` → `*.int.nerdbox.dev` + apex, types A/AAAA/CNAME/TXT | Worker IPs again: external-dns is a pod, so its RFC2136 updates arrive from a **node** IP. Scoping this to a service IP produces `REFUSED` that looks like a TSIG failure. |
+
+### The zone is DNSSEC-signed and carries the cluster's DANE-EE records
+
+Cluster init signed `int.nerdbox.dev` (DNSKEY/RRSIG/NSEC) and published
+`_53443._tcp.<node>` **TLSA records with `certificateUsage: DANE-EE`**. Those TLSA records are
+how cluster peers pin each other's self-signed certificates — the pinning lives in this zone, not
+just in the nodes' config.
+
+external-dns writes into the same zone. It is safe **because `registry: txt` means it only ever
+deletes records it holds an ownership TXT for**, and the cluster's NS/A/TLSA/DNSKEY records have
+none. Do not remove the TXT registry or set `txtOwnerId` to something that collides — losing that
+boundary puts the cluster's own trust anchors within reach of a DNS controller.
 
 ## Gotchas
 
