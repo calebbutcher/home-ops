@@ -1,0 +1,95 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: coc-trade-bot
+  namespace: coc-trade-bot
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "5.0.1"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    defaultPodOptions:
+      securityContext:
+        # The image creates uid/gid 1000 and the process runs as it. fsGroup
+        # makes the Longhorn volume group-writable so SQLite can create its
+        # -wal/-shm sidecar files; OnRootMismatch skips a recursive chown on
+        # every start once ownership is already correct.
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+    controllers:
+      bot:
+        # SQLite allows exactly one writer, and the PVC is RWO. Recreate tears
+        # the old pod down fully before the new one starts; the default
+        # RollingUpdate would briefly run two pods against the same database.
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              # Built from github.com/calebbutcher/coc-trade-bot by that repo's
+              # build workflow. Pinned to a semver tag so Renovate manages it
+              # exactly like every other image in this cluster.
+              repository: ghcr.io/calebbutcher/coc-trade-bot
+              tag: "0.1.0"
+            envFrom:
+              - secretRef:
+                  name: coc-trade-bot-secret
+            env:
+              TZ: UTC
+            probes:
+              # There is no HTTP server to probe — this is a Discord gateway
+              # client, outbound-only. Instead the bot touches a heartbeat file
+              # every 60s from its asyncio loop, and this ages it out. That
+              # detects a wedged/deadlocked event loop, which is the failure a
+              # restart actually fixes. It deliberately does NOT assert gateway
+              # connectivity: discord.py reconnects on its own, and a revoked
+              # token would survive a restart anyway, so probing that would just
+              # produce a crashloop instead of a clear error in the logs.
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command:
+                      - python
+                      - -c
+                      - |
+                        import os, sys, time
+                        p = os.environ.get("HEARTBEAT_PATH", "/data/heartbeat")
+                        sys.exit(0 if os.path.exists(p) and time.time() - os.path.getmtime(p) < 300 else 1)
+                  initialDelaySeconds: 120
+                  periodSeconds: 60
+                  timeoutSeconds: 10
+                  failureThreshold: 3
+              # Nothing routes traffic here, so readiness would gate nothing.
+              readiness:
+                enabled: false
+              startup:
+                enabled: false
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                memory: 256Mi
+    persistence:
+      # cocards.db plus the heartbeat file the liveness probe reads.
+      data:
+        existingClaim: coc-trade-bot-data
+        globalMounts:
+          - path: /data

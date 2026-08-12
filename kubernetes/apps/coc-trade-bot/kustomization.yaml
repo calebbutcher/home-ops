@@ -1,0 +1,11 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# NOTE: no top-level transformers (namespace/commonLabels) — they would rewrite the
+# .sops.yaml secret's metadata and corrupt the SOPS MAC. Every manifest sets its own
+# namespace explicitly.
+resources:
+  - namespace.yaml
+  - coc-trade-bot-secret.sops.yaml
+  - pvc.yaml
+  - helmrelease.yaml
