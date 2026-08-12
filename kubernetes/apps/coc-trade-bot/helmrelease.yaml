@@ -45,7 +45,7 @@ spec:
               # build workflow. Pinned to a semver tag so Renovate manages it
               # exactly like every other image in this cluster.
               repository: ghcr.io/calebbutcher/coc-trade-bot
-              tag: "0.1.0"
+              tag: "0.2.0"
             envFrom:
               - secretRef:
                   name: coc-trade-bot-secret
