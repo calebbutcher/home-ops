@@ -42,11 +42,11 @@ spec:
           app:
             image:
               # Built from github.com/calebbutcher/coc-trade-bot by that repo's
-              # build workflow. Back on a semver tag now that v0.3.0 is tagged
-              # upstream, which restores Renovate's ability to bump it — it
-              # cannot do anything with the sha- pin this replaced.
+              # build workflow. A full semver tag, which is what lets Renovate
+              # bump it like any other image in the cluster — it cannot do
+              # anything with a sha- pin.
               repository: ghcr.io/calebbutcher/coc-trade-bot
-              tag: "0.3.0"
+              tag: "0.3.1"
             envFrom:
               - secretRef:
                   name: coc-trade-bot-secret
