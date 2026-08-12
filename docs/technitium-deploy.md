@@ -50,6 +50,30 @@ lives only on the primary (from where it replicates).
 | Recursion | `AllowOnlyForPrivateNetworks` | These hold LAN addresses; must not become open resolvers. |
 | TSIG key `externaldns-key` (hmac-sha256) | secret = `vault_technitium_tsig_secret` | Must equal `kubernetes/infrastructure/controllers/external-dns/external-dns-tsig.sops.yaml`. **`tsigKeys` in the API replaces the whole list** — read the existing keys back and resubmit them, or you delete the cluster's own `cluster-catalog.int.nerdbox.dev` key. |
 | `int.nerdbox.dev` dynamic updates | `UseSpecifiedNetworkACL`, ACL `10.2.169.40`–`.45`, policy `externaldns-key` → `*.int.nerdbox.dev` + apex, types A/AAAA/CNAME/TXT | Worker IPs again: external-dns is a pod, so its RFC2136 updates arrive from a **node** IP. Scoping this to a service IP produces `REFUSED` that looks like a TSIG failure. |
+| **Catalog** zone `cluster-catalog.int.nerdbox.dev` → `zoneTransferTsigKeyNames` | `cluster-catalog.int.nerdbox.dev`, **`externaldns-key`** | Catalog members inherit the **catalog's** transfer policy — see below. This one entry is what lets external-dns read the zone at all. |
+
+### Zone transfer for catalog members is set on the CATALOG, not the zone
+
+`int.nerdbox.dev` is a member of the cluster catalog, and member zones inherit the catalog's
+zone-transfer settings. Setting `zoneTransfer` / `zoneTransferTsigKeyNames` **on the zone itself
+has no effect** — the values are stored and shown in the API, but ignored.
+
+This is easy to misdiagnose. external-dns needs a TSIG-signed AXFR to read current records
+(`--rfc2136-tsig-axfr`; it signs the transfer, and its updates are signed separately). Without it
+external-dns cannot list anything, so it blindly re-sends every record every cycle, and
+`policy: sync` can never be used because it cannot know what to delete. The symptom is
+`AXFR error: dns: bad xfr rcode: 5` every interval, with Technitium logging *"refused a zone
+transfer request since the request is missing TSIG auth required by the zone"*.
+
+**The fix is to add the key to the catalog zone's `zoneTransferTsigKeyNames`,** alongside the
+cluster's own key. After that external-dns reports `All records are already up to date` and stops
+rewriting.
+
+**Do not "fix" it with `overrideCatalogZoneTransfer=true` on the member zone.** That does let
+external-dns in, but it replaces the catalog policy the cluster relies on and **breaks cluster
+replication** — verified: secondaries immediately began logging
+`zone transfer response (RCODE=Refused)` and stopped receiving updates until the override was
+turned back off.
 
 ### The zone is DNSSEC-signed and carries the cluster's DANE-EE records
 
