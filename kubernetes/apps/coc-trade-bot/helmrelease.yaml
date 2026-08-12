@@ -42,10 +42,17 @@ spec:
           app:
             image:
               # Built from github.com/calebbutcher/coc-trade-bot by that repo's
-              # build workflow. Pinned to a semver tag so Renovate manages it
-              # exactly like every other image in this cluster.
+              # build workflow.
+              #
+              # Temporarily pinned to a commit image rather than a semver tag.
+              # The same-category trade restriction is merged to main but has
+              # no release tag yet, and that workflow only publishes a semver
+              # image on a `v*` git tag -- so there is no 0.2.1 to point at.
+              # This digest is the main build of e344d17 (PR #1). Renovate
+              # cannot bump a sha- pin, so switch this back to the semver tag
+              # once v0.2.1 is tagged upstream.
               repository: ghcr.io/calebbutcher/coc-trade-bot
-              tag: "0.2.0"
+              tag: "sha-e344d17@sha256:75128facc8c3a8a5317e75a3d109636206cc0e6cce4a45f8eeae6138fbe179c8"
             envFrom:
               - secretRef:
                   name: coc-trade-bot-secret
