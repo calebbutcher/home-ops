@@ -1,0 +1,24 @@
+---
+# Holds the SQLite database (cocards.db) — the entire state of the bot: every
+# member's reported duplicates and needs, plus the per-guild match-channel
+# setting. Self-reported data that nobody would enjoy re-entering mid-event.
+#
+# No ReplicationSource here, unlike the other stateful apps: Longhorn's
+# `daily-backup` RecurringJob covers the `default` group, which every volume
+# joins automatically, so this PVC is already backed up to s3://longhorn-backups
+# nightly at 04:00. VolSync would be a second copy of a 1Gi database for a
+# month-long event.
+#
+# RWO and SQLite's single-writer rule ⇒ the controller uses strategy: Recreate.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: coc-trade-bot-data
+  namespace: coc-trade-bot
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 1Gi

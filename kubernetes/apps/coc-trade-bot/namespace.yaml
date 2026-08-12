@@ -1,0 +1,17 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: coc-trade-bot
+  labels:
+    # PodSecurity baseline: blocks the container-escape primitives (privileged,
+    # host namespaces, hostPath, hostPort, unsafe capabilities). Nothing here
+    # needs any of them — the workload is a single unprivileged Python process
+    # with one PVC and no host access — so baseline is satisfied by construction
+    # rather than by exception.
+    #
+    # 'restricted' is deliberately NOT used, not even as a warning: every pod in
+    # the cluster fails it (no seccompProfile, no runAsNonRoot), so it would emit
+    # a warning on every reconcile and train us to ignore warnings.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
