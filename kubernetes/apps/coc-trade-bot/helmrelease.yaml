@@ -46,7 +46,7 @@ spec:
               # bump it like any other image in the cluster — it cannot do
               # anything with a sha- pin.
               repository: ghcr.io/calebbutcher/coc-trade-bot
-              tag: "0.3.1"
+              tag: "0.4.0"
             envFrom:
               - secretRef:
                   name: coc-trade-bot-secret
