@@ -293,8 +293,22 @@ data:
             # Event-side counterpart to node_systemd_unit_state (PR: prometheusrule-nodes.yaml).
             # The metric says "is failed now"; this says "failed just now", and
             # catches units that fail-and-restart in between metric scrapes.
+            #
+            # MUST stay anchored to syslog_identifier="systemd". k3s runs as a
+            # systemd unit, so its own application output lands in {job="journal"}
+            # too — and the case-insensitive "Failed to start" branch matches the
+            # substring in k3s's runtime errors, e.g.
+            #   "PreStop hook failed" err="... failed to start exec \"3e0ea...\":
+            #    OCI runtime exec failed: ... exec: \"/bin/sh\": no such file"
+            # Longhorn's node-driver-registrar is distroless and its preStop hook
+            # shells out, so every CSI DaemonSet roll emitted that line on all six
+            # workers at once and fired this alert cluster-wide while
+            # node_systemd_unit_state{state="failed"} was flat 0 everywhere.
+            # Scoping to systemd's own journal entries keeps genuine
+            # fail-and-restart detection and drops the false positives; verified
+            # 0 matches over 7d, matching the quiet baseline documented above.
             expr: |
-              sum by (node) (count_over_time({job="journal"} |~ `(?i)(Failed with result|Failed to start)` [10m])) > 0
+              sum by (node) (count_over_time({job="journal", syslog_identifier="systemd"} |~ `(?i)(Failed with result|Failed to start)` [10m])) > 0
             for: 0m
             labels:
               severity: warning
