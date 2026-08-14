@@ -233,8 +233,10 @@ spec:
     #     CRS *rule* via APPSEC_RULES (NOT the crowdsecurity/appsec-crs collection), so the
     #     collection's banning scenario `crowdsec-appsec-outofband` is absent — CRS can only
     #     ALERT, never ban, while we tune false positives. Promote CRS to inband-ban later.
-    # Wired to seerr only for now via the crowdsec-appsec middleware (immich excluded — large
-    # uploads would be body-inspected). Real client IP now reaches the engine (Traefik ETP=Local).
+    # Wired to seerr and home-assistant via the crowdsec-appsec middleware — the two publicly
+    # resolvable routes that are NOT excluded (immich is: large uploads would be body-inspected).
+    # home-assistant is the one that most needs it: it is deliberately internet-exposed and
+    # fronts locks/cameras/presence. Real client IP reaches the engine (Traefik ETP=Local).
     appsec:
       enabled: true
       # Scrape the appsec component's Prometheus endpoint (port 6060) so cs_appsec_*

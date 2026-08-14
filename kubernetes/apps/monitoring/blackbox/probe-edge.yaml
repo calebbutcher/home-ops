@@ -1,7 +1,7 @@
 ---
 # Edge probes — every ingress host, through Traefik, over TLS.
 #
-# One probe per hostname (32 of them, including aliases). Aliases are NOT deduplicated
+# One probe per hostname (33 of them, including aliases). Aliases are NOT deduplicated
 # to the app behind them on purpose: cert-manager issues a SEPARATE certificate per
 # hostname here (verified — grafana.int.nerdbox.dev's leaf carries exactly one SAN),
 # and each host is its own Traefik router. seerr alone answers to five names, and any
@@ -44,6 +44,7 @@ spec:
         - https://gitea.int.nerdbox.dev
         - https://grafana.int.nerdbox.dev
         - https://ha.int.nerdbox.dev
+        - https://ha.nerdbox.dev
         - https://immich.int.nerdbox.dev
         - https://immich.nerdbox.dev
         - https://it-tools.int.nerdbox.dev

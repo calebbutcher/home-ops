@@ -55,8 +55,13 @@ spec:
 # through externalTrafficPolicy: Local is working end to end.
 #
 # Attach ALONGSIDE crowdsec-bouncer (IP reputation, which stays first). Referenced as
-# `crowdsec-crowdsec-appsec@kubernetescrd`. Wired to seerr only — see the HelmRelease for
-# why immich (the only other publicly-resolvable route) is deliberately excluded.
+# `crowdsec-crowdsec-appsec@kubernetescrd`. Wired to seerr and home-assistant — see the
+# HelmRelease for why immich (the third publicly-resolvable route) is deliberately excluded.
+#
+# ⚠️ home-assistant is internet-exposed and is the route where a false positive hurts most —
+# a 403 on the companion app reads as "my house is broken", not "the WAF fired". It fails open
+# on AppSec being down/erroring, but NOT on a rule match. First move when triaging: drop the
+# appsec middleware from that Ingress, then check `cscli alerts list` (kind `waf`).
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:

@@ -7,32 +7,64 @@ metadata:
   annotations:
     # CNAME to the single self-healing ingress record (see the Traefik Service)
     # rather than a second A record, so a Traefik IP change moves one record.
+    # NOTE: this only governs the INTERNAL name. external-dns is hard-filtered to
+    # `domainFilters: [int.nerdbox.dev]`, so it neither creates nor touches the bare
+    # ha.nerdbox.dev record — that one is a manual Cloudflare A record to the WAN IP,
+    # DNS-only (grey cloud), exactly like immich/seerr. Nothing in-cluster can change it.
     external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    # CrowdSec bouncer (IP reputation) — the enforcement half of HA's CrowdSec coverage; the
-    # detection half is the home-assistant acquisition + crowdsecurity/home-assistant
-    # collection in the CrowdSec HelmRelease.
+    # HA is DELIBERATELY INTERNET-EXPOSED (ha.nerdbox.dev, for away-from-home access), which
+    # makes it the highest-value target in the cluster — it fronts locks, cameras and presence.
+    # It therefore carries the full edge stack, the same chain as seerr and one step beyond
+    # immich:
     #
-    # Be honest about what this does TODAY: ha.int.nerdbox.dev has no public DNS record and
-    # the bouncer trusts all of RFC1918, so for the LAN clients that actually use HA it is
-    # inert. It earns its keep on the spoofed-Host path (anything can reach the public IP with
-    # `Host: ha.int.nerdbox.dev` — DNS is not the boundary here) and by enforcing the shared
-    # decision pool: the ~39k CAPI/firehol bans plus any local ban, including ones HA's own
-    # brute-force scenario now creates.
+    #   security-headers → rate-limit → crowdsec-bouncer → crowdsec-appsec
     #
-    # No traefik-rate-limit here, unlike the other bouncer-protected routes: HA holds a
-    # long-lived websocket per client and the companion app polls hard, so a 50 req/s ceiling
-    # is a real risk of breaking the app for no benefit on a LAN-only host.
-    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd
+    #  * rate-limit    — 50 req/s avg, 100 burst, per client IP. Safe for the companion app:
+    #                    Traefik's rateLimit counts the websocket UPGRADE request, not traffic
+    #                    on the established socket, so a persistent connection costs 1.
+    #  * bouncer       — IP reputation. Enforces the shared decision pool (~39k CAPI/firehol
+    #                    bans) plus local bans, including ones HA's own brute-force scenario
+    #                    now raises (see the home-assistant acquisition in the CrowdSec
+    #                    HelmRelease — that detection is what makes this route self-defending).
+    #  * appsec        — in-band WAF: vpatch CVE signatures + generic scanner rules 403 the
+    #                    live request; OWASP CRS runs out-of-band, detect-only. Fails OPEN
+    #                    (crowdsecAppsecFailureBlock/UnreachableBlock are false), so an AppSec
+    #                    outage cannot lock you out of your own house — but a false-positive
+    #                    in-band match WILL 403. If the companion app starts failing after a
+    #                    deploy, drop `crowdsec-crowdsec-appsec@kubernetescrd` from this list
+    #                    first and check `cs_appsec_block_total` / `cscli alerts list` (kind
+    #                    `waf`) before blaming HA.
+    #
+    # NO authentik forward-auth, for the same reason immich has none: it challenges/redirects,
+    # which breaks the HA companion app and the REST/webhook API. HA's own login + MFA is the
+    # authentication boundary here, so MFA on every HA account is not optional.
+    #
+    # RFC1918 is trusted by both the bouncer and the AppSec middleware, so none of this touches
+    # LAN clients on ha.int.nerdbox.dev — it applies to the public path only.
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-rate-limit@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd,crowdsec-crowdsec-appsec@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
+    # Both names on one cert (DNS-01, so the internal name is issuable too). Adding the bare
+    # name here is what triggers cert-manager to re-issue with both SANs.
     - hosts:
         - ha.int.nerdbox.dev
+        - ha.nerdbox.dev
       secretName: home-assistant-tls
   rules:
     - host: ha.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: home-assistant
+                port:
+                  number: 8123
+    - host: ha.nerdbox.dev
       http:
         paths:
           - path: /
