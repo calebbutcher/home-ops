@@ -185,13 +185,33 @@ spec:
       # PVCs bound it to k3s-worker-02, and it could not have rescheduled if that node
       # had been lost.
       #
-      # ⚠️ storageClassName is immutable on a bound PVC, so Helm cannot migrate the
-      # existing crowdsec-config-pvc / crowdsec-db-pvc in place. After this reconciles:
-      # scale the LAPI to 0, delete both PVCs, scale back up and let the chart recreate
-      # them on Longhorn. Safe to do because the contents are self-healing — hub content
-      # re-downloads, console enrollment re-runs idempotently from the ENROLL secret,
-      # local_api_credentials.yaml regenerates, and bouncer keys now live in Postgres
-      # with the Traefik bouncer re-registering from BOUNCER_KEY_traefik.
+      # ⚠️ HISTORICAL — how this class was changed, and the ordering that is NOT optional.
+      # storageClassName is immutable on a bound PVC, and Helm applies PVCs server-side as
+      # part of the upgrade. So the old local-path claims had to be deleted BEFORE this
+      # value could land, not after: with them still bound the upgrade fails with
+      # "spec is immutable after creation except resources.requests ..." and helm-controller
+      # rolls the WHOLE release back — taking the db_config change above with it, which is
+      # exactly what happened on the first attempt (release v28→v30).
+      #
+      # The working order, should either class ever change again:
+      #   flux suspend helmrelease crowdsec -n crowdsec
+      #   kubectl scale -n crowdsec deploy/crowdsec-lapi --replicas=0
+      #   kubectl delete pvc -n crowdsec crowdsec-config-pvc crowdsec-db-pvc
+      #   flux resume helmrelease crowdsec -n crowdsec
+      # Suspend/resume rather than a manual helm rollback or patch — fighting
+      # helm-controller's field manager causes SSA conflicts (see the mTLS migration notes).
+      #
+      # Recreating the volumes empty is safe: hub content re-downloads, console enrollment
+      # re-runs idempotently from the ENROLL secret, local_api_credentials.yaml regenerates,
+      # and bouncer keys live in Postgres with the Traefik bouncer re-registering from
+      # BOUNCER_KEY_traefik.
+      #
+      # ⚠️ One thing that does NOT self-heal: agents and appsec that were connected during
+      # the swap hold a stale session and silently never re-register against the new, empty
+      # machines table — pods stay Ready, logs show nothing after one "connection refused",
+      # and they simply stop heartbeating. Check `cscli machines list` covers every agent
+      # pod IP plus the appsec, and `kubectl delete pod` any that are missing. Only an issue
+      # when the DATABASE is replaced; an ordinary LAPI restart keeps the rows.
       persistentVolume:
         data:
           storageClassName: longhorn
