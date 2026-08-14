@@ -179,14 +179,42 @@ spec:
           # healthy, so only the CrowdSecIngestionStalled alert (added alongside this) catches
           # a recurrence. Polling instead of inotify is the documented fix for symlinked logs.
           poll_without_inotify: true
+        # Home Assistant's own failed-auth log. Unlike Authentik (see below), HA DOES write
+        # auth failures to stdout — `homeassistant.components.http.ban` logs a WARNING per
+        # invalid-auth request — so a log-based parser has something real to match. The
+        # `program: home-assistant` label is what selects crowdsecurity/home-assistant-logs
+        # (its filter is `evt.Parsed.program in ['home-assistant', 'hass']`).
+        #
+        # HA colourises stdout with ANSI escapes (`^[[33m...^[[0m` around every line) and the
+        # hub grok is unanchored, so it matches through them — verified with `cscli explain`
+        # on a real captured line, which produced source_ip + log_type=home-assistant_failed_auth.
+        #
+        # The extracted IP is the REAL client, not the Traefik pod: HA's configuration.yaml
+        # sets `http.use_x_forwarded_for` with the node + pod CIDRs in `trusted_proxies`. If
+        # that block is ever removed, this acquisition silently starts attributing every
+        # failure to a 10.42.x pod IP (whitelisted below) and becomes a no-op.
+        - namespace: home-assistant
+          podName: home-assistant-*
+          program: home-assistant
+          poll_without_inotify: true
         # NOTE: no Authentik acquisition. Authentik writes auth events to its DB, not stdout
         # (its logs are only authentik.asgi request logs), so a log-based CrowdSec parser has
         # nothing to match — SSO brute-force is handled by Authentik's own Reputation policy.
       env:
         # HTTP attack scenarios (traefik + base) + the L7 DoS collection (http-dos — its 4
-        # scenarios run in simulation first, see above).
+        # scenarios run in simulation first, see above) + Home Assistant brute-force.
+        #
+        # Collections are installed by the image entrypoint on every agent start, so this env
+        # var IS the durable install — nothing here depends on a `cscli collections install`
+        # surviving a pod restart (the agent's config dir is an EmptyDir and is wiped on any
+        # reboot/rollout). Changing this value rolls the DaemonSet, which is also what picks
+        # up the acquis.yaml above.
+        #
+        # crowdsecurity/home-assistant = the home-assistant-logs parser + the home-assistant-bf
+        # scenario (capacity 5 / leakspeed 10s / blackhole 5m, remediation: true → a real ban
+        # decision that every bouncer-protected ingress then enforces, not just HA's).
         - name: COLLECTIONS
-          value: "crowdsecurity/traefik crowdsecurity/base-http-scenarios crowdsecurity/http-dos"
+          value: "crowdsecurity/traefik crowdsecurity/base-http-scenarios crowdsecurity/http-dos crowdsecurity/home-assistant"
       metrics:
         serviceMonitor:
           enabled: true
