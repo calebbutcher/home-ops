@@ -51,6 +51,22 @@ spec:
       storageMinimalAvailablePercentage: 15
       # Rebuild a lost replica promptly (5 min) rather than the 1h default.
       replicaReplenishmentWaitInterval: 300
+      # Keep volume engines in step with the manager. Upgrading the chart only
+      # rolls the manager/CSI pods — every existing volume keeps running the OLD
+      # engine until told otherwise, so after the 1.12.0 -> 1.12.1 bump all 42
+      # volumes sat on v1.12.0 (refCount 145) while v1.12.1 sat unused at 0.
+      # That drift is silent and grows with every upgrade.
+      #
+      # 0 (the chart default) disables automatic upgrades. 1 lets Longhorn
+      # live-upgrade healthy volumes itself, at most one per node at a time;
+      # degraded volumes are skipped until they recover, and RWO volumes upgrade
+      # without detaching. Consequence to be aware of: a future chart bump now
+      # rolls engines on its own rather than waiting for a separate decision —
+      # that is the point, but it depends on every worker carrying the multipath
+      # blacklist from the `longhorn` Ansible role: an engine upgrade
+      # detaches/reattaches volumes, and multipathd claiming the freed iSCSI LUN
+      # is exactly what stranded gitea and n8n on worker-06 (PR #341).
+      concurrentAutomaticEngineUpgradePerNodeLimit: 1
     longhornUI:
       replicas: 1
     # The UI is exposed by our own Ingress (ingress.yaml) rather than the chart's,
