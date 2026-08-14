@@ -1,0 +1,17 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: crowdsec-postgres
+  namespace: crowdsec
+spec:
+  # 6-field cron (seconds first); daily at 08:00. Every earlier hour is taken —
+  # authentik 03:00, n8n + immich 04:00, paperless 05:00, gitea 06:00, tandoor 07:00 —
+  # so the clusters do not contend for RustFS bandwidth at the same minute.
+  schedule: "0 0 8 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: crowdsec-postgres
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

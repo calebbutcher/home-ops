@@ -1,0 +1,12 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# NOTE: no top-level transformers (namespace/commonLabels) — they would rewrite the
+# .sops.yaml secret's metadata and corrupt the SOPS MAC, after which Flux fails to
+# decrypt while the `sops` CLI still works. Every manifest sets its own namespace.
+resources:
+  - cnpg-rustfs-creds.sops.yaml
+  - objectstore.yaml
+  - cluster.yaml
+  - scheduledbackup.yaml
+  - networkpolicy.yaml
