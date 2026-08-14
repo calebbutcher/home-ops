@@ -10,7 +10,21 @@ metadata:
     external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd
+    # CrowdSec bouncer (IP reputation) — the enforcement half of HA's CrowdSec coverage; the
+    # detection half is the home-assistant acquisition + crowdsecurity/home-assistant
+    # collection in the CrowdSec HelmRelease.
+    #
+    # Be honest about what this does TODAY: ha.int.nerdbox.dev has no public DNS record and
+    # the bouncer trusts all of RFC1918, so for the LAN clients that actually use HA it is
+    # inert. It earns its keep on the spoofed-Host path (anything can reach the public IP with
+    # `Host: ha.int.nerdbox.dev` — DNS is not the boundary here) and by enforcing the shared
+    # decision pool: the ~39k CAPI/firehol bans plus any local ban, including ones HA's own
+    # brute-force scenario now creates.
+    #
+    # No traefik-rate-limit here, unlike the other bouncer-protected routes: HA holds a
+    # long-lived websocket per client and the companion app polls hard, so a 50 req/s ceiling
+    # is a real risk of breaking the app for no benefit on a LAN-only host.
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:

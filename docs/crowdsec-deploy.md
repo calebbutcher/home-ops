@@ -18,10 +18,26 @@ Internet ──(port-forward :443)──▶ MetalLB VIP ──▶ Traefik (2 rep
                                                      ▼        checks source IP vs LAPI decisions → 403 if banned
                                                 Ingress ──▶ App
    CrowdSec Agent (DaemonSet) ◀─ reads /var/log/containers/traefik-*_traefik_*.log
-        │  parses w/ crowdsecurity/traefik, runs HTTP scenarios
+        │                      ◀─ reads /var/log/containers/home-assistant-*_home-assistant_*.log
+        │  parses w/ crowdsecurity/traefik + crowdsecurity/home-assistant, runs scenarios
         ▼
    CrowdSec LAPI (Deployment) ── stores decisions, pulls community blocklist (CAPI)
 ```
+
+**Application log sources.** Detection only fires on logs we acquire. Two acquisitions are
+configured (`agent.acquisition[]` in the HelmRelease), both keyed by a `program:` label that
+selects the parser:
+
+| `program` | Source | Collection | Detects |
+|-----------|--------|------------|---------|
+| `traefik` | Traefik JSON access logs | `crowdsecurity/traefik` + `base-http-scenarios` + `http-dos` | HTTP probing, crawling, CVE paths, L7 DoS (simulation) |
+| `home-assistant` | HA container stdout | `crowdsecurity/home-assistant` | Failed HA logins / invalid-auth requests (`home-assistant-bf`) |
+
+HA is a genuine log source (unlike Authentik, which logs auth events to its DB — see Notes):
+`homeassistant.components.http.ban` writes one WARNING per invalid-auth request, and HA's
+`http.use_x_forwarded_for` + `trusted_proxies` config means the line carries the **real client
+IP**, not the Traefik pod IP. Removing that config from `configuration.yaml` silently turns this
+acquisition into a no-op (every failure would attribute to a whitelisted `10.42.x` pod IP).
 
 Because traffic is a **direct port-forward to MetalLB** (no upstream proxy), Traefik sees the
 real client source IP, so no `forwardedHeaders.trustedIPs` gymnastics are needed. RFC1918/LAN
@@ -35,7 +51,7 @@ ranges are whitelisted on **both** sides: the agent won't raise decisions for th
 |------|------|
 | `namespace.yaml` | `crowdsec` namespace. |
 | `helmrepository.yaml` | `crowdsec` HelmRepository (`https://crowdsecurity.github.io/helm-charts`). |
-| `helmrelease.yaml` | CrowdSec chart `0.24.0` — LAPI (Deployment) + agent (DaemonSet), `container_runtime: containerd`, Traefik acquisition, LAN whitelist, ServiceMonitors. |
+| `helmrelease.yaml` | CrowdSec chart `0.24.0` — LAPI (Deployment) + agent (DaemonSet), `container_runtime: containerd`, Traefik + Home Assistant acquisitions, LAN whitelist, ServiceMonitors. |
 | `secret.sops.yaml` | `crowdsec-bouncer-key` (crowdsec ns) → `BOUNCER_KEY_traefik` env; LAPI auto-registers the `traefik` bouncer with this key. |
 | `middleware.yaml` | `crowdsec-bouncer` Traefik Middleware (defined, not yet attached). |
 
@@ -59,9 +75,9 @@ kubectl -n crowdsec exec deploy/crowdsec-lapi -- cscli bouncers list
 kubectl -n crowdsec exec deploy/crowdsec-lapi -- cscli decisions list
 kubectl -n crowdsec exec deploy/crowdsec-lapi -- cscli alerts list
 
-# Agent: Traefik acquisition parsing lines, collections installed
+# Agent: acquisitions parsing lines, collections installed
 kubectl -n crowdsec exec ds/crowdsec-agent -- cscli metrics
-kubectl -n crowdsec exec ds/crowdsec-agent -- cscli collections list   # crowdsecurity/traefik enabled
+kubectl -n crowdsec exec ds/crowdsec-agent -- cscli collections list   # traefik + home-assistant enabled
 
 # Traefik plugin loaded + connected to LAPI (should log no auth errors)
 kubectl -n traefik logs deploy/traefik | grep -i crowdsec
@@ -69,6 +85,39 @@ kubectl -n traefik logs deploy/traefik | grep -i crowdsec
 
 Let observe mode run long enough to confirm normal usage (Immich upload, `*arr` API polling,
 Authentik logins) does **not** raise decisions against legitimate clients.
+
+### Verify a log-based acquisition end to end
+
+`cscli explain` replays a real captured line through the whole pipeline and prints which parser
+matched and what it extracted. This is the only reliable way to confirm an app acquisition
+works — a stuck or non-matching acquisition looks completely healthy from the outside (all
+targets UP, agents `Running`, heartbeats ✔️). Home Assistant as the worked example:
+
+```sh
+# 1. Generate one invalid-auth request. An unauthenticated GET is enough — HA raises
+#    HTTPUnauthorized and its ban middleware logs the WARNING, no bogus token needed.
+#    It does NOT self-ban: login_attempts_threshold defaults to -1, so this is safe
+#    to repeat.
+curl -s -o /dev/null -w '%{http_code}\n' https://ha.int.nerdbox.dev/api/   # expect 401
+
+# 2. Replay the resulting line through the pipeline, on the agent co-located with the HA pod.
+#    HA runs with hostNetwork on one node, so pick that node's agent:
+#      kubectl -n home-assistant get pod -o wide   → NODE
+#      kubectl -n crowdsec get pod -o wide         → the crowdsec-agent on that NODE
+AGENT=crowdsec-agent-xxxxx
+kubectl -n crowdsec exec "$AGENT" -- sh -c '
+  grep "http.ban" /var/log/containers/home-assistant-*_home-assistant_*.log | tail -1 |
+  cscli explain --type containerd --labels program:home-assistant -f - -v'
+```
+
+Expect `🟢 crowdsecurity/home-assistant-logs` in `s01-parse`, creating
+`evt.Meta.log_type: home-assistant_failed_auth` and an `evt.Parsed.source_ip` that is the **real
+client IP**. A LAN client then ends in `parser success, ignored by whitelist (private ranges
+(RFC1918))` — that is the correct outcome, not a failure; only non-RFC1918 sources can reach the
+`home-assistant-bf` scenario.
+
+> HA colourises stdout (`^[[33m…^[[0m` wraps every line). The hub grok is unanchored so it
+> matches straight through the escapes — confirmed, no `--log-no-color` needed.
 
 ## Enforce
 
@@ -97,7 +146,10 @@ Files: `kubernetes/apps/{immich/ingress.yaml, uptime-kuma/ingress.yaml,
 media/seerr/ingress.yaml, media/radarr/ingress.yaml, media/sonarr/ingress.yaml,
 media/tracearr/ingress.yaml}` — note `radarr`/`sonarr` each have **two** Ingresses (UI + open
 `-api`); annotate both. `immich` intentionally keeps no forward-auth (mobile app), so it gets
-the bouncer only.
+the bouncer only. `home-assistant` likewise: it has its own login and the companion app must
+reach it unauthenticated at the edge, so it gets `security-headers,bouncer` — and deliberately
+**no** `traefik-rate-limit` (HA holds a long-lived websocket per client; a 50 req/s ceiling
+risks breaking the app for no gain on a LAN-only host).
 
 ### Test enforcement
 
@@ -216,3 +268,24 @@ kubectl -n crowdsec exec deploy/crowdsec-lapi -- cscli decisions list           
   [CrowdSec console](https://app.crowdsec.net/) for dashboards via `cscli console enroll <key>`.
 - **Persistence**: LAPI uses two small `local-path` PVCs (decision DB + machine creds). On a
   fresh volume the `traefik` bouncer re-registers automatically from `BOUNCER_KEY_traefik`.
+- **Never install collections with `cscli` on an agent.** The agent's config directory is an
+  `EmptyDir`, so anything installed by hand is wiped by the next pod restart, rollout or node
+  reboot — and the loss is silent (the scenario just stops existing; no alert covers it).
+  `agent.env.COLLECTIONS` in the HelmRelease is the durable install: the image entrypoint runs
+  the install on every start. `cscli collections install` is still the right tool for a
+  throwaway test, e.g. to run `cscli explain` against a hub parser before committing to it.
+- **Adding a new app log source** is three things, all in git: an `agent.acquisition[]` entry
+  (`namespace` + `podName` glob + a `program:` label matching the hub parser's filter, plus
+  `poll_without_inotify: true` — see the log-rotation gotcha), the collection appended to
+  `agent.env.COLLECTIONS`, and the bouncer middleware on that app's Ingress so a resulting
+  decision is actually enforced. Verify with `cscli explain` (above) before trusting it.
+- **Not every app can be a log source.** Authentik was tried and reverted: it writes auth
+  events to its **database**, and its stdout carries only `authentik.asgi` request logs, so no
+  parser can distinguish a failed password from a success. Home Assistant works precisely
+  because it logs the failure itself. Check for a real failed-auth line on stdout *before*
+  wiring an acquisition — dead config is worse than no config.
+- **Monitoring gap**: `CrowdSecIngestionStalled` sums `cs_parser_hits_total` across all
+  acquisitions, so it fires only if *everything* stops. Traefik's volume dwarfs HA's, so an
+  HA-specific acquisition wedge would not trip it. If HA detection ever becomes load-bearing,
+  add a per-source rule — but note the `source` label embeds pod name + container ID and
+  churns on every rollout.
