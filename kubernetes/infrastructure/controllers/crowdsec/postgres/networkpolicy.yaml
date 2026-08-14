@@ -1,0 +1,62 @@
+---
+# Restrict who can open a socket to the CrowdSec Postgres cluster.
+#
+# SCOPE: deliberately not a namespace-wide default-deny. The aim is to stop
+# *cross-namespace* lateral movement to the data — a compromised app in another
+# namespace should not be able to reach this database — without taking on the
+# breakage risk of allow-listing every flow in the crowdsec namespace. Only the
+# Postgres pods are selected; the LAPI, agents and appsec are untouched. Egress is
+# not restricted at all (CNPG needs it to push barman backups to RustFS).
+#
+# Mirrors the policy already proven on the app-namespace clusters; see
+# kubernetes/apps/paperless/networkpolicy.yaml for the verification notes (policies
+# ARE enforced here via k3s's kube-router controller, and kubelet health probes are
+# not subject to ingress rules).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-restrict-ingress
+  namespace: crowdsec
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: crowdsec-postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    # Anything in this namespace: the CrowdSec LAPI itself, plus the other Postgres
+    # instances. All three replicas match the selector above, so they must be allowed
+    # to reach each other or streaming replication stops.
+    - from:
+        - podSelector: {}
+    # The CloudNativePG operator, which polls each instance manager and drives
+    # failover. Not pinned to a port on purpose: the operator is trusted
+    # infrastructure, and pinning it would turn a future CNPG change into a cluster
+    # stuck in an unknown state for no real security gain.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+    # Prometheus scraping the built-in exporter via the CNPG PodMonitor. Without this,
+    # the Postgres dashboards and prometheusrule-postgres.yaml go blind — and an absent
+    # metric is silence, not an alert.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9187
+    # Uptime Kuma's TCP port monitors, which probe Postgres services from their own
+    # namespace as an independent liveness check. Applied uniformly to every Postgres
+    # even where no monitor exists today: a port monitor is a short-lived connect()
+    # that never shows up in a point-in-time sample of ESTABLISHED connections, which
+    # is exactly how an earlier version of this policy was verified as "no
+    # cross-namespace clients" while it was about to break two live monitors.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: uptime-kuma
+      ports:
+        - protocol: TCP
+          port: 5432

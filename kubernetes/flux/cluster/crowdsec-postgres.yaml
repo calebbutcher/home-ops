@@ -1,0 +1,38 @@
+---
+# The CrowdSec Postgres cluster is applied in its own Flux Kustomization, separate
+# from the `infrastructure` set, because its CRD (postgresql.cnpg.io/Cluster) is
+# installed by the cloudnative-pg HelmRelease — which lives in that same set, as does
+# the crowdsec HelmRelease this database serves. Keeping the Cluster CR in
+# `infrastructure` makes the whole kustomization fail dry-run ("no matches for kind
+# Cluster") until the operator is up: a deadlock, since the operator is inside the
+# set that just stalled. Same failure mode as the tailscale Connector; see
+# tailscale-connector.yaml.
+#
+# dependsOn infrastructure → the CNPG operator installs (and registers the CRD) first;
+# retryInterval lets this converge quickly once the CRD exists. Isolated here it can
+# never re-block `infrastructure` or `apps`.
+#
+# NOTE the ordering consequence: `infrastructure` does NOT depend on this, so on a
+# from-scratch bootstrap the CrowdSec LAPI comes up before Postgres exists and
+# crashloops until this reconciles. That self-heals via the HelmRelease's install
+# remediation; chaining the crowdsec HelmRelease behind this would be more churn than
+# the failure mode is worth.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: crowdsec-postgres
+  namespace: flux-system
+spec:
+  interval: 30m
+  retryInterval: 2m
+  path: ./kubernetes/infrastructure/controllers/crowdsec/postgres
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    - name: infrastructure
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age

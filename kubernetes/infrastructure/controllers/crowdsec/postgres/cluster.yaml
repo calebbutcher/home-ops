@@ -1,0 +1,94 @@
+---
+# Postgres for the CrowdSec LAPI, replacing the embedded SQLite database.
+#
+# WHY: on 2026-08-14 the LAPI wedged for ~4 minutes in a SQLite lock spiral — every
+# DB operation blocked for the full 100s busy timeout, agent heartbeats returned 500,
+# and the Traefik bouncer's decision stream died (isCrowdsecStreamHealthy:false),
+# leaving edge IP-reputation enforcement running on a stale cache. It self-recovered,
+# but the cause is structural: db_config.type sqlite with use_wal false is
+# rollback-journal mode (single writer, readers block writers) under ~37.5k decisions,
+# 8 agents heartbeating, bulk CAPI blocklist writes (+15000 IPs in one transaction),
+# and Prometheus `level: full` counting the whole decisions table every scrape.
+# Postgres MVCC removes that failure class: bulk inserts stop blocking the metrics
+# reads and the metrics reads stop blocking heartbeats.
+#
+# ⚠️ This CR is deliberately NOT referenced by ../kustomization.yaml. Its CRD comes
+# from the cloudnative-pg HelmRelease, which lives in the SAME `infrastructure` Flux
+# Kustomization as the crowdsec HelmRelease — a CR next to the HelmRelease that owns
+# its CRD makes the whole set fail dry-run ("no matches for kind Cluster") and stall,
+# with the operator that would register the CRD trapped inside the stalled set. It is
+# applied by its own Flux Kustomization instead; see
+# kubernetes/flux/cluster/crowdsec-postgres.yaml and the tailscale-connector precedent.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: crowdsec-postgres
+  namespace: crowdsec
+spec:
+  # HA: primary + 2 streaming replicas. Anti-affinity is `required`, so the three
+  # instances land on three different workers and the loss of any one node is a
+  # switchover (~seconds) rather than an outage. Matches every other CNPG cluster
+  # in this repo; see docs/cnpg-ha.md.
+  instances: 3
+  primaryUpdateMethod: switchover
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+  imageName: ghcr.io/cloudnative-pg/postgresql:17
+  storage:
+    # 8Gi is generous: the SQLite database this replaces is ~19MB, and CrowdSec's
+    # decisions table is bounded by CAPI blocklist size plus a 7-day alert flush.
+    size: 8Gi
+    # longhorn-single (1 replica), NOT the 2-replica `longhorn` default: Postgres
+    # already replicates at the app layer, so three instances on this class give
+    # three independent copies on three nodes. The 2-replica class would write six
+    # copies of the same data for no added safety. This is exactly the case the
+    # class was created for — see controllers/longhorn/storageclass.yaml.
+    #
+    # It also gets the LAPI's datastore off local-path, which pins a pod to one
+    # node and cannot reschedule when that node is lost.
+    storageClass: longhorn-single
+  # Emits the per-instance metrics on :9187 and creates the PodMonitor that scrapes
+  # them. Alerts live in
+  # kubernetes/apps/monitoring/kube-prometheus-stack/prometheusrule-postgres.yaml.
+  monitoring:
+    enablePodMonitor: true
+    # The barman-cloud plugin exports its backup timestamps
+    # (barman_cloud_cloudnative_pg_io_*) on this same :9187 endpoint with NO labels
+    # of their own — not even a cluster name. Copy the pod's cnpg.io/cluster label
+    # so the series identify themselves.
+    #
+    # ⚠️ Target label is `cnpg_cluster`, NOT `cluster`: the CNPG exporter already
+    # sets its own `cluster` label on cnpg_collector_up, and a relabeling that
+    # collides gets renamed to `exported_cluster`, quietly breaking any rule that
+    # matches on it.
+    podMonitorRelabelings:
+      - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+        targetLabel: cnpg_cluster
+        action: replace
+  # Backups are NOT optional here, even though CrowdSec's data is largely derived.
+  # kubernetes/apps/backup-verify/cronjob-postgres.yaml discovers every CNPG cluster
+  # in the cluster and restores it from s3://postgres-backups/<serverName>/; a cluster
+  # with no barman plugin falls through to serverName=<cluster name>, finds no archive,
+  # and turns the weekly restore verification red.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: crowdsec-postgres-store
+  bootstrap:
+    # Bootstrapped empty on purpose — no migration from the SQLite database. Of the
+    # ~37.5k decisions it holds, ~24.7k come from CAPI and ~13.6k from the community
+    # blocklists (both re-pulled on startup) and only ~60 are locally generated, all
+    # expiring within hours. Agents re-register via their mTLS certs, the Traefik
+    # bouncer from BOUNCER_KEY_traefik, and alerts are 7-day retention anyway.
+    initdb:
+      database: crowdsec
+      owner: crowdsec
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 1Gi

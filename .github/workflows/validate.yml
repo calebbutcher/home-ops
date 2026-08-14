@@ -72,6 +72,7 @@ jobs:
           TARGETS="
           kubernetes/apps
           kubernetes/infrastructure
+          kubernetes/infrastructure/controllers/crowdsec/postgres
           kubernetes/infrastructure/controllers/longhorn/config
           kubernetes/infrastructure/controllers/tailscale-operator/config
           "
