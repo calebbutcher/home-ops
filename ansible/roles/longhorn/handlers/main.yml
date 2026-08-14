@@ -1,0 +1,9 @@
+---
+# `multipathd reconfigure` re-reads /etc/multipath.conf and drops any map that
+# the new blacklist now excludes, which is what actually releases the device.
+# Preferred over restarting the service: a restart would tear down every map at
+# once, and on a node already serving Longhorn volumes there is no reason to
+# disturb maps we are not blacklisting.
+- name: Reconfigure multipathd
+  ansible.builtin.command: multipathd reconfigure
+  changed_when: true

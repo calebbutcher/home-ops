@@ -11,6 +11,7 @@ resources:
   - helmrelease.yaml
   - storageclass.yaml
   - ingress.yaml
+  - networkpolicy.yaml
 # config/ (RecurringJob) is applied by the `longhorn-jobs` Flux Kustomization
 # (dependsOn infrastructure) — its CRD is installed by the HelmRelease above, so it
 # can't share this dry-run/apply. See kubernetes/flux/cluster/longhorn-jobs.yaml.

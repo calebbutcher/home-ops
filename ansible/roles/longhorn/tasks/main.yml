@@ -25,6 +25,44 @@
     enabled: true
     state: started
 
+# Longhorn v1 volumes are presented to the node as iSCSI LUNs, which multipathd
+# happily claims: it wraps /dev/sdX in a device-mapper map, takes an exclusive
+# open on it, and from then on the CSI plugin cannot stage the volume — fsck
+# reports "<device> is in use" and mount(2) fails EBUSY with the misleading
+# "already mounted or mount point busy". The pod sits in ContainerCreating
+# forever. This is a race, so it only bites the node that loses it: it took out
+# gitea and n8n on worker-06 during the Longhorn 1.12.1 upgrade, when the
+# volumes detached/reattached and multipathd grabbed the new device nodes first.
+#
+# Nothing in this cluster uses real multipath, so blacklist Longhorn's LUNs
+# rather than masking multipathd (open-iscsi pulls it in, and other tooling may
+# expect the daemon present). Longhorn's iSCSI target identifies as IET /
+# VIRTUAL-DISK, which is specific enough to leave any genuine SAN path alone.
+- name: Check whether multipathd is installed
+  ansible.builtin.stat:
+    path: /lib/systemd/system/multipathd.service
+  register: longhorn_multipathd_unit
+
+- name: Blacklist Longhorn iSCSI LUNs so multipathd cannot claim them
+  ansible.builtin.blockinfile:
+    path: /etc/multipath.conf
+    create: true
+    mode: u=rw,g=r,o=r
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - longhorn"
+    block: |
+      # Longhorn v1 volumes are exposed as iSCSI LUNs (vendor IET, product
+      # VIRTUAL-DISK). multipathd claims them on (re)attach and wraps them in a dm
+      # map, so the CSI plugin cannot mount the device: fsck reports "is in use" and
+      # mount fails with EBUSY. Nothing here uses real multipath, so blacklist them.
+      blacklist {
+          device {
+              vendor "IET"
+              product "VIRTUAL-DISK"
+          }
+      }
+  when: longhorn_multipathd_unit.stat.exists
+  notify: Reconfigure multipathd
+
 - name: Resolve short device name
   ansible.builtin.set_fact:
     longhorn_data_device_short: "{{ longhorn_data_device | basename }}"

@@ -1,0 +1,42 @@
+---
+# Restore Prometheus access to longhorn-manager's metrics.
+#
+# Longhorn 1.12.1 began shipping its own NetworkPolicies (Helm-owned, six of
+# them in longhorn-system). The `longhorn-manager` policy admits ingress only
+# from same-namespace pods carrying Longhorn's own labels — longhorn-manager,
+# longhorn-ui, longhorn-csi-plugin, longhorn-driver-deployer and the recurring
+# jobs. It has no namespaceSelector, so Prometheus in the `monitoring` namespace
+# is denied on :9500 and every longhorn-backend scrape target goes down.
+#
+# The failure mode is nasty because Longhorn itself stays perfectly healthy:
+# volumes attach, replicas rebuild, backups run. Only the metrics vanish, which
+# blanks every Longhorn dashboard and fires LonghornManagerDown — it reads as a
+# total storage outage when nothing is actually wrong. That is precisely what
+# happened on the 1.12.0 -> 1.12.1 upgrade (PR #332).
+#
+# NetworkPolicies are additive (a pod's allowed traffic is the union of every
+# policy selecting it), so this grants the one exception Prometheus needs while
+# leaving the chart's isolation intact for everything else. Deliberately NOT
+# setting networkPolicies.enabled=false in the HelmRelease — that would drop the
+# new isolation for all Longhorn components just to unblock one scrape.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: longhorn-manager-allow-monitoring
+  namespace: longhorn-system
+spec:
+  podSelector:
+    matchLabels:
+      app: longhorn-manager
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          # The manager's API/metrics port, fronted by the longhorn-backend
+          # Service that metrics.serviceMonitor in helmrelease.yaml scrapes.
+          port: 9500
