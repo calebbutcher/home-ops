@@ -121,12 +121,21 @@ client IP**. A LAN client then ends in `parser success, ignored by whitelist (pr
 
 ## Enforce
 
-The bouncer is attached to every Ingress carrying a bare `*.nerdbox.dev` host by adding it to the
-`router.middlewares` annotation (bouncer **first** — cheap IP check before any auth). Only
-`immich` and `seerr` actually have external Cloudflare DNS; the rest (`uptime`, `radarr`/`sonarr`
-+ their `-api`, `tracearr`) have no DNS but their bare routers still answer on the public IP with a
-spoofed `Host` header, so they are covered as **defense-in-depth**. Internal `*.int` routes on the
-same Ingresses are unaffected — LAN is whitelisted.
+The bouncer is attached via the `router.middlewares` annotation (bouncer **first** — cheap IP
+check before any auth). Internal `*.int` routes are unaffected either way: LAN is whitelisted.
+
+**What actually determines exposure.** Three of these routes have public Cloudflare DNS —
+`immich`, `seerr`, and `ha` (added 2026-08-14 for away-from-home access). But **DNS is not the
+boundary**, and the `.int` label is a naming convention, not a routing boundary:
+
+- Traefik matches on the `Host` header, so *any* router — `.int` or bare — answers a request
+  sent to the WAN IP with that Host. No DNS record is required to reach it.
+- Every hostname here is published in **Certificate Transparency logs** the moment Let's Encrypt
+  issues its cert. `crt.sh -q '%.int.nerdbox.dev'` returns ~38 internal names including
+  `ha.int`, `longhorn.int`, `grafana.int`. There is no obscurity to rely on.
+
+So treat the bouncer as blanket defense-in-depth on every route, and do not read "internal-only
+DNS" as protection for any of them.
 
 Routes with **no** existing middleware — set the annotation:
 
@@ -146,10 +155,36 @@ Files: `kubernetes/apps/{immich/ingress.yaml, uptime-kuma/ingress.yaml,
 media/seerr/ingress.yaml, media/radarr/ingress.yaml, media/sonarr/ingress.yaml,
 media/tracearr/ingress.yaml}` — note `radarr`/`sonarr` each have **two** Ingresses (UI + open
 `-api`); annotate both. `immich` intentionally keeps no forward-auth (mobile app), so it gets
-the bouncer only. `home-assistant` likewise: it has its own login and the companion app must
-reach it unauthenticated at the edge, so it gets `security-headers,bouncer` — and deliberately
-**no** `traefik-rate-limit` (HA holds a long-lived websocket per client; a 50 req/s ceiling
-risks breaking the app for no gain on a LAN-only host).
+the bouncer only.
+
+### `home-assistant` — the full stack
+
+HA is deliberately internet-exposed (`ha.nerdbox.dev`) and fronts locks, cameras and presence,
+so it carries every layer — the same chain as `seerr`, one step beyond `immich`:
+
+```yaml
+traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-rate-limit@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd,crowdsec-crowdsec-appsec@kubernetescrd
+```
+
+- **No Authentik forward-auth** — it challenges/redirects, which breaks the companion app and
+  the REST/webhook API (same reason `immich` has none). HA's own login **plus MFA on every
+  account** is therefore the authentication boundary. Not optional on a public route.
+- **`traefik-rate-limit` is safe here** despite the long-lived websocket: Traefik's rateLimit
+  counts the websocket *upgrade* request, not traffic on the established socket, so a persistent
+  companion-app connection costs 1 against the 50/s average.
+- **AppSec is the one that can bite.** It fails open if the component is down or errors, but a
+  false-positive in-band rule match returns a real 403 — which on this route reads as "my house
+  is broken", not "the WAF fired". First triage step is to drop
+  `crowdsec-crowdsec-appsec@kubernetescrd` from the annotation, then check
+  `cscli alerts list` (kind `waf`) and `cs_appsec_block_total`.
+- HA is also a **detection** source (see the acquisitions table above), so this route is
+  self-defending: repeated failed logins from a public IP raise `home-assistant-bf` → a ban →
+  the bouncer on this same Ingress enforces it. That loop only closes for non-RFC1918 sources,
+  which is precisely the traffic that arrives on `ha.nerdbox.dev`.
+
+The public `ha.nerdbox.dev` A record is a **manual Cloudflare record** (DNS-only / grey cloud,
+straight to the WAN IP), like `immich`/`seerr`. external-dns cannot manage it — it is hard-filtered
+to `domainFilters: [int.nerdbox.dev]` so that nothing in-cluster can write a public record.
 
 ### Test enforcement
 
@@ -175,8 +210,8 @@ default (`false`), so even a failed plugin download never takes Traefik down.
 
 CrowdSec's AppSec component (port 7422) does in-band request inspection. Deployed via
 `appsec.enabled: true` + the custom `home-ops/appsec-detect` config in the HelmRelease, behind the
-`crowdsec-appsec` Middleware (`crowdsec-appsec-service:7422`), attached to **seerr only** for now
-(immich excluded — large uploads get body-inspected). It runs in **two tiers**:
+`crowdsec-appsec` Middleware (`crowdsec-appsec-service:7422`), attached to **seerr** and
+**home-assistant** (immich excluded — large uploads get body-inspected). It runs in **two tiers**:
 
 - **In-band (enforcing): `default_remediation: ban`** over `base-config` + `vpatch-*` (CVE virtual
   patches) + `generic-*` (scanner patterns). A match **403s the live request**. These are narrow,
