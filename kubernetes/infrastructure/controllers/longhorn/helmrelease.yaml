@@ -49,6 +49,33 @@ spec:
       defaultReplicaCount: 2
       # Leave headroom on the 100G data disk.
       storageMinimalAvailablePercentage: 15
+      # Longhorn schedules replicas against a PVC's DECLARED size, not what it
+      # actually stores, and each disk only offers (97.9Gi - 30% reserved) = 68.5Gi
+      # of scheduling budget — ~411Gi across the six workers. The local-path PVC
+      # requests we are migrating were written in the no-quota era and are mostly
+      # fiction: at 395Gi scheduled the volumes were holding 41.5Gi of real data
+      # (~10%). That exhausted the budget with no node able to fit another 8Gi
+      # replica, so the tandoor Postgres re-clone stuck at "volume is currently in
+      # detached state with some un-schedulable replicas" — an out-of-space error
+      # for space that is not actually in use.
+      #
+      # 250% raises the budget to ~171Gi per disk (~1028Gi cluster-wide), which
+      # covers the rest of the local-path migration — the remaining CNPG clusters
+      # (~128Gi declared) and the monitoring TSDBs (~112Gi) — with room to spare.
+      #
+      # This is safe because over-provisioning is not the thing protecting the
+      # disk: storageMinimalAvailablePercentage above is. That guardrail measures
+      # ACTUAL free space and stops scheduling to a disk once it drops below 15%
+      # (~14.7Gi), so a disk genuinely filling up still refuses new replicas no
+      # matter how much has been promised. What this setting governs is only how
+      # much unused reservation we allow.
+      #
+      # ⚠️ The corollary is that a volume can now be scheduled onto a disk that
+      # could not hold it if every volume there grew to its declared size. Watch
+      # the Longhorn disk-usage alerts rather than assuming the declared numbers
+      # add up — and note media/sonarr-config is already at 8.04Gi of an 8Gi
+      # request, so the fiction does not hold everywhere.
+      storageOverProvisioningPercentage: 250
       # Rebuild a lost replica promptly (5 min) rather than the 1h default.
       replicaReplenishmentWaitInterval: 300
       # Keep volume engines in step with the manager. Upgrading the chart only
