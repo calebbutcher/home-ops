@@ -12,9 +12,11 @@
 #
 # Drilldown for a single cluster is "Postgres / Cluster" (uid postgres-cluster).
 #
-# Pinned to the `prometheus` datasource: every panel is a "right now" fleet
-# question and 6h << the ~2d local retention. The per-cluster dashboard is the one
-# with a $datasource switch for Thanos history.
+# $datasource defaults to `prometheus` (~2d retention, 30s resolution) and can be
+# switched to `thanos` for long-range history — same variable as
+# dashboard-cluster.yaml. The default is the local Prometheus because every panel
+# here is a "right now" fleet question and the 6h window is well inside local
+# retention; reach for Thanos when you need to look further back than ~2d.
 #
 # ⚠️ TWO LABEL VOCABULARIES. The per-instance exporter (:9187, via the PodMonitor
 # each Cluster CR enables) emits cnpg_cluster + pod + namespace. The cluster-level
@@ -73,7 +75,7 @@ data:
           "title": "Clusters",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -119,7 +121,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "count(cnpg_cluster_instances_desired)",
@@ -136,7 +138,7 @@ data:
           "title": "Clusters degraded",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 5,
@@ -186,7 +188,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "count(cnpg_cluster_ready_instances < cnpg_cluster_instances_desired) or vector(0)",
@@ -203,7 +205,7 @@ data:
           "title": "Instances down",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 10,
@@ -253,7 +255,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "count(cnpg_collector_up == 0) or vector(0)",
@@ -270,7 +272,7 @@ data:
           "title": "Worst replication lag",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 15,
@@ -326,7 +328,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max(cnpg_pg_replication_lag)",
@@ -342,7 +344,7 @@ data:
           "title": "Oldest backup",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 20,
@@ -397,7 +399,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max(time() - (max by (cnpg_cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp > 0)))",
@@ -414,7 +416,7 @@ data:
           "title": "Cluster health",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -720,7 +722,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max by (cnpg_cluster, namespace) (label_replace(cnpg_cluster_ready_instances, \"cnpg_cluster\", \"$1\", \"name\", \"(.*)\"))",
@@ -732,7 +734,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max by (cnpg_cluster) (label_replace(cnpg_cluster_instances_desired, \"cnpg_cluster\", \"$1\", \"name\", \"(.*)\"))",
@@ -744,7 +746,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max by (cnpg_cluster) (label_replace(cnpg_cluster_condition{type=\"Ready\"}, \"cnpg_cluster\", \"$1\", \"name\", \"(.*)\"))",
@@ -756,7 +758,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max by (cnpg_cluster) (label_replace(cnpg_cluster_condition{type=\"ContinuousArchiving\"}, \"cnpg_cluster\", \"$1\", \"name\", \"(.*)\"))",
@@ -768,7 +770,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max by (cnpg_cluster) (label_replace(cnpg_cluster_condition{type=\"LastBackupSucceeded\"}, \"cnpg_cluster\", \"$1\", \"name\", \"(.*)\"))",
@@ -780,7 +782,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max by (cnpg_cluster) (cnpg_pg_replication_lag)",
@@ -792,7 +794,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "time() - (max by (cnpg_cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp > 0))",
@@ -804,7 +806,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max by (cnpg_cluster) (cnpg_collector_postgres_version)",
@@ -835,7 +837,7 @@ data:
           "title": "Replication lag",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -922,7 +924,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max by (cnpg_cluster) (cnpg_pg_replication_lag)",
@@ -940,7 +942,7 @@ data:
           "title": "Connection utilisation",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 12,
@@ -1028,7 +1030,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max by (cnpg_cluster) (sum by (cnpg_cluster, pod) (cnpg_backends_total))\n  / on (cnpg_cluster) group_left()\nmax by (cnpg_cluster) (cnpg_pg_settings_setting{name=\"max_connections\"})\n  * 100",
@@ -1046,7 +1048,7 @@ data:
           "title": "WAL archive backlog",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -1133,7 +1135,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max by (cnpg_cluster) (cnpg_collector_pg_wal_archive_status{value=\"ready\"})",
@@ -1151,7 +1153,7 @@ data:
           "title": "Transactions/sec (primary)",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 12,
@@ -1230,7 +1232,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (cnpg_cluster) (\n  rate(cnpg_pg_stat_database_xact_commit{datname!=\"\"}[5m])\n    and on (pod, namespace) (cnpg_pg_replication_in_recovery == 0)\n)",
@@ -1261,7 +1263,7 @@ data:
           "title": "Database size",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -1340,7 +1342,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (cnpg_cluster) (\n  max by (cnpg_cluster, datname) (\n    cnpg_pg_database_size_bytes{datname!~\"template.*|postgres\"}\n  )\n)",
@@ -1358,7 +1360,7 @@ data:
           "title": "Backup age",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 12,
@@ -1445,7 +1447,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "time() - (max by (cnpg_cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp > 0))",
@@ -1466,7 +1468,27 @@ data:
         "database"
       ],
       "templating": {
-        "list": []
+        "list": [
+          {
+            "current": {
+              "selected": false,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "label": "Datasource",
+            "multi": false,
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "queryValue": "",
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false,
+            "type": "datasource"
+          }
+        ]
       },
       "time": {
         "from": "now-6h",
