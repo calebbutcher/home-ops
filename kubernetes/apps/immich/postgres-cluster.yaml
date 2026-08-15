@@ -43,7 +43,17 @@ spec:
   imageName: ghcr.io/tensorchord/cloudnative-vectorchord:17-0.4.3
   storage:
     size: 20Gi
-    storageClass: local-path
+    # longhorn-single (1 Longhorn replica): Postgres already replicates at the app
+    # layer (primary + 2 streaming replicas across nodes), so a 2-replica Longhorn
+    # volume would double-write for no availability gain. Longhorn buys volume
+    # mobility so a drained/dead node's instance can reschedule — which also lets the
+    # SUC agent Plan stop excluding CNPG from drains. Migrated from local-path via
+    # rolling instance re-clone (destroy each instance; CNPG rebuilds on the new class
+    # via pg_basebackup). storageClass is immutable on existing PVCs, so this manifest
+    # change only governs the new PVCs the re-clone provisions. The clone is physical,
+    # so vchord rides along unchanged — but verify the extension loads on each rebuilt
+    # instance, per the note on shared_preload_libraries below.
+    storageClass: longhorn-single
   # Immich expects superuser on its DB; this also exposes the
   # immich-postgres-superuser secret used for the one-off restore.
   enableSuperuserAccess: true
