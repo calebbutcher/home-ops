@@ -17,7 +17,15 @@ spec:
   imageName: ghcr.io/cloudnative-pg/postgresql:17
   storage:
     size: 8Gi
-    storageClass: local-path
+    # longhorn-single (1 Longhorn replica): Postgres already replicates at the app
+    # layer (primary + 2 streaming replicas across nodes), so a 2-replica Longhorn
+    # volume would double-write for no availability gain. Longhorn buys volume
+    # mobility so a drained/dead node's instance can reschedule — which also lets the
+    # SUC agent Plan stop excluding CNPG from drains. Migrated from local-path via
+    # rolling instance re-clone (destroy each instance; CNPG rebuilds on the new class
+    # via pg_basebackup). storageClass is immutable on existing PVCs, so this manifest
+    # change only governs the new PVCs the re-clone provisions.
+    storageClass: longhorn-single
   # Emits the per-instance metrics on :9187 and creates the PodMonitor that
   # scrapes them. Until this was enabled the Postgres clusters were completely
   # unmonitored: replication lag, WAL archive backlog, connection saturation and
