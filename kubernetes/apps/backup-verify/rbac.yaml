@@ -13,7 +13,7 @@
 #   CREDENTIALS are enumerated by name. The restic repository passwords live in
 #   the app namespaces and stay there — this job reads them, it does not keep a
 #   second copy that could drift out of sync with the real one. `resourceNames`
-#   pins the grant to exactly the 15 restic secrets, so it cannot be used to
+#   pins the grant to exactly the 16 restic secrets, so it cannot be used to
 #   read (say) the gitea admin secret or the authentik bootstrap token that sit
 #   in the same namespaces.
 #
@@ -296,6 +296,37 @@ kind: RoleBinding
 metadata:
   name: restore-verify-read-restic
   namespace: tandoor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: restore-verify-read-restic
+subjects:
+  - kind: ServiceAccount
+    name: restore-verify
+    namespace: backup-verify
+---
+# Added after the first scheduled run failed exactly as the note above predicts:
+# technitium/technitium-config was discovered, the secret read was forbidden, and
+# the job aborted naming the missing entry. The ReplicationSource predates this
+# grant — the design turned an unverified backup into a loud failure rather than
+# a silent gap, which is the whole point.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: restore-verify-read-restic
+  namespace: technitium
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames:
+      - technitium-restic-secret
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: restore-verify-read-restic
+  namespace: technitium
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role

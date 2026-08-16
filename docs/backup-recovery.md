@@ -219,6 +219,62 @@ CloudNativePG recovery docs for the full bootstrap-from-objectstore flow.
 > the old token; keep retired tokens in the password manager until their
 > snapshots age out.
 
+### Idle clusters and the "WAL ends before end of online backup" trap
+
+A base backup is only restorable once the WAL segment holding its **end LSN** has
+been archived. Every cluster here sets `backup.target: primary` for that reason,
+and the reason is not obvious.
+
+CNPG's default is `prefer-standby`, which runs the base backup on a replica. A
+standby cannot write WAL, so such a backup emits **no WAL records at all** —
+`pg_backup_stop` merely reports the current insert LSN, which sits inside the
+primary's still-open segment. That segment gets archived when it fills or when a
+switch is forced, and `archive_timeout` (5min, a CNPG default) deliberately
+*skips* its forced switch if nothing has been written since the last one —
+otherwise an idle server would archive an endless run of empty 16 MB files.
+
+On a cluster with real write traffic the segment rolls over within minutes and
+nobody notices. On an **idle** cluster it never rolls over, so the newest backup
+is permanently unrestorable while its `Backup` CR still reads `completed`.
+Recovery fails at bootstrap with:
+
+```text
+FATAL: WAL ends before end of online backup
+HINT:  All WAL generated while online backup was taken must be available at recovery.
+```
+
+`backup.target: primary` fixes it at the source: on the primary the backup writes
+its own WAL (`pg_backup_start` forces a checkpoint, `pg_backup_stop` writes the
+backup-end record), so `archive_timeout` always has something to flush.
+
+Diagnosing it — the tell is `last_archived_wal` sitting exactly one segment behind
+`pg_current_wal_lsn()` with an archive time hours or days old, and **no** stuck
+`.ready` files (the archiver is healthy; there is genuinely nothing to archive):
+
+```sh
+kubectl -n <ns> exec <primary-pod> -c postgres -- psql -U postgres -Atx -c \
+  "SELECT pg_walfile_name(pg_current_wal_lsn()), last_archived_wal, last_archived_time,
+          failed_count, last_failed_wal FROM pg_stat_archiver"
+```
+
+To rescue an already-taken backup, generate one WAL record and force the switch
+on the **primary**. `pg_switch_wal()` alone is a no-op on a segment with no
+activity, hence the `CHECKPOINT` first:
+
+```sh
+kubectl -n <ns> exec <primary-pod> -c postgres -- psql -U postgres -Atc \
+  "CHECKPOINT; SELECT pg_switch_wal();"
+```
+
+Confirm the segment landed in the object store before trusting the backup:
+
+```sh
+kubectl -n <ns> exec <primary-pod> -c postgres -- env \
+  AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... \
+  barman-cloud-wal-restore --endpoint-url http://10.2.40.10:30292 \
+  s3://postgres-backups/ <server-name> <wal-segment> /controller/tmp/probe
+```
+
 ## Restore: Authentik
 
 Authentik's source of truth is its **CNPG Postgres** cluster (`authentik-postgres`
