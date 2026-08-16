@@ -1,7 +1,12 @@
 ---
 # Auto-provisioned Grafana dashboard for the TrueNAS host (job=truenas-node).
 # Imported by the kube-prometheus-stack Grafana sidecar via the
-# grafana_dashboard label. Generated from scripts/monitoring/gen_truenas_dashboards.py.
+# grafana_dashboard label. Generated from scripts/monitoring/gen_truenas_dashboards.py
+# — edit the generator, not this file, or the next run silently reverts you.
+#
+# $datasource defaults to the local Prometheus (~2d retention) and can be switched
+# to Thanos in the picker for long-range history. Same convention as the Postgres
+# and Traefik dashboards.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -31,7 +36,26 @@ data:
       },
       "refresh": "30s",
       "templating": {
-        "list": []
+        "list": [
+          {
+            "name": "datasource",
+            "label": "Datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {
+              "selected": false,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "options": [],
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false
+          }
+        ]
       },
       "panels": [
         {
@@ -40,7 +64,7 @@ data:
           "title": "Unhealthy pools",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 4,
@@ -88,7 +112,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "count(node_zfs_zpool_state{job=\"truenas-node\",state=~\"degraded|faulted|unavail|removed|suspended\"} == 1) or vector(0)"
             }
@@ -100,7 +124,7 @@ data:
           "title": "ARC hit ratio",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 4,
@@ -152,7 +176,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(rate(node_zfs_arc_hits{job=\"truenas-node\"}[$__rate_interval])) / (sum(rate(node_zfs_arc_hits{job=\"truenas-node\"}[$__rate_interval])) + sum(rate(node_zfs_arc_misses{job=\"truenas-node\"}[$__rate_interval])))"
             }
@@ -164,7 +188,7 @@ data:
           "title": "ARC size",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 4,
@@ -208,7 +232,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "node_zfs_arc_size{job=\"truenas-node\"}"
             }
@@ -220,7 +244,7 @@ data:
           "title": "L2ARC size",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 4,
@@ -264,7 +288,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "node_zfs_arc_l2_size{job=\"truenas-node\"}"
             }
@@ -276,7 +300,7 @@ data:
           "title": "Pool state",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 4,
@@ -302,7 +326,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "node_zfs_zpool_state{job=\"truenas-node\"} == 1",
               "instant": true,
@@ -340,7 +364,7 @@ data:
           "title": "ARC size vs target",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 8,
@@ -405,7 +429,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "node_zfs_arc_size{job=\"truenas-node\"}",
               "legendFormat": "Current"
@@ -414,7 +438,7 @@ data:
               "refId": "B",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "node_zfs_arc_c{job=\"truenas-node\"}",
               "legendFormat": "Target (c)"
@@ -423,7 +447,7 @@ data:
               "refId": "C",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "node_zfs_arc_c_max{job=\"truenas-node\"}",
               "legendFormat": "Max"
@@ -436,7 +460,7 @@ data:
           "title": "ARC hits vs misses",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 8,
@@ -501,7 +525,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "rate(node_zfs_arc_hits{job=\"truenas-node\"}[$__rate_interval])",
               "legendFormat": "hits/s"
@@ -510,7 +534,7 @@ data:
               "refId": "B",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "rate(node_zfs_arc_misses{job=\"truenas-node\"}[$__rate_interval])",
               "legendFormat": "misses/s"
@@ -523,7 +547,7 @@ data:
           "title": "ARC hit ratio",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 8,
@@ -588,7 +612,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(rate(node_zfs_arc_hits{job=\"truenas-node\"}[$__rate_interval])) / (sum(rate(node_zfs_arc_hits{job=\"truenas-node\"}[$__rate_interval])) + sum(rate(node_zfs_arc_misses{job=\"truenas-node\"}[$__rate_interval])))",
               "legendFormat": "ARC"
@@ -601,7 +625,7 @@ data:
           "title": "L2ARC hit ratio",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 8,
@@ -666,7 +690,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(rate(node_zfs_arc_l2_hits{job=\"truenas-node\"}[$__rate_interval])) / (sum(rate(node_zfs_arc_l2_hits{job=\"truenas-node\"}[$__rate_interval])) + sum(rate(node_zfs_arc_l2_misses{job=\"truenas-node\"}[$__rate_interval])))",
               "legendFormat": "L2ARC"
@@ -679,7 +703,7 @@ data:
           "title": "Pool throughput",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 8,
@@ -744,7 +768,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum by (zpool) (rate(node_zfs_zpool_dataset_nread{job=\"truenas-node\"}[$__rate_interval]))",
               "legendFormat": "{{zpool}} read"
@@ -753,7 +777,7 @@ data:
               "refId": "B",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum by (zpool) (rate(node_zfs_zpool_dataset_nwritten{job=\"truenas-node\"}[$__rate_interval]))",
               "legendFormat": "{{zpool}} write"
@@ -766,7 +790,7 @@ data:
           "title": "Pool IOPS",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 8,
@@ -831,7 +855,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum by (zpool) (rate(node_zfs_zpool_dataset_reads{job=\"truenas-node\"}[$__rate_interval]))",
               "legendFormat": "{{zpool}} read"
@@ -840,7 +864,7 @@ data:
               "refId": "B",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum by (zpool) (rate(node_zfs_zpool_dataset_writes{job=\"truenas-node\"}[$__rate_interval]))",
               "legendFormat": "{{zpool}} write"
@@ -853,7 +877,7 @@ data:
           "title": "Dataset usage (top)",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 10,
@@ -909,7 +933,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "(1 - node_filesystem_avail_bytes{job=\"truenas-node\",fstype=\"zfs\",mountpoint!~\"/|/boot.*|/conf|/audit|/home|/data|/mnt/.ix-apps.*\"} / node_filesystem_size_bytes{job=\"truenas-node\",fstype=\"zfs\",mountpoint!~\"/|/boot.*|/conf|/audit|/home|/data|/mnt/.ix-apps.*\"}) * 100",
               "instant": true,
@@ -947,7 +971,7 @@ data:
           "title": "Pool capacity",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 4,
@@ -999,7 +1023,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "max(zfs_zpool_capacity_ratio{job=\"truenas-node\"})"
             }
@@ -1011,7 +1035,7 @@ data:
           "title": "Fragmentation",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 4,
@@ -1063,7 +1087,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "max(zfs_zpool_fragmentation_ratio{job=\"truenas-node\"})"
             }
@@ -1075,7 +1099,7 @@ data:
           "title": "Since last scrub",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 4,
@@ -1127,7 +1151,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "time() - max(zfs_zpool_scrub_last_finish_timestamp{job=\"truenas-node\"})"
             }
@@ -1139,7 +1163,7 @@ data:
           "title": "Vdev errors (24h)",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 4,
@@ -1187,7 +1211,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(increase(zfs_zpool_vdev_read_errors{job=\"truenas-node\"}[24h]) + increase(zfs_zpool_vdev_write_errors{job=\"truenas-node\"}[24h]) + increase(zfs_zpool_vdev_checksum_errors{job=\"truenas-node\"}[24h])) or vector(0)"
             }
@@ -1199,7 +1223,7 @@ data:
           "title": "Scrub state",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 8,
@@ -1266,7 +1290,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "zfs_zpool_scrub_state{job=\"truenas-node\"}",
               "instant": true,
@@ -1303,7 +1327,7 @@ data:
           "title": "Per-vdev errors",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 8,
@@ -1383,7 +1407,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "zfs_zpool_vdev_read_errors{job=\"truenas-node\"}",
               "instant": true,
@@ -1393,7 +1417,7 @@ data:
               "refId": "B",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "zfs_zpool_vdev_write_errors{job=\"truenas-node\"}",
               "instant": true,
@@ -1403,7 +1427,7 @@ data:
               "refId": "C",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "zfs_zpool_vdev_checksum_errors{job=\"truenas-node\"}",
               "instant": true,
@@ -1441,7 +1465,7 @@ data:
           "title": "Pool capacity",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 8,
@@ -1506,7 +1530,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "zfs_zpool_capacity_ratio{job=\"truenas-node\"}",
               "legendFormat": "{{pool}}"
@@ -1519,7 +1543,7 @@ data:
           "title": "Fragmentation",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 8,
@@ -1584,7 +1608,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "zfs_zpool_fragmentation_ratio{job=\"truenas-node\"}",
               "legendFormat": "{{pool}}"
@@ -1597,7 +1621,7 @@ data:
           "title": "Per-vdev errors",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 8,
@@ -1662,7 +1686,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "increase(zfs_zpool_vdev_checksum_errors{job=\"truenas-node\"}[$__rate_interval])",
               "legendFormat": "{{pool}}/{{vdev}} cksum"
@@ -1671,7 +1695,7 @@ data:
               "refId": "B",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "increase(zfs_zpool_vdev_read_errors{job=\"truenas-node\"}[$__rate_interval])",
               "legendFormat": "{{pool}}/{{vdev}} read"
@@ -1680,7 +1704,7 @@ data:
               "refId": "C",
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "increase(zfs_zpool_vdev_write_errors{job=\"truenas-node\"}[$__rate_interval])",
               "legendFormat": "{{pool}}/{{vdev}} write"
