@@ -52,6 +52,24 @@ spec:
       - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
         targetLabel: cnpg_cluster
         action: replace
+  # Base backups run on the PRIMARY. CNPG defaults to prefer-standby, and a
+  # standby cannot write WAL: pg_backup_stop there only reports the current
+  # insert LSN, which sits in the primary's still-open segment. archive_timeout
+  # (5min, a CNPG default) skips its forced switch when nothing has been written
+  # since the last one — otherwise an idle server would archive an endless run of
+  # empty 16 MB files — so on a cluster with no write traffic that segment is
+  # never archived and recovery dies with "WAL ends before end of online backup".
+  # The newest backup is silently unrestorable while the Backup CR reads
+  # `completed`. Caught on gitea and tandoor by the weekly restore verification on
+  # 2026-08-16, after the Longhorn migration left both with no writes; the busy
+  # clusters self-healed within minutes, which is what made it look like a
+  # two-app problem rather than a default. On the primary the backup generates its
+  # own WAL (start forces a checkpoint, stop writes the backup-end record), so it
+  # is self-contained instead of waiting on unrelated traffic. Set on the Cluster
+  # rather than the ScheduledBackup so manually triggered backups inherit it too.
+  # See docs/backup-recovery.md.
+  backup:
+    target: primary
   plugins:
     - name: barman-cloud.cloudnative-pg.io
       isWALArchiver: true
