@@ -855,7 +855,7 @@ data:
           "id": 14,
           "type": "table",
           "title": "Restored database size",
-          "description": "Size of each database after a real recovery from s3://postgres-backups \u2014 barman base backup + WAL replay + promotion, then queried. Compare against production: on 2026-08-09 every cluster landed within 0.2%, the difference being same-day writes since the 02:00-07:00 backups. Matching EXACTLY is not the goal and would only happen on an idle database.",
+          "description": "Size of each database after a real recovery from s3://postgres-backups \u2014 barman base backup + WAL replay + promotion, then queried. Compare against production: on 2026-08-09 every cluster landed within 0.2%, the difference being same-day writes since the 02:00-07:00 backups. Matching EXACTLY is not the goal and would only happen on an idle database.\n\n⚠️ `| db != \"none\"` is not decoration. A cluster that never got as far as having a database still emits a RESULT line, carrying the `db=none` sentinel and zeroes. Grouping by (cluster, db) makes that its own series, so the failing cluster appears TWICE for the whole 8d window — once with its last good size, once as `none` at 0. Seen on 2026-08-16, when gitea and tandoor failed to bootstrap. The guard keeps this table to rows that describe a database that actually came back; whether a run failed is the stat above and the log below.",
           "gridPos": {
             "h": 10,
             "w": 8,
@@ -893,7 +893,7 @@ data:
               },
               "queryType": "instant",
               "instant": true,
-              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=postgres\" | logfmt | unwrap bytes [$__range]) by (cluster, db)"
+              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=postgres\" | logfmt | db != \"none\" | unwrap bytes [$__range]) by (cluster, db)"
             }
           ],
           "transformations": [
@@ -940,7 +940,7 @@ data:
           "id": 15,
           "type": "table",
           "title": "Restored table count",
-          "description": "User tables in the restored database (pg_catalog and information_schema excluded). The job fails a cluster with zero. tracearr shows ~1000 because TimescaleDB chunks are tables.",
+          "description": "User tables in the restored database (pg_catalog and information_schema excluded). The job fails a cluster with zero. tracearr shows ~1000 because TimescaleDB chunks are tables.\n\n⚠️ `| db != \"none\"` is not decoration. A cluster that never got as far as having a database still emits a RESULT line, carrying the `db=none` sentinel and zeroes. Grouping by (cluster, db) makes that its own series, so the failing cluster appears TWICE for the whole 8d window — once with its last good count, once as `none` at 0. Seen on 2026-08-16, when gitea and tandoor failed to bootstrap. The guard keeps this table to rows that describe a database that actually came back; whether a run failed is the stat above and the log below.",
           "gridPos": {
             "h": 10,
             "w": 8,
@@ -978,7 +978,7 @@ data:
               },
               "queryType": "instant",
               "instant": true,
-              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=postgres\" | logfmt | unwrap tables [$__range]) by (cluster, db)"
+              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=postgres\" | logfmt | db != \"none\" | unwrap tables [$__range]) by (cluster, db)"
             }
           ],
           "transformations": [
@@ -1025,7 +1025,7 @@ data:
           "id": 16,
           "type": "table",
           "title": "Restored row estimate",
-          "description": "Sum of pg_class.reltuples, which does survive a physical restore. Logged and shown, never asserted: gitea legitimately reports 0 because its tables are genuinely empty, and a floor here would fail it forever.",
+          "description": "Sum of pg_class.reltuples, which does survive a physical restore. Logged and shown, never asserted: gitea legitimately reports 0 because its tables are genuinely empty, and a floor here would fail it forever.\n\n⚠️ `| db != \"none\"` is not decoration. A cluster that never got as far as having a database still emits a RESULT line, carrying the `db=none` sentinel and zeroes. Grouping by (cluster, db) makes that its own series, so the failing cluster appears TWICE for the whole 8d window — once with its last good estimate, once as `none` at 0. Seen on 2026-08-16, when gitea and tandoor failed to bootstrap. The guard keeps this table to rows that describe a database that actually came back; whether a run failed is the stat above and the log below.",
           "gridPos": {
             "h": 10,
             "w": 8,
@@ -1063,7 +1063,7 @@ data:
               },
               "queryType": "instant",
               "instant": true,
-              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=postgres\" | logfmt | unwrap rows [$__range]) by (cluster, db)"
+              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=postgres\" | logfmt | db != \"none\" | unwrap rows [$__range]) by (cluster, db)"
             }
           ],
           "transformations": [
