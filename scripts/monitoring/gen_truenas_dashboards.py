@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate TrueNAS System + ZFS Grafana dashboard ConfigMaps for home-ops.
-Matches the repo convention: schemaVersion 39, datasource uid 'prometheus',
-label grafana_dashboard: "1", panels scoped to job="truenas-node".
+Matches the repo convention: schemaVersion 39, a $datasource template variable
+defaulting to the local Prometheus, label grafana_dashboard: "1", panels scoped
+to job="truenas-node".
 
 Run `python3 scripts/monitoring/gen_truenas_dashboards.py` from anywhere; it
 rewrites kubernetes/apps/monitoring/truenas/dashboard-{system,zfs}.yaml in place.
@@ -11,7 +12,26 @@ scripts/truenas/zfs-textfile-collector.sh (metrics prefixed zfs_zpool_*).
 """
 import json, os
 
-DS = {"type": "prometheus", "uid": "prometheus"}
+# Every panel and target points at the $datasource variable rather than a fixed
+# uid, so these dashboards can be flipped between the local Prometheus (~2d
+# retention) and Thanos (long-term, via thanos-query-frontend) from the picker.
+# TrueNAS metrics come from node_exporter scraped by Prometheus, so the Thanos
+# sidecar ships them to RustFS like everything else — the history is there, the
+# dashboards just had no way to reach it. See DATASOURCE_VAR below.
+DS = {"type": "prometheus", "uid": "${datasource}"}
+
+# Grafana renders this as the "Datasource" picker at the top of the dashboard.
+# query: "prometheus" lists every datasource of that *type*, which is both the
+# built-in Prometheus and Thanos (the Thanos datasource is type prometheus — it
+# speaks the same API). Default stays the local Prometheus: the 6h default window
+# is well inside local retention, and Thanos costs an object-store round trip.
+DATASOURCE_VAR = {
+    "name": "datasource", "label": "Datasource", "type": "datasource",
+    "query": "prometheus",
+    "current": {"selected": False, "text": "Prometheus", "value": "prometheus"},
+    "hide": 0, "includeAll": False, "multi": False, "options": [],
+    "refresh": 1, "regex": "", "skipUrlSync": False,
+}
 JOB = 'job="truenas-node"'
 NIC = 'device=~"bond01|enp65s0f.*"'
 # Repo-relative: this file lives at scripts/monitoring/, the manifests at
@@ -86,7 +106,7 @@ def dashboard(uid, title, tags, panels):
         "annotations": {"list": []}, "editable": True, "graphTooltip": 1,
         "schemaVersion": 39, "version": 1, "uid": uid, "title": title, "tags": tags,
         "time": {"from": "now-6h", "to": "now"}, "refresh": "30s",
-        "templating": {"list": []}, "panels": panels,
+        "templating": {"list": [DATASOURCE_VAR]}, "panels": panels,
     }
 
 def write_cm(name, key, dash):
@@ -96,7 +116,12 @@ def write_cm(name, key, dash):
         "---\n"
         f"# Auto-provisioned Grafana dashboard for the TrueNAS host (job=truenas-node).\n"
         f"# Imported by the kube-prometheus-stack Grafana sidecar via the\n"
-        f"# grafana_dashboard label. Generated from scripts/monitoring/gen_truenas_dashboards.py.\n"
+        f"# grafana_dashboard label. Generated from scripts/monitoring/gen_truenas_dashboards.py\n"
+        f"# — edit the generator, not this file, or the next run silently reverts you.\n"
+        f"#\n"
+        f"# $datasource defaults to the local Prometheus (~2d retention) and can be switched\n"
+        f"# to Thanos in the picker for long-range history. Same convention as the Postgres\n"
+        f"# and Traefik dashboards.\n"
         "apiVersion: v1\n"
         "kind: ConfigMap\n"
         "metadata:\n"
