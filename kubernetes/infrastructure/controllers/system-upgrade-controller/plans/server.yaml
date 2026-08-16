@@ -27,7 +27,7 @@ spec:
   # repeat up to the current release (stable is ~v1.36). Keep in rough sync with
   # ansible `k3s_version` (the fresh-install pin in
   # inventory/my-cluster/group_vars/all/main.yml).
-  version: v1.33.13+k3s2
+  version: v1.34.10+k3s1
   concurrency: 1
   cordon: true
   nodeSelector:
