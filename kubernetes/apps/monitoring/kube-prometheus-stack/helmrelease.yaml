@@ -279,11 +279,16 @@ spec:
       # promote this to isDefault: true (and disable the built-in default via
       # sidecar.datasources.defaultDatasourceEnabled: false).
       additionalDataSources:
+        # Points at thanos-query-frontend, NOT thanos-query. The frontend splits
+        # long ranges into parallel 24h sub-queries and caches their results; it
+        # only helps traffic that is actually routed through it, and Grafana is
+        # effectively all of our query traffic. It forwards to thanos-query, so
+        # this loses nothing — same API, same de-duplicated view.
         - name: Thanos
           type: prometheus
           uid: thanos
           access: proxy
-          url: http://thanos-query.monitoring.svc.cluster.local:9090
+          url: http://thanos-query-frontend.monitoring.svc.cluster.local:9090
           jsonData:
             timeInterval: 30s
         # Loki (logs) — served through the loki-gateway nginx front (port 80).
