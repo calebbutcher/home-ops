@@ -1,8 +1,10 @@
 ---
-# Alerts for the observability pipeline itself — Alloy (log collection) and Loki
-# (log storage). Until this file existed, the entire logging path was unscraped:
-# collection could stop, or Loki could start rejecting writes, and the only
-# symptom was logs quietly going missing. Nothing fired.
+# Alerts for the observability pipeline itself — Alloy (log collection), Loki
+# (log storage) and the parts of Thanos (long-term metric storage) the upstream
+# chart mixin does not cover correctly. Until this file existed, the entire
+# logging path was unscraped: collection could stop, or Loki could start
+# rejecting writes, and the only symptom was logs quietly going missing.
+# Nothing fired.
 #
 # Fed by the ServiceMonitors enabled on all three Alloy releases
 # (alloy/helmrelease*.yaml → serviceMonitor.enabled) and by Loki's own chart
@@ -272,3 +274,53 @@ spec:
               loki_ruler_config_last_reload_successful == 0 for >20m. A recent edit
               to the loki-alerting-rules ConfigMap is invalid and has NOT been
               applied — the ruler is still running the previous rule set.
+
+    # Thanos component-liveness alerts that the chart's bundled mixin gets wrong
+    # once Query Frontend exists. The mixin matches components by loose regex:
+    #
+    #     ThanosQueryIsDown: absent(up{job=~".*thanos.*query.*"} == 1)
+    #
+    # That regex matches BOTH thanos-query and thanos-query-frontend. So from the
+    # moment Query Frontend was enabled, a total thanos-query outage stopped
+    # firing ThanosQueryIsDown — absent() sees the frontend's `up == 1` and is
+    # satisfied. The chart alert silently became "at least one of the two is up",
+    # which is precisely the wrong assertion for two components in series.
+    #
+    # These use exact job matchers so each component is asserted independently.
+    # Named *Missing rather than *IsDown to avoid colliding with the chart's
+    # alerts, which are left in place (their non-absent rules — latency, error
+    # rate, overload — are still correct and worth keeping).
+    - name: thanos.rules
+      rules:
+        # Grafana's Thanos datasource points at the frontend, so this is the
+        # user-facing failure: every long-range dashboard panel breaks even though
+        # thanos-query and the store gateways are perfectly healthy.
+        - alert: ThanosQueryFrontendMissing
+          expr: absent(up{job="thanos-query-frontend"} == 1)
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Thanos Query Frontend is gone — Grafana long-range dashboards are broken"
+            description: >-
+              No scrapeable thanos-query-frontend target for >10m. Grafana's Thanos
+              datasource routes through it, so historical panels fail even if
+              thanos-query is fine. Falling back is a one-line datasource change to
+              thanos-query (losing result caching) — see the kube-prometheus-stack
+              HelmRelease.
+
+        # The assertion the chart alert stopped making. Without this, thanos-query
+        # can be entirely down and the only chart alert that should catch it stays
+        # green because the frontend in front of it is still up.
+        - alert: ThanosQueryMissing
+          expr: absent(up{job="thanos-query"} == 1)
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Thanos Query is gone — no fan-out to store gateways or sidecars"
+            description: >-
+              No scrapeable thanos-query target for >10m. Query Frontend has
+              nothing to forward to, so all Thanos queries fail. Note the chart's
+              own ThanosQueryIsDown does NOT cover this case once Query Frontend is
+              enabled — its regex matches the frontend too.
