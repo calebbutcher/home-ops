@@ -74,9 +74,24 @@ spec:
     storegateway:
       enabled: true
       replicas: 2
+      # longhorn-single (1 Longhorn replica): this disk is a *cache*, not a copy of
+      # record. It holds index-headers and the chunk cache derived from the blocks in
+      # RustFS — wipe it and the gateway rebuilds it by re-reading the bucket. A
+      # 2-replica Longhorn volume would therefore replicate something S3 already
+      # protects. What Longhorn buys is mobility: local-path pinned each replica to
+      # the node that first scheduled it, so a dead node meant a Pending pod and
+      # (with only 2 replicas) half the historical query capacity gone until the node
+      # came back.
+      #
+      # Migrated from local-path by orphan-deleting the StatefulSet so Helm could
+      # recreate it with the new template, then replacing each PVC in turn —
+      # volumeClaimTemplates are immutable, so this manifest change alone does not
+      # move an existing PVC. Roll one ordinal at a time: a rebuilt gateway is
+      # unready until it has re-synced the bucket index, and the other replica has to
+      # cover the queries meanwhile.
       persistence:
         enabled: true
-        storageClass: local-path
+        storageClass: longhorn-single
         size: 10Gi
       resources:
         requests:
@@ -88,9 +103,21 @@ spec:
     compactor:
       # Must remain a singleton (the chart enforces replicas: 1).
       enabled: true
+      # longhorn-single, same reasoning as the store gateway: this is scratch space
+      # where blocks are downloaded, compacted and downsampled before being written
+      # back to RustFS. Nothing here is authoritative, so a second Longhorn replica
+      # protects nothing — and being a singleton, mobility is worth *more* here than
+      # anywhere else in this chart: on local-path a dead node left compaction
+      # completely stopped (no second replica to carry it) until that node returned.
+      #
+      # Keep 20Gi even though steady-state usage is under 1Mi. The number is not
+      # sized for what compaction leaves behind, it is sized for what compaction
+      # needs *while running* — the largest group of blocks it has to hold on disk at
+      # once. Longhorn is thin-provisioned, so the unused portion costs scheduling
+      # budget rather than real disk.
       persistence:
         enabled: true
-        storageClass: local-path
+        storageClass: longhorn-single
         size: 20Gi
       # Downsample/retention policy in the object store (empty = keep forever).
       retention:
