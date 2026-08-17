@@ -11,7 +11,25 @@ kind: Connector
 metadata:
   name: k3s-gateway
 spec:
-  hostname: k3s-gateway
+  # Two proxy devices instead of one. At 1 replica, losing that node meant losing
+  # remote access entirely — including the way in to fix whatever broke.
+  #
+  # This buys real HA for the subnet router: both replicas advertise the routes
+  # below identically, and the control plane fails traffic over automatically
+  # once a router drops for ~15s. It does NOT buy the same for the exit node —
+  # clients select an exit node per-device, and Tailscale's HA docs cover subnet
+  # routers and app connectors only, so treat exit-node continuity as unsolved.
+  replicas: 2
+  # hostnamePrefix, not hostname: the CRD rejects `hostname` outright when
+  # replicas > 1. Each replica appends its StatefulSet ordinal, so the single
+  # `k3s-gateway` device becomes `k3s-gateway-0` and `k3s-gateway-1`.
+  #
+  # That rename is tailnet-visible and needs manual follow-up on merge:
+  #   - the MagicDNS name k3s-gateway.<tailnet>.ts.net stops resolving
+  #   - any client using k3s-gateway as its exit node must re-select one
+  #   - both new devices need their advertised routes approved (autoApprovers,
+  #     or a one-time manual approve), or remote LAN access stays down
+  hostnamePrefix: k3s-gateway
   # Enable tailscaled Prometheus metrics on the proxy pod (see proxyclass.yaml).
   proxyClass: gateway-metrics
   # Route tailnet devices' public internet egress through home.
