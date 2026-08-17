@@ -26,10 +26,24 @@ data:
       "templating": {
         "list": [
           {
+            "name": "loki",
+            "label": "Logs",
+            "type": "datasource",
+            "query": "loki",
+            "current": { "selected": false, "text": "Loki", "value": "loki" },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "options": [],
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false
+          },
+          {
             "name": "namespace",
             "label": "Namespace",
             "type": "query",
-            "datasource": { "type": "loki", "uid": "loki" },
+            "datasource": { "type": "loki", "uid": "${loki}" },
             "definition": "label_values(namespace)",
             "query": "label_values(namespace)",
             "refresh": 2,
@@ -44,7 +58,7 @@ data:
             "name": "pod",
             "label": "Pod",
             "type": "query",
-            "datasource": { "type": "loki", "uid": "loki" },
+            "datasource": { "type": "loki", "uid": "${loki}" },
             "definition": "label_values({namespace=\"$namespace\"}, pod)",
             "query": "label_values({namespace=\"$namespace\"}, pod)",
             "refresh": 2,
@@ -60,7 +74,7 @@ data:
             "name": "container",
             "label": "Container",
             "type": "query",
-            "datasource": { "type": "loki", "uid": "loki" },
+            "datasource": { "type": "loki", "uid": "${loki}" },
             "definition": "label_values({namespace=\"$namespace\", pod=~\"$pod\"}, container)",
             "query": "label_values({namespace=\"$namespace\", pod=~\"$pod\"}, container)",
             "refresh": 2,
@@ -87,7 +101,7 @@ data:
           "id": 1,
           "title": "Log volume",
           "type": "timeseries",
-          "datasource": { "type": "loki", "uid": "loki" },
+          "datasource": { "type": "loki", "uid": "${loki}" },
           "gridPos": { "h": 6, "w": 24, "x": 0, "y": 0 },
           "fieldConfig": {
             "defaults": {
@@ -109,7 +123,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "datasource": { "type": "loki", "uid": "loki" },
+              "datasource": { "type": "loki", "uid": "${loki}" },
               "expr": "sum by (container) (count_over_time({namespace=\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |~ \"$search\" [$__auto]))",
               "legendFormat": "{{container}}",
               "queryType": "range"
@@ -120,7 +134,7 @@ data:
           "id": 2,
           "title": "Logs",
           "type": "logs",
-          "datasource": { "type": "loki", "uid": "loki" },
+          "datasource": { "type": "loki", "uid": "${loki}" },
           "gridPos": { "h": 20, "w": 24, "x": 0, "y": 6 },
           "options": {
             "showTime": true,
@@ -135,7 +149,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "datasource": { "type": "loki", "uid": "loki" },
+              "datasource": { "type": "loki", "uid": "${loki}" },
               "expr": "{namespace=\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |~ \"$search\"",
               "queryType": "range"
             }
