@@ -56,7 +56,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -138,7 +138,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "ceph_health_status{}",
               "format": "time_series",
@@ -157,7 +157,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -215,7 +215,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(irate(ceph_osd_op_w_in_bytes{}[5m]))",
               "format": "time_series",
@@ -233,7 +233,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -299,7 +299,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(irate(ceph_osd_op_r_out_bytes{}[5m]))",
               "format": "time_series",
@@ -317,7 +317,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -384,7 +384,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "ceph_cluster_total_bytes{}",
               "format": "time_series",
@@ -403,7 +403,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -468,7 +468,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "(ceph_cluster_total_bytes{}-ceph_cluster_total_used_bytes{})/ceph_cluster_total_bytes{}",
               "format": "time_series",
@@ -487,7 +487,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -549,7 +549,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pool_objects{})",
               "format": "time_series",
@@ -567,7 +567,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -629,7 +629,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_osd_op_w_in_bytes{})",
               "format": "time_series",
@@ -647,7 +647,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -709,7 +709,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_osd_op_r_out_bytes{})",
               "format": "time_series",
@@ -727,7 +727,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -782,7 +782,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "count(ALERTS{alertstate=\"firing\",alertname=~\"^Ceph.+\"}) OR vector(0)",
               "format": "time_series",
@@ -800,7 +800,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -858,7 +858,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(irate(ceph_osd_op_w{}[5m]))",
               "format": "time_series",
@@ -876,7 +876,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -942,7 +942,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(irate(ceph_osd_op_r{}[5m]))",
               "format": "time_series",
@@ -960,7 +960,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -1027,7 +1027,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "ceph_cluster_total_used_bytes{}",
               "format": "time_series",
@@ -1045,7 +1045,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -1111,7 +1111,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pool_objects)",
               "format": "time_series",
@@ -1129,7 +1129,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -1191,7 +1191,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_mon_num_sessions{})",
               "format": "time_series",
@@ -1209,7 +1209,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -1277,7 +1277,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "count(ceph_mon_quorum_status{}) or vector(0)",
               "format": "time_series",
@@ -1315,7 +1315,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -1381,7 +1381,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "count(ceph_osd_up{}) - count(ceph_osd_in{})",
               "format": "time_series",
@@ -1400,7 +1400,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -1466,7 +1466,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "count(ceph_osd_up{} == 0.0) OR vector(0)",
               "format": "time_series",
@@ -1485,7 +1485,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -1547,7 +1547,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_osd_up{})",
               "format": "time_series",
@@ -1566,7 +1566,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -1628,7 +1628,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_osd_in{})",
               "format": "time_series",
@@ -1647,7 +1647,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -1713,7 +1713,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "avg(ceph_osd_numpg{})",
               "format": "time_series",
@@ -1732,7 +1732,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -1798,7 +1798,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "avg(ceph_osd_apply_latency_ms{})",
               "format": "time_series",
@@ -1817,7 +1817,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -1883,7 +1883,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "avg(ceph_osd_commit_latency_ms{})",
               "format": "time_series",
@@ -1902,7 +1902,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -1969,7 +1969,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "avg(rate(ceph_osd_op_w_latency_sum{}[5m]) / rate(ceph_osd_op_w_latency_count{}[5m]) >= 0)",
               "format": "time_series",
@@ -1986,7 +1986,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "",
           "fieldConfig": {
@@ -2053,7 +2053,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "avg(rate(ceph_osd_op_r_latency_sum{}[5m])/rate(ceph_osd_op_r_latency_count{}[5m]) >= 0)",
               "format": "time_series",
@@ -2090,7 +2090,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -2303,7 +2303,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "ceph_cluster_total_bytes{}-ceph_cluster_total_used_bytes{}",
               "format": "time_series",
@@ -2316,7 +2316,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "ceph_cluster_total_used_bytes{}",
               "format": "time_series",
@@ -2329,7 +2329,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "ceph_cluster_total_bytes{}",
               "format": "time_series",
@@ -2346,7 +2346,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -2505,7 +2505,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(irate(ceph_osd_op_w{}[5m]))",
               "format": "time_series",
@@ -2518,7 +2518,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(irate(ceph_osd_op_r{}[5m]))",
               "format": "time_series",
@@ -2535,7 +2535,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -2618,7 +2618,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(irate(ceph_osd_op_w_in_bytes{}[5m]))",
               "format": "time_series",
@@ -2631,7 +2631,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(irate(ceph_osd_op_r_out_bytes{}[5m]))",
               "format": "time_series",
@@ -2648,7 +2648,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -2725,7 +2725,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "(ceph_pool_bytes_used{}) *on (pool_id) group_left(name)(ceph_pool_metadata{})",
               "format": "time_series",
@@ -2741,7 +2741,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -2814,7 +2814,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "(ceph_pool_avail_raw{}) *on (pool_id) group_left(name)(ceph_pool_metadata{})",
               "format": "time_series",
@@ -2827,7 +2827,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "(ceph_pool_stored_raw{}) *on (pool_id) group_left(name)(ceph_pool_metadata{})",
               "format": "time_series",
@@ -2845,7 +2845,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -2922,7 +2922,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "(ceph_pool_objects{}) *on (pool_id) group_left(name)(ceph_pool_metadata{})",
               "format": "time_series",
@@ -2937,7 +2937,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -3015,7 +3015,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "(ceph_pool_quota_bytes{}) *on (pool_id) group_left(name)(ceph_pool_metadata{})",
               "format": "time_series",
@@ -3030,7 +3030,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -3108,7 +3108,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "(ceph_pool_quota_objects{}) *on (pool_id) group_left(name)(ceph_pool_metadata{})",
               "format": "time_series",
@@ -3123,7 +3123,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -3201,7 +3201,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "count(ceph_bluestore_kv_commit_lat_count{})",
               "format": "time_series",
@@ -3229,7 +3229,7 @@ data:
               "columns": [],
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -3302,7 +3302,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "ALERTS{alertstate=\"firing\",alertname=~\"^Ceph.+\"}",
                   "format": "table",
@@ -3329,7 +3329,7 @@ data:
               "columns": [],
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -3403,7 +3403,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "topk(5,sort_desc(ceph_osd_apply_latency_ms{} + ceph_osd_commit_latency_ms{}))",
                   "format": "table",
@@ -3430,7 +3430,7 @@ data:
               "columns": [],
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -3503,7 +3503,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "ceph_osd_up{} == 0",
                   "format": "table",
@@ -3549,7 +3549,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -3631,7 +3631,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "node_memory_Active_anon_bytes{}",
                   "format": "time_series",
@@ -3642,7 +3642,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "sum(node_memory_Active_anon_bytes{})",
                   "format": "time_series",
@@ -3657,7 +3657,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -3738,7 +3738,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "avg by(instance)(irate(node_cpu_seconds_total{job='node',mode!=\"idle\"}[$interval])) * 100",
                   "format": "time_series",
@@ -3753,7 +3753,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -3834,7 +3834,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "sum by (instance)(irate(node_disk_read_bytes_total{}[$interval]))",
                   "format": "time_series",
@@ -3849,7 +3849,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -3930,7 +3930,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "sum by (instance)(irate(node_disk_written_bytes_total{}[$interval]))",
                   "format": "time_series",
@@ -3945,7 +3945,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -4022,7 +4022,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "(node_filesystem_free_bytes{ mountpoint=\"/\", device != \"rootfs\"})*100 / (node_filesystem_size_bytes{ mountpoint=\"/\", device != \"rootfs\"})",
                   "format": "time_series",
@@ -4066,7 +4066,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -4160,7 +4160,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pool_objects)",
               "format": "time_series",
@@ -4178,7 +4178,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -4275,7 +4275,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_active{})",
               "format": "time_series",
@@ -4288,7 +4288,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_clean{})",
               "format": "time_series",
@@ -4301,7 +4301,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_peering{})",
               "format": "time_series",
@@ -4314,7 +4314,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_degraded{})",
               "format": "time_series",
@@ -4328,7 +4328,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_stale{})",
               "format": "time_series",
@@ -4342,7 +4342,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_unclean_pgs{})",
               "format": "time_series",
@@ -4356,7 +4356,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_undersized{})",
               "format": "time_series",
@@ -4370,7 +4370,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_incomplete{})",
               "format": "time_series",
@@ -4383,7 +4383,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_forced_backfill{})",
               "format": "time_series",
@@ -4396,7 +4396,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_forced_recovery{})",
               "format": "time_series",
@@ -4409,7 +4409,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_creating{})",
               "format": "time_series",
@@ -4422,7 +4422,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_wait_backfill{})",
               "format": "time_series",
@@ -4435,7 +4435,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_deep{})",
               "format": "time_series",
@@ -4448,7 +4448,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_scrubbing{})",
               "format": "time_series",
@@ -4461,7 +4461,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_recovering{})",
               "format": "time_series",
@@ -4474,7 +4474,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_repair{})",
               "format": "time_series",
@@ -4487,7 +4487,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_down{})",
               "format": "time_series",
@@ -4500,7 +4500,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_peered{})",
               "format": "time_series",
@@ -4513,7 +4513,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_backfill{})",
               "format": "time_series",
@@ -4526,7 +4526,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_remapped{})",
               "format": "time_series",
@@ -4539,7 +4539,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_backfill_toofull{})",
               "format": "time_series",
@@ -4556,7 +4556,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -4654,7 +4654,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_degraded{})",
               "format": "time_series",
@@ -4668,7 +4668,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_stale{})",
               "format": "time_series",
@@ -4682,7 +4682,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(ceph_pg_undersized{})",
               "format": "time_series",
@@ -4700,7 +4700,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -4779,7 +4779,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "sum(irate(ceph_osd_recovery_ops{}[$interval]))",
               "format": "time_series",
@@ -4827,7 +4827,7 @@ data:
           "dataFormat": "timeseries",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -4907,7 +4907,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "ceph_osd_apply_latency_ms{}",
               "format": "time_series",
@@ -4957,7 +4957,7 @@ data:
           "dataFormat": "timeseries",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -5036,7 +5036,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "ceph_osd_commit_latency_ms{}",
               "format": "time_series",
@@ -5086,7 +5086,7 @@ data:
           "dataFormat": "timeseries",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -5166,7 +5166,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "rate(ceph_osd_op_r_latency_sum{}[5m]) / rate(ceph_osd_op_r_latency_count{}[5m]) >= 0",
               "format": "time_series",
@@ -5216,7 +5216,7 @@ data:
           "dataFormat": "timeseries",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -5296,7 +5296,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "rate(ceph_osd_op_w_latency_sum{}[5m]) / rate(ceph_osd_op_w_latency_count{}[5m]) >= 0",
               "format": "time_series",
@@ -5334,7 +5334,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -5411,7 +5411,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "avg(rate(ceph_osd_op_r_latency_sum{}[5m]) / rate(ceph_osd_op_r_latency_count{}[5m]) >= 0)",
               "format": "time_series",
@@ -5422,7 +5422,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "avg(rate(ceph_osd_op_w_latency_sum{}[5m]) / rate(ceph_osd_op_w_latency_count{}[5m]) >= 0)",
               "format": "time_series",
@@ -5437,7 +5437,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "fieldConfig": {
             "defaults": {
@@ -5517,7 +5517,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "avg(ceph_osd_apply_latency_ms{})",
               "format": "time_series",
@@ -5531,7 +5531,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "expr": "avg(ceph_osd_commit_latency_ms{})",
               "format": "time_series",
@@ -5560,7 +5560,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -5637,7 +5637,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "count by (ceph_version)(ceph_osd_metadata{})",
                   "format": "time_series",
@@ -5652,7 +5652,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -5729,7 +5729,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "count by (ceph_version)(ceph_mon_metadata{})",
                   "format": "time_series",
@@ -5744,7 +5744,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -5821,7 +5821,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "count by (ceph_version)(ceph_mds_metadata{})",
                   "format": "time_series",
@@ -5836,7 +5836,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -5913,7 +5913,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "count by (ceph_version)(ceph_rgw_metadata{})",
                   "format": "time_series",
@@ -5943,6 +5943,24 @@ data:
       ],
       "templating": {
         "list": [
+          {
+            "name": "datasource",
+            "label": "Datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {
+              "selected": false,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "options": [],
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false
+          },
           {
             "auto": true,
             "auto_count": 10,

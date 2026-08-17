@@ -76,7 +76,7 @@ data:
           "title": "Instances up",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -123,7 +123,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "count(redis_up{namespace=~\"$namespace\"} == 1) or vector(0)",
@@ -139,7 +139,7 @@ data:
           "title": "Instances down",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 5,
@@ -190,7 +190,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "count(redis_up{namespace=~\"$namespace\"} == 0) or vector(0)",
@@ -206,7 +206,7 @@ data:
           "title": "Total memory used",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 10,
@@ -253,7 +253,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum(redis_memory_used_bytes{namespace=~\"$namespace\"})",
@@ -269,7 +269,7 @@ data:
           "title": "Highest memory utilisation",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 15,
@@ -325,7 +325,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max(\n  sum by (namespace) (redis_memory_used_bytes{namespace=~\"$namespace\"})\n    / on (namespace)\n  max by (namespace) (kube_pod_container_resource_limits{resource=\"memory\", pod=~\".*-redis-.*\", container!~\".*exporter.*\", namespace=~\"$namespace\"})\n) * 100",
@@ -342,7 +342,7 @@ data:
           "title": "Instances",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -514,7 +514,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "redis_up{namespace=~\"$namespace\"}",
@@ -526,7 +526,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max by (namespace, redis_version) (redis_instance_info{namespace=~\"$namespace\"})",
@@ -538,7 +538,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max by (namespace) (redis_uptime_in_seconds{namespace=~\"$namespace\"})",
@@ -550,7 +550,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (namespace) (redis_memory_used_bytes{namespace=~\"$namespace\"})",
@@ -562,7 +562,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (namespace) (redis_connected_clients{namespace=~\"$namespace\"})",
@@ -574,7 +574,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (namespace) (redis_db_keys{namespace=~\"$namespace\"})",
@@ -605,7 +605,7 @@ data:
           "title": "Memory used vs container limit",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -684,7 +684,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (namespace) (redis_memory_used_bytes{namespace=~\"$namespace\"})",
@@ -696,7 +696,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "max(kube_pod_container_resource_limits{resource=\"memory\", pod=~\".*-redis-.*\", container!~\".*exporter.*\", namespace=~\"$namespace\"})",
@@ -714,7 +714,7 @@ data:
           "title": "Memory utilisation",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 12,
@@ -801,7 +801,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (namespace) (redis_memory_used_bytes{namespace=~\"$namespace\"})\n  / on (namespace)\nmax by (namespace) (kube_pod_container_resource_limits{resource=\"memory\", pod=~\".*-redis-.*\", container!~\".*exporter.*\", namespace=~\"$namespace\"})\n  * 100",
@@ -832,7 +832,7 @@ data:
           "title": "Commands/sec",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -911,7 +911,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (namespace) (rate(redis_commands_processed_total{namespace=~\"$namespace\"}[5m]))",
@@ -928,7 +928,7 @@ data:
           "title": "Keyspace hit ratio",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 8,
@@ -1008,7 +1008,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (namespace) (rate(redis_keyspace_hits_total{namespace=~\"$namespace\"}[5m]))\n  /\nclamp_min(\n  sum by (namespace) (rate(redis_keyspace_hits_total{namespace=~\"$namespace\"}[5m]))\n  + sum by (namespace) (rate(redis_keyspace_misses_total{namespace=~\"$namespace\"}[5m]))\n, 1)\n  * 100",
@@ -1026,7 +1026,7 @@ data:
           "title": "Connected clients",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 16,
@@ -1105,7 +1105,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (namespace) (redis_connected_clients{namespace=~\"$namespace\"})",
@@ -1117,7 +1117,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (namespace) (redis_blocked_clients{namespace=~\"$namespace\"})",
@@ -1148,7 +1148,7 @@ data:
           "title": "Evicted keys/sec",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -1231,7 +1231,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (namespace) (rate(redis_evicted_keys_total{namespace=~\"$namespace\"}[5m]))",
@@ -1249,7 +1249,7 @@ data:
           "title": "Expired keys/sec",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 8,
@@ -1328,7 +1328,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (namespace) (rate(redis_expired_keys_total{namespace=~\"$namespace\"}[5m]))",
@@ -1346,7 +1346,7 @@ data:
           "title": "Rejected connections/sec",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 16,
@@ -1429,7 +1429,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (namespace) (rate(redis_rejected_connections_total{namespace=~\"$namespace\"}[5m]))",
@@ -1447,7 +1447,7 @@ data:
           "title": "Keys per database",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -1526,7 +1526,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (namespace, db) (redis_db_keys{namespace=~\"$namespace\"})",
@@ -1543,7 +1543,7 @@ data:
           "title": "Network throughput",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 12,
@@ -1622,7 +1622,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (namespace) (rate(redis_net_input_bytes_total{namespace=~\"$namespace\"}[5m]))",
@@ -1634,7 +1634,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "sum by (namespace) (rate(redis_net_output_bytes_total{namespace=~\"$namespace\"}[5m]))",
@@ -1656,6 +1656,24 @@ data:
       "templating": {
         "list": [
           {
+            "name": "datasource",
+            "label": "Datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {
+              "selected": false,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "options": [],
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false
+          },
+          {
             "current": {
               "selected": false,
               "text": "All",
@@ -1663,7 +1681,7 @@ data:
             },
             "datasource": {
               "type": "prometheus",
-              "uid": "prometheus"
+              "uid": "${datasource}"
             },
             "definition": "label_values(redis_up, namespace)",
             "hide": 0,

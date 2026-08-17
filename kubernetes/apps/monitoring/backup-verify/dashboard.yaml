@@ -76,6 +76,24 @@ data:
       "templating": {
         "list": [
           {
+            "name": "loki",
+            "label": "Logs",
+            "type": "datasource",
+            "query": "loki",
+            "current": {
+              "selected": false,
+              "text": "Loki",
+              "value": "loki"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "options": [],
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false
+          },
+          {
             "name": "datasource",
             "label": "Datasource",
             "type": "datasource",
@@ -299,7 +317,7 @@ data:
           },
           "datasource": {
             "type": "loki",
-            "uid": "loki"
+            "uid": "${loki}"
           },
           "fieldConfig": {
             "defaults": {
@@ -353,7 +371,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "loki",
-                "uid": "loki"
+                "uid": "${loki}"
               },
               "instant": true,
               "queryType": "instant",
@@ -683,7 +701,7 @@ data:
           },
           "datasource": {
             "type": "loki",
-            "uid": "loki"
+            "uid": "${loki}"
           },
           "fieldConfig": {
             "defaults": {
@@ -708,7 +726,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "loki",
-                "uid": "loki"
+                "uid": "${loki}"
               },
               "queryType": "instant",
               "instant": true,
@@ -767,7 +785,7 @@ data:
           },
           "datasource": {
             "type": "loki",
-            "uid": "loki"
+            "uid": "${loki}"
           },
           "fieldConfig": {
             "defaults": {
@@ -792,7 +810,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "loki",
-                "uid": "loki"
+                "uid": "${loki}"
               },
               "queryType": "instant",
               "instant": true,
@@ -864,7 +882,7 @@ data:
           },
           "datasource": {
             "type": "loki",
-            "uid": "loki"
+            "uid": "${loki}"
           },
           "fieldConfig": {
             "defaults": {
@@ -889,7 +907,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "loki",
-                "uid": "loki"
+                "uid": "${loki}"
               },
               "queryType": "instant",
               "instant": true,
@@ -949,7 +967,7 @@ data:
           },
           "datasource": {
             "type": "loki",
-            "uid": "loki"
+            "uid": "${loki}"
           },
           "fieldConfig": {
             "defaults": {
@@ -974,7 +992,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "loki",
-                "uid": "loki"
+                "uid": "${loki}"
               },
               "queryType": "instant",
               "instant": true,
@@ -1034,7 +1052,7 @@ data:
           },
           "datasource": {
             "type": "loki",
-            "uid": "loki"
+            "uid": "${loki}"
           },
           "fieldConfig": {
             "defaults": {
@@ -1059,7 +1077,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "loki",
-                "uid": "loki"
+                "uid": "${loki}"
               },
               "queryType": "instant",
               "instant": true,
@@ -1132,7 +1150,7 @@ data:
           },
           "datasource": {
             "type": "loki",
-            "uid": "loki"
+            "uid": "${loki}"
           },
           "options": {
             "showTime": true,
@@ -1147,7 +1165,7 @@ data:
               "refId": "A",
               "datasource": {
                 "type": "loki",
-                "uid": "loki"
+                "uid": "${loki}"
               },
               "expr": "{namespace=\"backup-verify\", container=~\"verify|fetch-credentials\"}"
             }

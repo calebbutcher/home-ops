@@ -55,7 +55,7 @@ data:
               "cacheTimeout": null,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -133,7 +133,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -193,7 +193,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -258,7 +258,7 @@ data:
               "cacheTimeout": null,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -337,7 +337,7 @@ data:
               "cacheTimeout": null,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -417,7 +417,7 @@ data:
               "cacheTimeout": null,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -497,7 +497,7 @@ data:
               "cacheTimeout": null,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -577,7 +577,7 @@ data:
               "cacheTimeout": null,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -656,7 +656,7 @@ data:
               "cacheTimeout": null,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -734,7 +734,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -804,11 +804,29 @@ data:
       "templating": {
         "list": [
           {
+            "name": "datasource",
+            "label": "Datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {
+              "selected": false,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "options": [],
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false
+          },
+          {
             "allValue": null,
             "current": {},
             "datasource": {
               "type": "prometheus",
-              "uid": "prometheus"
+              "uid": "${datasource}"
             },
             "definition": "label_values(cs_info, instance)",
             "description": null,

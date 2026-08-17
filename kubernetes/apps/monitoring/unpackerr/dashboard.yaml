@@ -64,7 +64,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "How long unpackerr has been running",
           "fieldConfig": {
@@ -113,7 +113,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "builder",
               "expr": "unpackerr_uptime_seconds_total{instance=\"$instance\"}",
@@ -141,7 +141,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "Contains counts for all Unpackerr queue gauges. As items progress through the queue, they transition from one of these states to another.",
           "fieldConfig": {
@@ -222,7 +222,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "builder",
               "expr": "unpackerr_gauges{instance=\"$instance\"}",
@@ -237,7 +237,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "Displays totals for all Unpackerr queue counters. Contains command hooks, web hooks, finished and retried extraction counts.",
           "fieldConfig": {
@@ -316,7 +316,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "builder",
               "expr": "sum by(name) (unpackerr_counters{instance=\"$instance\"})",
@@ -331,7 +331,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "Shows the number of items in the activity queue for each starr app that Unpackerr is polling.",
           "fieldConfig": {
@@ -411,7 +411,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "builder",
               "expr": "sum by(app, url) (unpackerr_app_queue_size{instance=\"$instance\"})",
@@ -427,7 +427,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "Contains channel buffer sizes. Under normal conditions these are always zero, or very close to zero.",
           "fieldConfig": {
@@ -506,7 +506,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "builder",
               "expr": "unpackerr_buffers{instance=\"$instance\"}",
@@ -534,7 +534,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "Visualization of API responses times from [[starrUrl]] and also includes request + error counts.",
           "fieldConfig": {
@@ -694,7 +694,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "builder",
               "expr": "unpackerr_app_queue_fetch_time_seconds{url=\"$starrUrl\", instance=\"$instance\"}",
@@ -706,7 +706,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "builder",
               "exemplar": false,
@@ -721,7 +721,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "builder",
               "expr": "increase(unpackerr_app_queue_fetch_errors_total{url=\"$starrUrl\", instance=\"$instance\"}[$__rate_interval])",
@@ -753,7 +753,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "This is how many bytes have been written from extracted archives via source: [[source]]",
           "fieldConfig": {
@@ -802,7 +802,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "builder",
               "expr": "unpackerr_bytes_written_total{instance=\"$instance\", url=\"$source\"}",
@@ -813,7 +813,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "hide": false,
               "refId": "B"
@@ -825,7 +825,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "This is how many archive files (rar/zip/etc) that have been extracted via source: [[source]]",
           "fieldConfig": {
@@ -874,7 +874,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "builder",
               "expr": "unpackerr_archives_read_total{instance=\"$instance\", url=\"$source\"}",
@@ -890,7 +890,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "This is how many files that have been extracted and written to disk via source: [[source]]",
           "fieldConfig": {
@@ -939,7 +939,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "builder",
               "expr": "unpackerr_files_extracted_total{instance=\"$instance\", url=\"$source\"}",
@@ -955,7 +955,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "description": "This histogram depicts the duration of each extraction. Each extraction generally represents 1 item in a starr app, or 1 folder in a folder watcher. This may include any number of archives. Via source: [[source]]",
           "fieldConfig": {
@@ -1022,7 +1022,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "builder",
               "expr": "increase(unpackerr_extract_time_seconds_bucket{instance=\"$instance\", url=\"$source\"}[$__rate_interval])",
@@ -1047,10 +1047,28 @@ data:
       "templating": {
         "list": [
           {
+            "name": "datasource",
+            "label": "Datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {
+              "selected": false,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "options": [],
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false
+          },
+          {
             "current": {},
             "datasource": {
               "type": "prometheus",
-              "uid": "prometheus"
+              "uid": "${datasource}"
             },
             "definition": "label_values(unpackerr_app_queue_size{instance=\"$instance\"},url)",
             "description": "This only includes urls for starr apps, not folders.",
@@ -1073,7 +1091,7 @@ data:
             "current": {},
             "datasource": {
               "type": "prometheus",
-              "uid": "prometheus"
+              "uid": "${datasource}"
             },
             "definition": "label_values(unpackerr_counters,instance)",
             "description": "Unpackerr instance, just in case you run multiple.",
@@ -1097,7 +1115,7 @@ data:
             "current": {},
             "datasource": {
               "type": "prometheus",
-              "uid": "prometheus"
+              "uid": "${datasource}"
             },
             "definition": "label_values(unpackerr_archives_read_total{instance=\"$instance\"},url)",
             "description": "This url is populated by \"apps\" (and folders) that have had items extracted.",

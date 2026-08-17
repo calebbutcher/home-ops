@@ -54,7 +54,7 @@ data:
         },
         {
           "cacheTimeout": null,
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -138,7 +138,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "decimals": 1,
           "fieldConfig": {
             "defaults": {
@@ -265,7 +265,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "decimals": 1,
           "fieldConfig": {
             "defaults": {
@@ -367,7 +367,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "decimals": 1,
           "fieldConfig": {
             "defaults": {
@@ -479,7 +479,7 @@ data:
           "type": "row"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -538,7 +538,7 @@ data:
           "type": "stat"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -597,7 +597,7 @@ data:
           "type": "stat"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -678,7 +678,7 @@ data:
           "type": "timeseries"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -774,7 +774,7 @@ data:
               "bars": false,
               "dashLength": 10,
               "dashes": false,
-              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
               "decimals": 1,
               "fieldConfig": {
                 "defaults": {
@@ -879,7 +879,7 @@ data:
               "bars": false,
               "dashLength": 10,
               "dashes": false,
-              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
               "decimals": 1,
               "fieldConfig": {
                 "defaults": {
@@ -997,7 +997,7 @@ data:
               "bars": false,
               "dashLength": 10,
               "dashes": false,
-              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
               "decimals": 1,
               "fieldConfig": {
                 "defaults": {
@@ -1099,7 +1099,7 @@ data:
               "bars": false,
               "dashLength": 10,
               "dashes": false,
-              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
               "decimals": 1,
               "fieldConfig": {
                 "defaults": {
@@ -1201,7 +1201,7 @@ data:
               "bars": false,
               "dashLength": 10,
               "dashes": false,
-              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
               "decimals": 1,
               "fieldConfig": {
                 "defaults": {
@@ -1308,7 +1308,26 @@ data:
       "style": "dark",
       "tags": [],
       "templating": {
-        "list": []
+        "list": [
+          {
+            "name": "datasource",
+            "label": "Datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {
+              "selected": false,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "options": [],
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false
+          }
+        ]
       },
       "time": {
         "from": "now-24h",
