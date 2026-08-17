@@ -44,6 +44,12 @@ spec:
     # Applied to BOTH server and worker. Kubernetes gives `env` precedence over
     # the chart's `envFrom` config secret, so these win for the keys they set.
     global:
+      # The chart's default preset is `soft` (preferred), which lets the
+      # scheduler co-locate replicas and quietly defeats the point of running
+      # more than one. `hard` renders a required anti-affinity term on
+      # kubernetes.io/hostname, so server replicas can never share a node.
+      affinity:
+        podAntiAffinity: hard
       env:
         - name: AUTHENTIK_SECRET_KEY
           valueFrom:
@@ -69,7 +75,18 @@ spec:
         - authentik-blueprints
 
     server:
-      replicas: 1
+      # HA: authentik-server is stateless (all state lives in CNPG + Redis), so
+      # this is purely a scheduling change. At 1 replica any reboot of the node
+      # holding it was a full SSO outage — and because the node dies rather than
+      # drains (our upgrades are cordon-only), the pod sat unschedulable for the
+      # default 5m `node.kubernetes.io/unreachable` toleration before it was even
+      # evicted. That took every forwardAuth-gated ingress down with it.
+      replicas: 2
+      # Lets a voluntary eviction (drain) take one replica but never both.
+      # Does NOT help on hard node loss — that path is the anti-affinity above.
+      pdb:
+        enabled: true
+        minAvailable: 1
       ingress:
         enabled: false                   # we manage our own Ingress object
       resources:
