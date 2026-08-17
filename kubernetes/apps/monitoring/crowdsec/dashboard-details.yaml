@@ -47,7 +47,7 @@ data:
           "collapsed": true,
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 1,
@@ -64,7 +64,7 @@ data:
               "dashes": false,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -113,7 +113,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "process_resident_memory_bytes{instance=\"$instance\"}",
                   "interval": "",
@@ -160,7 +160,7 @@ data:
               "dashes": false,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -206,7 +206,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "rate(process_cpu_seconds_total{instance=\"$instance\"}[$__interval])*100",
                   "interval": "",
@@ -249,7 +249,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -312,7 +312,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "(process_start_time_seconds{instance=\"$instance\"})*1000",
                   "instant": false,
@@ -331,7 +331,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "refId": "A"
             }
@@ -343,7 +343,7 @@ data:
           "collapsed": true,
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 1,
@@ -356,7 +356,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -406,7 +406,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "exemplar": true,
                   "expr": "sum(cs_alerts)",
@@ -421,7 +421,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -494,7 +494,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "exemplar": true,
                   "expr": "cs_alerts{instance=\"$instance\"}",
@@ -511,7 +511,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "refId": "A"
             }
@@ -523,7 +523,7 @@ data:
           "collapsed": true,
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 1,
@@ -540,7 +540,7 @@ data:
               "dashes": false,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "decimals": 1,
               "fieldConfig": {
@@ -591,7 +591,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "exemplar": true,
                   "expr": "sum(increase(cs_filesource_hits_total{instance=\"$instance\"}[$__interval])) by (source)",
@@ -603,7 +603,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "exemplar": true,
                   "expr": "sum(increase(cs_journalctlsource_hits_total{instance=\"$instance\"}[$__interval])) by (source)",
@@ -615,7 +615,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "exemplar": true,
                   "expr": "sum(increase(cs_cloudwatch_stream_hits_total{instance=\"$instance\"}[$__interval])) by (group, stream)",
@@ -627,7 +627,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "exemplar": true,
                   "expr": "sum(increase(cs_syslogsource_hits_total{instance=\"$instance\"}[$__interval])) by (source)",
@@ -675,7 +675,7 @@ data:
               "dashes": false,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "decimals": 1,
               "fieldConfig": {
@@ -726,7 +726,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "sum(increase(cs_parser_hits_ok_total{instance=\"$instance\"}[$__interval])) by (source)",
                   "interval": "",
@@ -773,7 +773,7 @@ data:
               "dashes": false,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "decimals": 1,
               "fieldConfig": {
@@ -824,7 +824,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "sum(increase(cs_parser_hits_ko_total{instance=\"$instance\"}[$__interval])) by (source)",
                   "interval": "",
@@ -867,7 +867,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -917,7 +917,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "editorMode": "code",
                   "exemplar": true,
@@ -936,7 +936,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "refId": "A"
             }
@@ -948,7 +948,7 @@ data:
           "collapsed": true,
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "h": 1,
@@ -965,7 +965,7 @@ data:
               "dashes": false,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "decimals": 1,
               "fieldConfig": {
@@ -1016,7 +1016,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "sum(cs_buckets{instance=\"$instance\"}) by (name)",
                   "interval": "",
@@ -1062,7 +1062,7 @@ data:
               "dashes": false,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "decimals": 1,
               "fieldConfig": {
@@ -1113,7 +1113,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "sum(increase(cs_bucket_created_total{instance=\"$instance\"}[$__interval])) by (name)",
                   "interval": "",
@@ -1159,7 +1159,7 @@ data:
               "dashes": false,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "decimals": 1,
               "fieldConfig": {
@@ -1210,7 +1210,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "sum(increase(cs_bucket_overflowed_total{instance=\"$instance\"}[$__interval])) by (name)",
                   "interval": "",
@@ -1257,7 +1257,7 @@ data:
               "dashes": false,
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "decimals": 1,
               "fieldConfig": {
@@ -1308,7 +1308,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "expr": "sum(increase(cs_bucket_underflowed_total{instance=\"$instance\"}[$__interval])) by (name)",
                   "interval": "",
@@ -1351,7 +1351,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "fieldConfig": {
                 "defaults": {
@@ -1401,7 +1401,7 @@ data:
                 {
                   "datasource": {
                     "type": "prometheus",
-                    "uid": "prometheus"
+                    "uid": "${datasource}"
                   },
                   "editorMode": "code",
                   "exemplar": true,
@@ -1420,7 +1420,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "refId": "A"
             }
@@ -1436,10 +1436,28 @@ data:
       "templating": {
         "list": [
           {
+            "name": "datasource",
+            "label": "Datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {
+              "selected": false,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "options": [],
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false
+          },
+          {
             "current": {},
             "datasource": {
               "type": "prometheus",
-              "uid": "prometheus"
+              "uid": "${datasource}"
             },
             "definition": "label_values(cs_info, instance)",
             "hide": 0,
@@ -1465,7 +1483,7 @@ data:
             "current": {},
             "datasource": {
               "type": "prometheus",
-              "uid": "prometheus"
+              "uid": "${datasource}"
             },
             "definition": "label_values(cs_parsing_time_seconds_bucket{instance=\"$instance\"}, type)",
             "hide": 0,
@@ -1487,7 +1505,7 @@ data:
             "current": {},
             "datasource": {
               "type": "prometheus",
-              "uid": "prometheus"
+              "uid": "${datasource}"
             },
             "definition": "label_values(cs_parsing_time_seconds_bucket{instance=\"$instance\", type=\"$datasource_type\"}, source)",
             "hide": 0,

@@ -70,7 +70,7 @@ data:
           "title": "Up",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -136,7 +136,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "mysql_up",
@@ -152,7 +152,7 @@ data:
           "title": "Uptime",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 4,
@@ -199,7 +199,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "mysql_global_status_uptime",
@@ -216,7 +216,7 @@ data:
           "title": "Connections used",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 9,
@@ -272,7 +272,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "mysql_global_status_threads_connected / mysql_global_variables_max_connections * 100",
@@ -288,7 +288,7 @@ data:
           "title": "Queries/sec",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 14,
@@ -336,7 +336,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_queries[5m])",
@@ -352,7 +352,7 @@ data:
           "title": "Buffer pool hit ratio",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 19,
@@ -400,7 +400,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "(1 - (\n  rate(mysql_global_status_innodb_buffer_pool_reads[5m])\n  / clamp_min(rate(mysql_global_status_innodb_buffer_pool_read_requests[5m]), 1)\n)) * 100",
@@ -430,7 +430,7 @@ data:
           "title": "Queries/sec",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -509,7 +509,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_queries[5m])",
@@ -521,7 +521,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_questions[5m])",
@@ -539,7 +539,7 @@ data:
           "title": "Connections",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 12,
@@ -618,7 +618,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "mysql_global_status_threads_connected",
@@ -630,7 +630,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "mysql_global_status_threads_running",
@@ -642,7 +642,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "mysql_global_variables_max_connections",
@@ -660,7 +660,7 @@ data:
           "title": "Slow queries/sec",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -743,7 +743,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_slow_queries[5m])",
@@ -760,7 +760,7 @@ data:
           "title": "Aborted/sec",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 8,
@@ -839,7 +839,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_aborted_connects[5m])",
@@ -851,7 +851,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_aborted_clients[5m])",
@@ -869,7 +869,7 @@ data:
           "title": "Temp tables/sec",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 16,
@@ -948,7 +948,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_created_tmp_tables[5m])",
@@ -960,7 +960,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_created_tmp_disk_tables[5m])",
@@ -991,7 +991,7 @@ data:
           "title": "Buffer pool hit ratio",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -1072,7 +1072,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "(1 - (\n  rate(mysql_global_status_innodb_buffer_pool_reads[5m])\n  / clamp_min(rate(mysql_global_status_innodb_buffer_pool_read_requests[5m]), 1)\n)) * 100",
@@ -1090,7 +1090,7 @@ data:
           "title": "Buffer pool pages",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 8,
@@ -1169,7 +1169,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "mysql_global_status_buffer_pool_pages",
@@ -1187,7 +1187,7 @@ data:
           "title": "Handler operations/sec",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 16,
@@ -1266,7 +1266,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_handlers_total{handler=~\"write|update|delete|read_key|read_next|read_rnd|commit|rollback\"}[5m])",
@@ -1297,7 +1297,7 @@ data:
           "title": "Table lock waits/sec",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 0,
@@ -1376,7 +1376,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_table_locks_waited[5m])",
@@ -1388,7 +1388,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_table_locks_immediate[5m])",
@@ -1406,7 +1406,7 @@ data:
           "title": "Network throughput",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${datasource}"
           },
           "gridPos": {
             "x": 12,
@@ -1485,7 +1485,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_bytes_received[5m])",
@@ -1497,7 +1497,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${datasource}"
               },
               "editorMode": "code",
               "expr": "rate(mysql_global_status_bytes_sent[5m])",
@@ -1517,7 +1517,26 @@ data:
         "uptime-kuma"
       ],
       "templating": {
-        "list": []
+        "list": [
+          {
+            "name": "datasource",
+            "label": "Datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {
+              "selected": false,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "options": [],
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false
+          }
+        ]
       },
       "time": {
         "from": "now-6h",
