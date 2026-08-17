@@ -1,0 +1,64 @@
+---
+# Scales k3s's bundled CoreDNS off its hard-coded 1 replica.
+#
+# Scaling the Deployment directly does not stick: CoreDNS is a k3s Addon, so the
+# manifest re-applies and resets replicas whenever k3s restarts. This autoscaler
+# polls every 10s and re-scales, making that reset a blip rather than a
+# permanent regression — and k3s keeps owning the manifest and the NodeHosts
+# ConfigMap it maintains (which `--disable=coredns` would strand).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: coredns-autoscaler
+  namespace: kube-system
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: cluster-proportional-autoscaler
+      version: "1.1.0"
+      sourceRef:
+        kind: HelmRepository
+        name: cluster-proportional-autoscaler
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # Without this the resources are named
+    # `coredns-autoscaler-cluster-proportional-autoscaler`.
+    fullnameOverride: coredns-autoscaler
+
+    options:
+      # The Deployment being scaled, and the namespace both it and this
+      # autoscaler live in.
+      target: deployment/coredns
+      namespace: kube-system
+
+    config:
+      linear:
+        # Stock upstream ratios. Note they do NOT get us off 1 replica on their
+        # own: at 36 cores / 9 nodes the formula is
+        #   max(ceil(36/256), ceil(9/16)) = 1
+        # so the two floors below are what actually deliver HA here. The ratios
+        # still matter — they take over automatically if the cluster grows.
+        coresPerReplica: 256
+        nodesPerReplica: 16
+        # Hard floor, independent of cluster size. This is the setting that
+        # makes today's cluster run 2 CoreDNS pods.
+        min: 2
+        # Belt-and-braces with `min`: guarantees >= 2 replicas whenever there is
+        # more than one node, so the floor cannot be lost to a future ratio edit.
+        preventSinglePointFailure: true
+
+    # Tiny controller — it only lists nodes and patches a scale subresource.
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        memory: 64Mi
