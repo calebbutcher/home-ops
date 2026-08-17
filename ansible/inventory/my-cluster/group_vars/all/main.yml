@@ -4,7 +4,7 @@
 # Keep roughly in sync with the SUC Plans' target so a freshly-joined node lands within
 # the +1 minor skew window (never re-run site.yml just to bump this — it has no serial:).
 # renovate: datasource=github-releases depName=k3s-io/k3s
-k3s_version: v1.34.10+k3s1
+k3s_version: v1.35.7+k3s1
 # this is the user that has ssh access to thee machines
 ansible_user: ubuntu
 systemd_dir: /etc/systemd/system
