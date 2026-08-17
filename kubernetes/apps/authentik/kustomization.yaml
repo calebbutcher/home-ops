@@ -12,7 +12,6 @@ resources:
   - postgres-objectstore.yaml
   - postgres-cluster.yaml
   - postgres-scheduledbackup.yaml
-  - pvc.yaml
   - redis.yaml
   - helmrelease.yaml
   - ingress.yaml

@@ -97,7 +97,10 @@ spec:
           memory: 1Gi
 
     worker:
-      replicas: 1
+      # Stateless (blueprints, outpost sync, email) and off the login path, so a
+      # second replica is cheap insurance rather than an outage fix. Inherits the
+      # hard anti-affinity preset set under `global` above.
+      replicas: 2
       env:
         # Surfaced to blueprints via `!Env <NAME>` so OIDC client secrets never
         # appear in a blueprint file in Git.
