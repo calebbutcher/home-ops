@@ -70,12 +70,38 @@ spec:
         # changes() is the right function here: increase() extrapolates and can
         # return a small non-zero value over a window with no actual increment.
         #
+        # ⚠️ The `max by (obj_namespace, obj_name)` is load-bearing — do not
+        # simplify it away. These series carry `pod` and `instance` labels from
+        # the operator Deployment, so a counter that lives in the operator's
+        # memory is scraped as a POD-SCOPED series. Every operator restart mints
+        # a brand-new series that reads a flat 0 until that source's next daily
+        # run, and a flat series has zero changes() — so the un-aggregated form
+        # fires on all 16 sources at once while every backup is perfectly
+        # healthy. That is not hypothetical: the k3s v1.35.7 rollout on
+        # 2026-08-17 rescheduled the operator at 18:54 and all 16 warned exactly
+        # 1h later, with lastSyncTime on every ReplicationSource just hours old
+        # and volume_out_of_sync flat zero throughout. Aggregating away the pod
+        # identity turns the restart into a 22->0 drop on one continuous series,
+        # which counts as a change and stays quiet. Any operator restart does
+        # this — node reboot, chart upgrade, eviction — so it recurs on every
+        # k3s upgrade until aggregated.
+        #
+        # The cost of that fix: for 26h after a restart the reset itself is the
+        # one change in the window, so this backstop cannot fire during it.
+        # VolSyncOutOfSync above is the reset-immune signal that covers the gap —
+        # it is a gauge the operator recomputes from the CR's own status, which
+        # survives the restart that zeroes this counter. Backstop, not primary.
+        #
         # A brand-new ReplicationSource has no completed sync yet and so will fire
         # this until its first run — which is correct, an unproven backup is not a
         # backup, but expect it briefly when adding one.
         - alert: VolSyncNoRecentSync
           expr: |
-            changes(volsync_sync_duration_seconds_count{role="source"}[26h]) == 0
+            changes(
+              max by (obj_namespace, obj_name) (
+                volsync_sync_duration_seconds_count{role="source"}
+              )[26h:5m]
+            ) == 0
           for: 1h
           labels:
             severity: warning
