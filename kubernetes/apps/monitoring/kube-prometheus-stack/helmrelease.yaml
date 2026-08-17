@@ -96,6 +96,12 @@ spec:
         # Two replicas for HA; Thanos Query de-duplicates them via the
         # prometheus_replica external label the operator injects.
         replicas: 2
+        # Same reasoning as alertmanagerSpec below: the chart default is "soft", so
+        # these two were only *preferentially* separated. They happen to sit on
+        # different nodes today, but nothing enforced it — and with local-path
+        # storage a co-located pair would have been pinned that way permanently,
+        # making the second replica decorative.
+        podAntiAffinity: hard
         # Short local retention — Thanos holds long-term history in object
         # storage. 2d comfortably covers the 2h block + sidecar upload lag.
         retention: 2d
@@ -334,6 +340,20 @@ spec:
             alertmanagerConfig: discord
         alertmanagerConfigMatcherStrategy:
           type: None
+        # HA: at 1 replica on a node-bound local-path PVC (below), losing that node
+        # meant this pod could not reschedule at all — it sat Pending until the node
+        # returned, so no alerts fired for the duration. That is the worst possible
+        # time to be silent. Alertmanager is built to cluster: the operator wires the
+        # gossip mesh via the headless Service, and peers replicate silences and
+        # dedupe notifications so two replicas do not double-send.
+        replicas: 2
+        # The chart defaults this to "soft" (preferred), which permits co-location.
+        # That is unsafe here specifically because storage is local-path: whichever
+        # node a replica first lands on is where its PVC lives permanently, so two
+        # replicas sharing a node would be pinned together for good and the second
+        # replica would buy nothing. "hard" makes separation a scheduling
+        # requirement (topology key defaults to kubernetes.io/hostname).
+        podAntiAffinity: hard
         # Durable storage so silences / notification state survive restarts.
         storage:
           volumeClaimTemplate:
