@@ -9,8 +9,6 @@ metadata:
   namespace: authentik
 spec:
   replicas: 1
-  strategy:
-    type: Recreate          # single RWO PVC, no rolling overlap
   selector:
     matchLabels:
       app: authentik-redis
@@ -65,9 +63,13 @@ spec:
             limits:
               memory: 64Mi
       volumes:
+        # emptyDir, not a PVC. This is a pure cache (see --save/--appendonly above),
+        # so there is nothing here worth persisting — and the PVC actively hurt: it
+        # was `local-path`, which is node-bound, so on node loss this pod could not
+        # reschedule at all and sat Pending until the node came back. That took
+        # authentik down with it even after the server tier went HA in #361.
         - name: data
-          persistentVolumeClaim:
-            claimName: authentik-redis
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
