@@ -1,0 +1,72 @@
+---
+# Safe reboot of a standalone (non-k3s) VM.
+#
+# Right now that is only the Technitium DNS pair, and they are a genuine HA pair:
+# rebooting dns-02 before dns-01 has come back answering queries would take
+# cluster-wide DNS down. `serial: 1` alone does not prevent that, because
+# ansible.builtin.reboot returns as soon as SSH answers — which happens well
+# before Docker has restarted the Technitium container.
+#
+# So this gates on the service, not the host: the same web-service probe the
+# technitium role and the keepalived health check already use, plus a real DNS
+# query against the host to prove it is actually resolving.
+#
+# The DNS gates are keyed on `technitium_server_domain`, which is set in
+# host_vars for exactly the two DNS VMs. A future non-Technitium standalone VM
+# added to this group therefore just reboots and waits for SSH, rather than
+# failing a probe that was never meant for it.
+
+- name: "{{ inventory_hostname }} — no reboot required"
+  ansible.builtin.debug:
+    msg: "No reboot needed; host left untouched."
+  when: not (reboot_needed | default(false) | bool)
+
+- name: Safe standalone VM reboot
+  when:
+    - reboot | default(false) | bool
+    - reboot_needed | default(false) | bool
+  block:
+    - name: Reboot {{ inventory_hostname }}
+      ansible.builtin.reboot:
+        reboot_command: "{{ custom_reboot_command | default(omit) }}"
+        msg: "Rebooting after OS updates"
+        pre_reboot_delay: 5
+        post_reboot_delay: 30
+        reboot_timeout: "{{ reboot_timeout | default(600) | int }}"
+
+    # Same probe as roles/technitium/tasks/technitium.yml and the keepalived
+    # health check in roles/technitium/files/check_technitium.sh.
+    - name: Wait for the Technitium web service to answer on {{ inventory_hostname }}
+      ansible.builtin.uri:
+        url: http://127.0.0.1:5380/api/user/session/get
+        status_code: 200
+      register: _tech_web
+      retries: "{{ ((service_ready_timeout | default(300) | int) / 5) | round(0, 'ceil') | int }}"
+      delay: 5
+      until: _tech_web.status is defined and _tech_web.status == 200
+      when: technitium_server_domain is defined
+
+    # Port 5380 answering is not proof it is serving DNS — query it for its own
+    # FQDN and require a real answer.
+    - name: Confirm {{ inventory_hostname }} is answering DNS queries
+      ansible.builtin.command: >-
+        dig +short +time=2 +tries=1 @{{ inventory_hostname }}
+        {{ technitium_server_domain }}
+      register: _dns_probe
+      changed_when: false
+      retries: 12
+      delay: 5
+      until: _dns_probe.rc == 0 and (_dns_probe.stdout | trim | length) > 0
+      delegate_to: localhost
+      become: false
+      when: technitium_server_domain is defined
+
+  rescue:
+    - name: Report the standalone VM failure
+      ansible.builtin.fail:
+        msg: >-
+          Safe reboot FAILED for {{ inventory_hostname }}. The roll has been
+          stopped before the next host — with a two-node DNS pair, continuing
+          would risk taking cluster-wide name resolution down. Check
+          `docker ps` / `docker logs technitium` on the host, and confirm its
+          peer is still serving before retrying.

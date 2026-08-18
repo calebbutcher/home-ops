@@ -109,32 +109,38 @@ kubectl -n media get cluster tracearr-postgres -w   # new primary within seconds
 
 The app should reconnect on its own.
 
-## Worker drains (enabled, now that the DBs are HA)
+## Worker drains — CNPG is always excluded
 
-The SUC agent Plan (`.../system-upgrade-controller/plans/agent.yaml`) drains movable pods
-before the binary swap:
+There are two things that reboot a worker, and they treat drains differently:
 
-```yaml
-  drain:
-    force: true
-    ignoreDaemonSets: true
-    deleteEmptydirData: true        # note: lowercase "dir" is the CRD field name
-    skipWaitForDeleteTimeout: 60
-    podSelector:                     # drain everything EXCEPT CNPG pods
-      matchExpressions:
-        - { key: cnpg.io/cluster, operator: DoesNotExist }
-```
+- **k3s version upgrades (SUC)** — `cordon: true` only, **no drain**. A `drain:` block was
+  added here in `e8993e6` when the DBs went HA and reverted in `e9ba696`: it predates the
+  Longhorn migration and deadlocks against it. Do not re-add it. See
+  [updates.md](updates.md#k3s-version-upgrades-system-upgrade-controller).
+- **OS package updates (Ansible)** — *does* drain, via
+  [`ansible/tasks/k8s_node_reboot.yml`](../ansible/tasks/k8s_node_reboot.yml), using a pod
+  selector that excludes both Longhorn's `instance-manager` and every CNPG pod:
 
-**Why exclude CNPG.** Their PVCs are node-local (`local-path`), so a drained replica can't
-move anyway, and draining a node with a CNPG **primary** forces a switchover — which on a busy
-DB re-triggers [#828](https://github.com/cloudnative-pg/plugin-barman-cloud/issues/828). Excluding
-them lets CNPG restart in place on the k3s restart (no switchover, no #828), while everything
-movable migrates gracefully.
+  ```text
+  longhorn.io/component!=instance-manager,!cnpg.io/cluster
+  ```
 
-**Trade-off to know:** other single-instance `local-path` apps (Prometheus TSDB, MariaDB,
-`*arr` configs) also can't relocate, so they blip/down for their node's upgrade window — that's
-inherent to draining on a node-local-storage cluster. Cordon-only (drop the `drain:` block) is
-gentler for those and remains a valid choice.
+**Why exclude CNPG.** Draining a node holding a CNPG **primary** forces a switchover, which
+on a busy DB re-triggers [#828](https://github.com/cloudnative-pg/plugin-barman-cloud/issues/828)
+(hit on immich, 622 pending WALs). It would also block: each `<cluster>-primary` PDB allows
+**0** disruptions until the operator has moved the primary itself. Excluding them lets CNPG
+ride the reboot and fail over on its own — which it does correctly on hard node loss —
+while everything movable migrates gracefully first.
+
+**Trade-off to know:** single-instance `local-path` apps (Prometheus TSDB, MariaDB, `*arr`
+configs) cannot relocate either, so they are down for their node's reboot window regardless.
+That is inherent to node-local storage, not to draining. `-e drain=false` gives cordon-only
+behaviour and remains a valid choice.
+
+⚠️ The CNPG data PVCs are **no longer `local-path`** — the Longhorn migration moved all 8
+clusters to `longhorn-single` (1 replica, `dataLocality: best-effort`). Older notes here that
+reasoned from "their PVCs are node-local" are out of date; the switchover/#828 argument is
+what still stands.
 
 ## Known issue: WAL archiving stuck after a busy switchover (#828)
 

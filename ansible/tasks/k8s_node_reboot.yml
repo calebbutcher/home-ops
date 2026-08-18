@@ -1,0 +1,137 @@
+---
+# Safe reboot of a k3s WORKER: cordon -> drain -> reboot -> wait Ready ->
+# uncordon -> wait for storage to settle.
+#
+# Why the drain needs a pod selector
+# ---------------------------------
+# A plain `kubectl drain` blocks forever on this cluster. Two sets of
+# PodDisruptionBudgets sit permanently at 0 allowed disruptions:
+#
+#   1. Longhorn's per-node `instance-manager` pod. `node-drain-policy` is
+#      `block-if-contains-last-replica`, and every worker holds the last healthy
+#      replica of at least one `longhorn-single` volume. That pod is owned by an
+#      `InstanceManager` CR rather than a DaemonSet, so `ignore_daemonsets` does
+#      not skip it, and `force` only permits *including* unmanaged pods — it does
+#      not bypass a PDB.
+#   2. Every CNPG `<cluster>-primary` PDB, which allows 0 disruptions until the
+#      operator has switched the primary elsewhere.
+#
+# So both are excluded from the selector. In a Kubernetes label selector
+# `key!=value` also matches objects that lack the key entirely, so
+# `longhorn.io/component!=instance-manager` still covers every ordinary pod;
+# `!cnpg.io/cluster` means "this label is absent".
+#
+# Excluding CNPG is deliberate beyond just unblocking the drain: forcing a
+# switchover on a busy database re-triggers plugin-barman-cloud #828 (see
+# docs/cnpg-ha.md), and CNPG already fails over correctly on hard node loss.
+# Its pods ride the reboot instead.
+#
+# Leaving instance-manager running does mean Longhorn's last-replica protection
+# is bypassed — but that is exactly the status quo today, since a cordon-only
+# reboot takes the same replicas down. This changes nothing for those volumes.
+
+- name: "{{ inventory_hostname }} — no reboot required, skipping drain"
+  ansible.builtin.debug:
+    msg: "No reboot needed; node left untouched and schedulable."
+  when: not (reboot_needed | default(false) | bool)
+
+- name: Safe worker reboot
+  when:
+    - reboot | default(false) | bool
+    - reboot_needed | default(false) | bool
+  block:
+    - name: Resolve node name
+      ansible.builtin.import_tasks: k8s_resolve_node.yml
+
+    - name: Cordon {{ k8s_node_name | default(inventory_hostname) }}
+      kubernetes.core.k8s_drain:
+        name: "{{ k8s_node_name }}"
+        state: cordon
+      delegate_to: localhost
+      become: false
+
+    - name: Drain workload pods off {{ k8s_node_name | default(inventory_hostname) }}
+      kubernetes.core.k8s_drain:
+        name: "{{ k8s_node_name }}"
+        state: drain
+        pod_selectors:
+          - "longhorn.io/component!=instance-manager,!cnpg.io/cluster"
+        delete_options:
+          ignore_daemonsets: true
+          delete_emptydir_data: true
+          force: true
+          wait_timeout: "{{ drain_timeout | default(300) | int }}"
+          wait_sleep: 5
+      delegate_to: localhost
+      become: false
+      when: drain | default(true) | bool
+
+    - name: Reboot {{ inventory_hostname }}
+      ansible.builtin.reboot:
+        reboot_command: "{{ custom_reboot_command | default(omit) }}"
+        msg: "Rebooting after OS updates"
+        pre_reboot_delay: 5
+        post_reboot_delay: 30
+        reboot_timeout: "{{ reboot_timeout | default(600) | int }}"
+
+    - name: Wait for {{ k8s_node_name | default(inventory_hostname) }} to report Ready
+      kubernetes.core.k8s_info:
+        kind: Node
+        name: "{{ k8s_node_name }}"
+      register: _node
+      until: >-
+        _node.resources is defined
+        and (_node.resources
+             | community.general.json_query("[0].status.conditions[?type=='Ready'].status | [0]")) == 'True'
+      retries: "{{ ((node_ready_timeout | default(600) | int) / 10) | round(0, 'ceil') | int }}"
+      delay: 10
+      delegate_to: localhost
+      become: false
+
+    - name: Uncordon {{ k8s_node_name | default(inventory_hostname) }}
+      kubernetes.core.k8s_drain:
+        name: "{{ k8s_node_name }}"
+        state: uncordon
+      delegate_to: localhost
+      become: false
+
+    - name: Wait for the Longhorn instance-manager to be running on {{ k8s_node_name | default(inventory_hostname) }}
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: longhorn-system
+        label_selectors:
+          - "longhorn.io/component=instance-manager"
+        field_selectors:
+          - "spec.nodeName={{ k8s_node_name }}"
+      register: _im
+      until: >-
+        _im.resources is defined
+        and (_im.resources
+             | community.general.json_query("[?status.phase=='Running'].metadata.name")
+             | length) > 0
+      retries: "{{ ((node_ready_timeout | default(600) | int) / 10) | round(0, 'ceil') | int }}"
+      delay: 10
+      delegate_to: localhost
+      become: false
+
+    # The gate that stops outages compounding: with serial:1, without this the
+    # next worker reboots while this one's replicas are still rebuilding, which
+    # can take both replicas of a 2-replica volume offline at once.
+    - name: Wait for Longhorn to settle after {{ k8s_node_name | default(inventory_hostname) }} returned
+      ansible.builtin.import_tasks: longhorn_healthy.yml
+      vars:
+        longhorn_wait_retries: "{{ ((storage_settle_timeout | default(900) | int) / 15) | round(0, 'ceil') | int }}"
+        longhorn_wait_delay: 15
+        longhorn_context: "post-reboot {{ inventory_hostname }}"
+
+  rescue:
+    - name: Report that the node was left cordoned
+      ansible.builtin.fail:
+        msg: >-
+          Safe reboot FAILED for {{ inventory_hostname }}
+          ({{ k8s_node_name | default('node name unresolved') }}).
+          The node has deliberately been left CORDONED so nothing reschedules onto
+          a host in an unknown state, and the roll has been stopped before the next
+          node. Investigate, then either `kubectl uncordon
+          {{ k8s_node_name | default('<node>') }}` once it is healthy, or re-run
+          this playbook with --limit {{ inventory_hostname }}.

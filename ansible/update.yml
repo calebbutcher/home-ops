@@ -3,38 +3,92 @@
 #
 # Usage:
 #   ansible-playbook update.yml                          # update only, no reboots
-#   ansible-playbook update.yml -e reboot=true           # update + reboot where needed
+#   ansible-playbook update.yml -e reboot=true           # update + safe rolling reboot
 #   ansible-playbook update.yml --limit master           # control plane only
 #   ansible-playbook update.yml --limit node             # workers only
 #   ansible-playbook update.yml --limit standalone_vms   # standalone VMs only
 #   ansible-playbook update.yml -e serial=2              # override rolling batch size
+#
+# Reboots are drained and gated
+# ----------------------------
+# With `-e reboot=true` each host is taken out of service properly rather than
+# just rebooted underneath its workloads:
+#
+#   workers  cordon -> drain -> reboot -> wait Ready -> uncordon -> wait for
+#            Longhorn to settle                       (tasks/k8s_node_reboot.yml)
+#   masters  cordon -> reboot -> wait Ready AND EtcdIsVoter -> uncordon
+#                                                    (tasks/k8s_master_reboot.yml)
+#   others   reboot -> wait for the service to answer (tasks/standalone_reboot.yml)
+#
+# The post-reboot gates are the point: `serial: 1` previously advanced as soon as
+# SSH answered, which is neither "node Ready" nor "storage rebuilt", so a slow
+# node let failures compound down the roll. See docs/updates.md.
+#
+# Kubernetes API calls run from the Ansible controller (delegate_to: localhost)
+# and need the same working kubeconfig `kubectl` uses.
+#
+# Extra variables:
+#   reboot                 (false) reboot hosts that signal a reboot is required
+#   drain                  (true)  drain workers before rebooting; false = cordon-only
+#   serial                 (1)     rolling batch size
+#   skip_preflight         (false) skip the cluster-health gate before the roll
+#   drain_timeout          (300)   seconds to wait for pods to evict
+#   reboot_timeout         (600)   seconds to wait for a host to come back on SSH
+#   node_ready_timeout     (600)   seconds to wait for a node to report Ready
+#   etcd_ready_timeout     (600)   seconds to wait for Ready + EtcdIsVoter
+#   storage_settle_timeout (900)   seconds to wait for Longhorn to stop rebuilding
+#   service_ready_timeout  (300)   seconds to wait for a standalone VM's service
 
 - name: Update k3s control plane nodes
   hosts: master
   serial: "{{ serial | default(1) }}"
   become: true
   gather_facts: true
+  # Stop the roll on the first failure instead of marching on to the next etcd
+  # member — continuing past a half-broken control-plane node costs quorum.
+  any_errors_fatal: true
   environment: "{{ proxy_env | default({}) }}"
   tasks:
+    - name: Check cluster health before starting
+      ansible.builtin.import_tasks: tasks/k8s_preflight.yml
+      when: reboot | default(false) | bool
+
     - name: Run OS update tasks
       ansible.builtin.import_tasks: tasks/os_update.yml
+
+    - name: Reboot safely if required
+      ansible.builtin.import_tasks: tasks/k8s_master_reboot.yml
 
 - name: Update k3s worker nodes
   hosts: node
   serial: "{{ serial | default(1) }}"
   become: true
   gather_facts: true
+  any_errors_fatal: true
   environment: "{{ proxy_env | default({}) }}"
   tasks:
+    # Re-checked here so `--limit node` gets the gate too; it is a no-op when the
+    # master play already ran it in the same invocation.
+    - name: Check cluster health before starting
+      ansible.builtin.import_tasks: tasks/k8s_preflight.yml
+      when: reboot | default(false) | bool
+
     - name: Run OS update tasks
       ansible.builtin.import_tasks: tasks/os_update.yml
+
+    - name: Reboot safely if required
+      ansible.builtin.import_tasks: tasks/k8s_node_reboot.yml
 
 - name: Update standalone VMs
   hosts: standalone_vms
   serial: "{{ serial | default(1) }}"
   become: true
   gather_facts: true
+  any_errors_fatal: true
   environment: "{{ proxy_env | default({}) }}"
   tasks:
     - name: Run OS update tasks
       ansible.builtin.import_tasks: tasks/os_update.yml
+
+    - name: Reboot safely if required
+      ansible.builtin.import_tasks: tasks/standalone_reboot.yml

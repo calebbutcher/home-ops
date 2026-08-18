@@ -101,6 +101,82 @@ nodes don't land far behind.
 those from the etcd snapshot if needed. The controller only bundles CoreDNS / metrics-server
 / local-path here (Traefik and ServiceLB are `--disable`d), so the upgrade surface is small.
 
+## OS package updates and node reboots (Ansible)
+
+Distro packages are a separate track from everything above — Renovate does not see
+them, and SUC only swaps the k3s binary. They are handled by
+[`ansible/update.yml`](../ansible/update.yml), which does an apt/dnf upgrade on every
+host and optionally reboots the ones that ask for it.
+
+```sh
+cd ansible
+ansible-playbook update.yml                        # update only, never reboots
+ansible-playbook update.yml -e reboot=true         # update + safe rolling reboot
+ansible-playbook update.yml -e reboot=true --limit node   # workers only
+```
+
+**Reboots are drained and gated.** `-e reboot=true` takes each host out of service
+properly rather than rebooting it underneath its workloads:
+
+| Group | Sequence |
+| --- | --- |
+| `node` (workers) | cordon → **drain** → reboot → wait `Ready` → uncordon → wait for Longhorn to settle |
+| `master` | cordon → reboot → wait `Ready` **and** `EtcdIsVoter=True` → uncordon (no drain) |
+| `standalone_vms` | reboot → wait for the Technitium web service → confirm it answers DNS |
+
+Hosts are still done one at a time (`serial: 1`), but the post-reboot gates are the
+real change: the play previously advanced as soon as SSH answered, which is neither
+"node Ready" nor "storage rebuilt". On the `master` play that was a latent
+quorum-loss risk — nothing stopped the second etcd member rebooting while the first
+was still rejoining. `any_errors_fatal: true` now halts the roll on the first
+failure instead of marching through the rest of the nodes.
+
+A `run_once` pre-flight refuses to start if any node is NotReady or any attached
+Longhorn volume is degraded (`-e skip_preflight=true` to override).
+
+**The drain needs a pod selector, and always will.** A plain `kubectl drain` blocks
+forever here, for the same Longhorn reason documented above — plus CNPG. Two sets of
+PDBs sit permanently at 0 allowed disruptions: every worker's `instance-manager` pod,
+and every `<cluster>-primary`. Both are excluded:
+
+```text
+--pod-selector='longhorn.io/component!=instance-manager,!cnpg.io/cluster'
+```
+
+In a Kubernetes label selector `key!=value` also matches objects lacking the key, so
+this still covers every ordinary pod. Verify the exclusion is doing its job with a
+server-side dry run — it needs no cordon and changes nothing:
+
+```sh
+kubectl drain <node> --dry-run=server --ignore-daemonsets --delete-emptydir-data \
+  --force --pod-selector='longhorn.io/component!=instance-manager,!cnpg.io/cluster'
+# ends "node/<node> drained (server dry run)"
+# drop --pod-selector and it fails on instance-manager with a PDB timeout instead
+```
+
+Excluding CNPG is deliberate beyond unblocking the drain: forcing a switchover on a
+busy database re-triggers [#828](cnpg-ha.md#known-issue-wal-archiving-stuck-after-a-busy-switchover-828),
+and CNPG already fails over correctly on hard node loss. Its pods ride the reboot.
+
+**What draining does and does not buy.** It relocates anything that can move before
+the reboot — the 2-replica tier (authentik, Alertmanager, Tailscale Connector,
+CoreDNS) and the 2-replica `longhorn` volumes — turning a ~5–7 minute outage into
+roughly none. It does **not** help workloads whose data cannot move: `local-path`
+PVCs (Prometheus TSDB, Loki, Alertmanager, uptime-kuma, paperless), `longhorn-single`
+volumes whose only replica is on that node, and `strategy: Recreate` singletons.
+Those are down for the reboot window either way, though they now get a clean
+`SIGTERM` instead of a hard kill. Shortening *their* downtime is a storage/replica
+problem, not a drain problem.
+
+**Escape hatches.** `-e drain=false` reverts to cordon-only. If a run aborts, the
+node is deliberately left **cordoned** — `kubectl uncordon <node>` once it is healthy.
+Timeouts are all overridable: `drain_timeout` (300s), `reboot_timeout` (600s),
+`node_ready_timeout` (600s), `etcd_ready_timeout` (600s), `storage_settle_timeout`
+(900s).
+
+Kubernetes calls run from the Ansible controller (`delegate_to: localhost`), so this
+needs the same working kubeconfig `kubectl` uses.
+
 ## Follow-on: Discord notifications (not yet enabled)
 
 GitHub already notifies on PRs and the Dependency Dashboard. To *also* push Flux

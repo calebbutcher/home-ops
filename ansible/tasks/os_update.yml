@@ -2,8 +2,10 @@
 # Shared OS update + reboot-detection tasks.
 # Supports Debian (Ubuntu) and RedHat (Rocky Linux) family hosts.
 #
-# Variables (pass via --extra-vars or play vars):
-#   reboot (bool, default false) — reboot host if a reboot is signalled as required
+# This file only upgrades packages and sets the `reboot_needed` fact. It does NOT
+# reboot — the reboot is owned by the per-host-class wrappers imported from
+# update.yml (k8s_node_reboot.yml / k8s_master_reboot.yml / standalone_reboot.yml),
+# so it can be bracketed with cordon/drain and post-reboot health gates.
 
 - name: Update apt cache
   ansible.builtin.apt:
@@ -51,14 +53,3 @@
   ansible.builtin.debug:
     msg: >-
       {{ inventory_hostname }} — {{ 'REBOOT REQUIRED' if reboot_needed else 'no reboot needed' }}
-
-- name: Reboot if required and reboot=true
-  ansible.builtin.reboot:
-    reboot_command: "{{ custom_reboot_command | default(omit) }}"
-    msg: "Rebooting after OS updates"
-    pre_reboot_delay: 5
-    post_reboot_delay: 30
-    reboot_timeout: 300
-  when:
-    - reboot | default(false) | bool
-    - reboot_needed | bool
