@@ -1,0 +1,36 @@
+---
+# Resolve the Kubernetes node name for the current Ansible host.
+#
+# The inventory is IP-based (inventory/my-cluster/hosts.ini) while Kubernetes
+# uses names like `k3s-worker-05`. Do NOT assume the VM hostname matches the
+# node name — match on the node's InternalIP instead, which is authoritative.
+#
+# Sets: k8s_node_name
+
+- name: Resolve Kubernetes node name for {{ inventory_hostname }}
+  kubernetes.core.k8s_info:
+    kind: Node
+  register: _all_nodes
+  delegate_to: localhost
+  become: false
+
+- name: Set k8s_node_name fact
+  vars:
+    _match: >-
+      {{ _all_nodes.resources
+         | community.general.json_query(
+             "[?status.addresses[?type=='InternalIP' && address=='"
+             ~ inventory_hostname ~ "']].metadata.name") }}
+  ansible.builtin.set_fact:
+    k8s_node_name: "{{ _match | first | default('', true) }}"
+
+- name: Assert the node was found
+  ansible.builtin.assert:
+    that: k8s_node_name | length > 0
+    fail_msg: >-
+      No Kubernetes node has InternalIP {{ inventory_hostname }}. Either this host
+      is not a cluster member, or the kubeconfig on the Ansible controller points
+      at the wrong cluster. Check `kubectl get nodes -o wide`.
+    success_msg: "{{ inventory_hostname }} is Kubernetes node {{ k8s_node_name }}"
+  delegate_to: localhost
+  become: false

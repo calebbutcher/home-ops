@@ -1,0 +1,65 @@
+---
+# Shared gate: wait until no ATTACHED Longhorn volume is degraded.
+#
+# Only volumes in state `attached` are considered. Around 16 volumes sit
+# `detached`/`unknown` at any given moment — they are the VolSync `*-cache`
+# PVCs, which legitimately detach between backup runs and are NOT a fault.
+# Gating on those would hang every single run.
+#
+# Params (set via `vars:` on the import):
+#   longhorn_wait_retries — poll attempts (1 = a single check with no waiting)
+#   longhorn_wait_delay   — seconds between attempts
+#   longhorn_context      — short label used in task names and messages
+
+- name: "Longhorn [{{ longhorn_context }}] — poll until attached volumes are healthy"
+  vars:
+    _degraded_names: "[?status.state=='attached' && status.robustness!='healthy'].metadata.name"
+  kubernetes.core.k8s_info:
+    api_version: longhorn.io/v1beta2
+    kind: Volume
+    namespace: longhorn-system
+  register: _lh
+  # `_lh.resources is defined` keeps us retrying through a transient API outage
+  # (the kube-vip VIP drops for ~20s whenever a control-plane node restarts)
+  # rather than reading an unreachable apiserver as "zero degraded volumes".
+  until: >-
+    _lh.resources is defined
+    and (_lh.resources | community.general.json_query(_degraded_names) | length) == 0
+  retries: "{{ longhorn_wait_retries | default(60) | int }}"
+  delay: "{{ longhorn_wait_delay | default(15) | int }}"
+  failed_when: false
+  delegate_to: localhost
+  become: false
+
+- name: "Longhorn [{{ longhorn_context }}] — assert storage settled"
+  vars:
+    _degraded: >-
+      {{ _lh.resources | default([])
+         | community.general.json_query(
+             "[?status.state=='attached' && status.robustness!='healthy'].[metadata.name, status.robustness]") }}
+    _attached: >-
+      {{ _lh.resources | default([])
+         | community.general.json_query("[?status.state=='attached'].metadata.name") }}
+    _detached: >-
+      {{ _lh.resources | default([])
+         | community.general.json_query("[?status.state!='attached'].metadata.name") }}
+  ansible.builtin.assert:
+    that:
+      - _lh.resources is defined
+      - _degraded | length == 0
+    fail_msg: >-
+      {{
+        'Could not reach the Kubernetes API to check Longhorn volumes.'
+        if _lh.resources is not defined
+        else
+        (_degraded | length) ~ ' attached Longhorn volume(s) still not healthy: '
+        ~ (_degraded | map('join', '=') | join(', '))
+        ~ '. Refusing to continue the roll — rebooting the next node now could take'
+        ~ ' the surviving replica of one of these volumes offline. Check the Longhorn'
+        ~ ' UI, wait for the rebuild to finish, then re-run.'
+      }}
+    success_msg: >-
+      Longhorn settled — {{ _attached | length }} attached volume(s) healthy,
+      {{ _detached | length }} detached (VolSync caches, ignored)
+  delegate_to: localhost
+  become: false

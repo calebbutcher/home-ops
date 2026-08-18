@@ -1,0 +1,81 @@
+---
+# Safe reboot of a k3s CONTROL-PLANE node: cordon -> reboot -> wait for
+# Ready AND EtcdIsVoter -> uncordon.
+#
+# Deliberately CORDON-ONLY, no drain. These nodes carry the `node-role.kubernetes.io/master`
+# taint and run essentially nothing but DaemonSets plus the system-upgrade
+# controller, so a drain would move almost nothing while adding risk around etcd.
+# This matches the SUC `k3s-server` Plan, which is cordon-only for the same reason.
+#
+# The gate that matters here is EtcdIsVoter. With 3 embedded-etcd members,
+# rebooting a second node before the first has rejoined as a voter loses quorum
+# and takes the whole API down. SSH answering again is NOT that signal —
+# docs/backup-recovery.md and docs/secrets-encryption.md both require checking
+# `Ready=True` *and* `EtcdIsVoter=True` before moving on, and this automates it.
+#
+# Expect transient API errors while polling: the kube-vip VIP at
+# 10.2.169.10:6443 refuses connections for ~20s as VRRP fails the address over.
+# The `until` loops ride that out rather than aborting.
+
+- name: "{{ inventory_hostname }} — no reboot required, skipping cordon"
+  ansible.builtin.debug:
+    msg: "No reboot needed; control-plane node left untouched and schedulable."
+  when: not (reboot_needed | default(false) | bool)
+
+- name: Safe control-plane reboot
+  when:
+    - reboot | default(false) | bool
+    - reboot_needed | default(false) | bool
+  block:
+    - name: Resolve node name
+      ansible.builtin.import_tasks: k8s_resolve_node.yml
+
+    - name: Cordon {{ k8s_node_name | default(inventory_hostname) }}
+      kubernetes.core.k8s_drain:
+        name: "{{ k8s_node_name }}"
+        state: cordon
+      delegate_to: localhost
+      become: false
+
+    - name: Reboot {{ inventory_hostname }}
+      ansible.builtin.reboot:
+        reboot_command: "{{ custom_reboot_command | default(omit) }}"
+        msg: "Rebooting after OS updates"
+        pre_reboot_delay: 5
+        post_reboot_delay: 30
+        reboot_timeout: "{{ reboot_timeout | default(600) | int }}"
+
+    - name: Wait for {{ k8s_node_name | default(inventory_hostname) }} to be Ready and a healthy etcd voter
+      kubernetes.core.k8s_info:
+        kind: Node
+        name: "{{ k8s_node_name }}"
+      register: _cp_node
+      until: >-
+        _cp_node.resources is defined
+        and (_cp_node.resources
+             | community.general.json_query("[0].status.conditions[?type=='Ready'].status | [0]")) == 'True'
+        and (_cp_node.resources
+             | community.general.json_query("[0].status.conditions[?type=='EtcdIsVoter'].status | [0]")) == 'True'
+      retries: "{{ ((etcd_ready_timeout | default(600) | int) / 10) | round(0, 'ceil') | int }}"
+      delay: 10
+      delegate_to: localhost
+      become: false
+
+    - name: Uncordon {{ k8s_node_name | default(inventory_hostname) }}
+      kubernetes.core.k8s_drain:
+        name: "{{ k8s_node_name }}"
+        state: uncordon
+      delegate_to: localhost
+      become: false
+
+  rescue:
+    - name: Report that the control-plane node was left cordoned
+      ansible.builtin.fail:
+        msg: >-
+          Safe reboot FAILED for control-plane node {{ inventory_hostname }}
+          ({{ k8s_node_name | default('node name unresolved') }}).
+          It has deliberately been left CORDONED, and the roll has been stopped
+          before the next etcd member — continuing could cost quorum. Check
+          `kubectl get nodes` and etcd health
+          (`kubectl get --raw=/livez?verbose`) before doing anything else, then
+          `kubectl uncordon {{ k8s_node_name | default('<node>') }}` once healthy.

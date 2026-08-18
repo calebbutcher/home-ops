@@ -1,0 +1,65 @@
+---
+# Cluster-health gate, run before a host is rebooted.
+#
+# Rolling reboots into an already-degraded cluster is how a small problem becomes
+# an outage: the first node drains onto workers that are already short a replica,
+# and `serial: 1` then marches through the rest. This refuses to start.
+#
+# `run_once` is per serial batch, not per play — so at the default `serial: 1`
+# this re-checks the whole cluster before every single host. That is deliberate:
+# it means a cluster that degrades midway through a roll stops the roll, rather
+# than only being caught by the pre-flight of the very first node.
+#
+# Talks to the Kubernetes API from the Ansible controller (delegate_to:
+# localhost), so it needs the same working kubeconfig that `kubectl` uses.
+#
+# Skip with `-e skip_preflight=true` — e.g. when deliberately updating hosts
+# while some unrelated part of the cluster is known-broken.
+
+- name: Pre-flight — cluster health
+  when: not (skip_preflight | default(false) | bool)
+  run_once: true
+  block:
+    - name: Pre-flight — fetch all Kubernetes nodes
+      kubernetes.core.k8s_info:
+        kind: Node
+      register: _preflight_nodes
+      delegate_to: localhost
+      become: false
+
+    - name: Pre-flight — assert every node is Ready
+      vars:
+        _not_ready: >-
+          {{ _preflight_nodes.resources
+             | community.general.json_query(
+                 "[?status.conditions[?type=='Ready' && status!='True']].metadata.name") }}
+      ansible.builtin.assert:
+        that: _not_ready | length == 0
+        fail_msg: >-
+          Node(s) not Ready: {{ _not_ready | join(', ') }}. Fix the cluster before
+          rolling reboots through it, or re-run with -e skip_preflight=true.
+        success_msg: "All {{ _preflight_nodes.resources | length }} nodes Ready"
+      delegate_to: localhost
+      become: false
+
+    - name: Pre-flight — warn about nodes already cordoned
+      vars:
+        _cordoned: >-
+          {{ _preflight_nodes.resources
+             | community.general.json_query("[?spec.unschedulable].metadata.name") }}
+      ansible.builtin.debug:
+        msg: >-
+          WARNING — node(s) already cordoned before this run:
+          {{ _cordoned | join(', ') }}. That usually means an earlier run aborted
+          mid-drain. Nodes outside this play's host list will NOT be uncordoned
+          for you; check them with `kubectl get nodes` first.
+      when: _cordoned | length > 0
+      delegate_to: localhost
+      become: false
+
+    - name: Pre-flight — Longhorn storage health
+      ansible.builtin.import_tasks: longhorn_healthy.yml
+      vars:
+        longhorn_wait_retries: 1
+        longhorn_wait_delay: 0
+        longhorn_context: "pre-flight"
