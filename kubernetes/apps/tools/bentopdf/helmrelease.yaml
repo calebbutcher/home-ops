@@ -1,0 +1,86 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: bentopdf
+  namespace: tools
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "5.1.0"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      bentopdf:
+        # Two replicas. Every PDF operation runs in the browser, so there is no
+        # state, no PVC and no leader — which makes this one of the few apps here
+        # that can actually survive a node going away. Single-replica apps in this
+        # cluster eat a 5-7 minute outage on every node update (updates cordon
+        # rather than drain, and the pod only moves after the 5m unreachable
+        # toleration expires); this one does not. Deliberately no anti-affinity:
+        # the scheduler's default hostname spread is enough at 2/9 nodes, a soft
+        # rule would only look like a guarantee, and a hard one risks Pending.
+        replicas: 2
+        containers:
+          app:
+            image:
+              # The `-simple` variant is upstream's self-host build: all ~50 PDF
+              # tools, minus the marketing site, pricing pages and GitHub-stars
+              # widget that the plain `bentopdf` image carries.
+              repository: ghcr.io/alam00000/bentopdf-simple
+              tag: "2.8.7"
+            probes:
+              # Plain GET / against the nginx docroot. Cheap, and unlike the
+              # chart's default TCP probe it fails if nginx is listening but no
+              # longer serving the built assets. No startup probe — a static
+              # nginx is ready well inside the first readiness period.
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 8080
+                  periodSeconds: 30
+                  failureThreshold: 5
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 8080
+                  periodSeconds: 15
+                  failureThreshold: 3
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                # Roomier than it-tools' 128Mi: the dist bundle is far bigger
+                # (pdf.js viewer plus ~20 localised builds) and nginx holds it in
+                # page cache, which counts against the cgroup. No CPU limit —
+                # gzip_comp_level 9 on a cold cache would throttle badly under
+                # one, and omitting it is the convention elsewhere in the repo.
+                memory: 256Mi
+    service:
+      app:               # controller == release name ⇒ Service "bentopdf"
+        controller: bentopdf
+        ports:
+          http:
+            port: 80
+            # nginx-unprivileged serves on 8080 as uid 101; the ingress backend
+            # and the blackbox app probe both target the Service's :80.
+            targetPort: 8080

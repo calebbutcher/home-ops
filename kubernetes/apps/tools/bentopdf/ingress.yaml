@@ -1,0 +1,35 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bentopdf
+  namespace: tools
+  annotations:
+    # CNAME to the single self-healing ingress record (see the Traefik Service)
+    # rather than a second A record, so a Traefik IP change moves one record.
+    external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # security-headers only sets nosniff, X-Frame-Options and HSTS — checked,
+    # because the app serves its own Cross-Origin-Opener-Policy and
+    # Cross-Origin-Embedder-Policy and a middleware that overwrote either would
+    # silently disable SharedArrayBuffer, hanging every WASM-backed tool
+    # (compress, OCR, Office conversion) at ~55% while merge/split kept working.
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - pdf.int.nerdbox.dev
+      secretName: bentopdf-tls
+  rules:
+    - host: pdf.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bentopdf
+                port:
+                  number: 80
