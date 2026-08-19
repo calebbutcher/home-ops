@@ -1,0 +1,171 @@
+---
+# speedtest-tracker — hourly Ookla speedtests against the WAN link, kept as
+# history and exported to Prometheus. Fills the one gap in the observability
+# stack: everything else watches the inside of the cluster, nothing measured the
+# internet connection itself.
+#
+# WHY THIS AND NOT A PLAIN PROMETHEUS EXPORTER
+# Every speedtest *exporter* (MiguelNdeCarvalho, danopstech, heathcliff26) runs
+# the test ON SCRAPE. Prometheus here runs 2 replicas (kube-prometheus-stack
+# helmrelease.yaml, prometheusSpec.replicas), both scrape every target, and the
+# scrape offset is derived from the target's labels — identical across replicas,
+# so they fire at effectively the same instant. MiguelNdeCarvalho's exporter has
+# no lock around its test function and serves under Waitress' 4 threads, so its
+# SPEEDTEST_CACHE_FOR does not rescue this: two speedtests would run
+# concurrently, contend for the same WAN link, and each report roughly half the
+# real throughput. That is not a tuning problem, it is the wrong architecture
+# for an HA Prometheus.
+#
+# speedtest-tracker runs tests on its OWN cron (SPEEDTEST_SCHEDULE) and serves
+# the last stored result at /prometheus. Scrapes are then idempotent reads, so
+# the number of scrapers is irrelevant. It is also actively maintained, unlike
+# the exporters above (v3.5.4, ~3 years stale), so Renovate can keep it current.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: speedtest-tracker
+  namespace: speedtest
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "5.1.0"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    defaultPodOptions:
+      securityContext:
+        # fsGroup ONLY — deliberately no runAsUser/runAsNonRoot. LinuxServer
+        # images boot s6-overlay as root, chown /config, then drop to PUID/PGID
+        # themselves; forcing a non-root uid breaks the init before the app ever
+        # starts. This is also why the namespace is PSA 'baseline' and not
+        # 'restricted'. Contrast pve-exporter (monitoring/proxmox), which is a
+        # plain static binary and does run as 65534 with all caps dropped.
+        #
+        # OnRootMismatch skips the recursive chown once ownership is correct.
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+    controllers:
+      speedtest-tracker:
+        # SQLite allows exactly one writer and the PVC is RWO. Recreate tears
+        # the old pod down fully before the new one starts; the default
+        # RollingUpdate would briefly run two pods against the same database.
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: lscr.io/linuxserver/speedtest-tracker
+              tag: "1.14.8"
+            env:
+              # LinuxServer convention: the uid/gid the app is dropped to, and
+              # what fsGroup above matches so /config is writable.
+              PUID: "1000"
+              PGID: "1000"
+              TZ: America/Chicago
+              # What the UI renders result timestamps in. APP_TIMEZONE is
+              # deliberately NOT set: upstream documents it as the escape hatch
+              # for a database that does not default to UTC, which does not apply
+              # to SQLite here. The schedule below is hourly on the hour, so the
+              # timezone does not change when tests run either way.
+              DISPLAY_TIMEZONE: America/Chicago
+              # Used to build absolute links in the UI and notifications.
+              APP_URL: https://speedtest.int.nerdbox.dev
+              # SQLite in /config rather than a CNPG cluster. The /config PVC is
+              # required either way (Laravel keeps its key cache and storage dir
+              # there), so Postgres would be purely additive for a table that
+              # gains one row an hour.
+              DB_CONNECTION: sqlite
+              # Hourly, on the hour. Each test saturates the link for ~30s.
+              SPEEDTEST_SCHEDULE: "0 * * * *"
+              # SPEEDTEST_SERVERS is deliberately absent, not set to "". Upstream
+              # marks it optional and falls back to Ookla's nearest-server pick
+              # when unset, but Laravel's env() hands a set-but-empty variable
+              # through as the empty string — which explodes into a list holding
+              # one invalid server ID rather than meaning "choose for me".
+              # If auto-selection turns out to rotate between servers, add it
+              # here with real IDs: that makes results comparable and bounds the
+              # server_* label cardinality the alert rules aggregate away.
+              # See docs/speedtest-deploy.md.
+              #
+              # Keep a year of history, then prune. Long enough to argue with an
+              # ISP about a gradual decline; short enough that SQLite stays small.
+              PRUNE_RESULTS_OLDER_THAN: "365"
+            envFrom:
+              # APP_KEY — Laravel's encryption key. See the secret for why it
+              # must be generated before the first apply and never rotated.
+              - secretRef:
+                  name: speedtest-secret
+            probes:
+              # Laravel runs database migrations on boot, and the very first
+              # boot also builds the SQLite file from scratch. 30 × 10s = 5min
+              # of runway before the pod is called failed.
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 80
+                  periodSeconds: 10
+                  failureThreshold: 30
+              liveness: &probe
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 80
+                  periodSeconds: 30
+                  failureThreshold: 5
+              readiness: *probe
+            resources:
+              requests:
+                cpu: 50m
+                memory: 256Mi
+              limits:
+                # PHP-FPM + nginx + the Ookla CLI during a test. The CLI is the
+                # spiky part: it buffers while saturating a gigabit link.
+                memory: 768Mi
+    service:
+      app:               # identifier `app` ⇒ Service takes the release name
+        controller: speedtest-tracker
+        ports:
+          http:
+            port: 80
+    serviceMonitor:
+      app:
+        serviceName: speedtest-tracker
+        endpoints:
+          - port: http
+            scheme: http
+            # NOT /metrics. speedtest-tracker serves the exposition at
+            # /prometheus, and that endpoint must first be switched on in the
+            # UI (Settings → Data Platforms → Prometheus) with the pod CIDR
+            # allowlisted — upstream closed the env-var request for it as not
+            # planned, so it is database state, not git. Until that is done this
+            # target scrapes clean but returns nothing. See docs/speedtest-deploy.md.
+            path: /prometheus
+            # This is a static read of the last stored result — the test cadence
+            # is SPEEDTEST_SCHEDULE above, not this — so a 1m interval costs
+            # almost nothing (a dozen gauges) and buys two things: a new hourly
+            # result appears in Grafana promptly, and every 5m step of the
+            # subquery in SpeedtestNoRecentResults is backed by ~5 samples rather
+            # than sitting on the edge of the 5m lookback delta.
+            interval: 1m
+            scrapeTimeout: 30s
+    persistence:
+      # SQLite database (the entire result history) + Laravel storage.
+      config:
+        existingClaim: speedtest-config
+        globalMounts:
+          - path: /config
