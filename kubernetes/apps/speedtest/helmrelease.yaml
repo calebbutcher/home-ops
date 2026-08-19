@@ -152,8 +152,12 @@ spec:
             # /prometheus, and that endpoint must first be switched on in the
             # UI (Settings → Data Platforms → Prometheus) with the pod CIDR
             # allowlisted — upstream closed the env-var request for it as not
-            # planned, so it is database state, not git. Until that is done this
-            # target scrapes clean but returns nothing. See docs/speedtest-deploy.md.
+            # planned, so it is database state, not git.
+            #
+            # Until that is done the route does not exist and this path returns
+            # 404, so the target sits at up == 0 and SpeedtestTargetDown fires
+            # after 15m. Loud rather than silent, but it puts a clock on a fresh
+            # deploy. See docs/speedtest-deploy.md.
             path: /prometheus
             # This is a static read of the last stored result — the test cadence
             # is SPEEDTEST_SCHEDULE above, not this — so a 1m interval costs
