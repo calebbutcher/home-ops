@@ -111,11 +111,17 @@ Grafana panels are empty.
    allowlist the pod CIDR **`10.42.0.0/16`** (the live k3s default — *not* ansible's `10.52`
    `cluster_cidr`, which is not what the cluster actually runs).
 
-   ⚠️ Until this is done the scrape target is **up and returning nothing**, which looks like a
-   healthy target with no data rather than an error. Upstream closed the request to configure this
-   via environment variables ([#2500](https://github.com/alexjustesen/speedtest-tracker/issues/2500))
-   as *not planned*, so it is database state, not git — same class of gotcha as pricewatch's
-   watches living in the datastore.
+   ⚠️ **Do this promptly after the first deploy.** Until it is done the route does not exist at
+   all — `/prometheus` returns **404**, so the scrape fails, `up{job="speedtest-tracker"} == 0`,
+   and `SpeedtestTargetDown` fires to Discord after 15 minutes. Verified on the 2026-08-19 rollout:
+   the target sat at `up == 0` from the moment the pod went Ready.
+
+   (That is the *good* failure mode — loud rather than silent — but it does mean a fresh deploy
+   has a 15-minute clock on it.)
+
+   Upstream closed the request to configure this via environment variables
+   ([#2500](https://github.com/alexjustesen/speedtest-tracker/issues/2500)) as *not planned*, so it
+   is database state, not git — same class of gotcha as pricewatch's watches living in the datastore.
 
 3. Verify the endpoint from inside the cluster:
 
