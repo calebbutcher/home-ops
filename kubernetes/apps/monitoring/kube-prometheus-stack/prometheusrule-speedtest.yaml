@@ -4,8 +4,10 @@
 # label needed — ruleSelectorNilUsesHelmValues: false — and the `severity` labels
 # route to Discord via the catch-all `discord` AlertmanagerConfig.
 #
-# Thresholds below are half of a 1 Gbps symmetric line. Update them here (and in
-# the docs) if the plan changes.
+# Thresholds below are half of a 1 Gbps symmetric line — EXCEPT upload, which is
+# provisional and deliberately lower because the line does not currently deliver
+# its rated upload. See the note on SpeedtestUploadDegraded. Update them here (and
+# in the docs) if the plan or the line changes.
 #
 # TWO THINGS TO KNOW ABOUT THESE SERIES:
 #
@@ -52,18 +54,37 @@ spec:
               means the local link or the modem.
 
         - alert: SpeedtestUploadDegraded
-          expr: avg(speedtest_tracker_upload_bits) < 500e6
+          # ⚠️ PROVISIONAL — 250 Mbps, NOT half the rated 1 Gbps like the download
+          # rule. Recalibrate once ~24h of scheduled results exist.
+          #
+          # The line does not deliver its rated upload. On 2026-08-19 the first
+          # readings ranged 288.6–515.7 Mbps, and fast.com from a LAN client
+          # independently reported 500–600 — two different measurement paths
+          # agreeing on roughly HALF the rated 1 Gbps up, while download sat at
+          # a steady ≥935. That is a provisioning problem to take to the ISP, not
+          # something an alert threshold should paper over.
+          #
+          # But leaving this at 500e6 would mean a permanently firing alert that
+          # says nothing new, so it is set below the observed floor instead: 289
+          # was measured with a remote Plex stream running, and anything above
+          # that would page on ordinary household upload contention.
+          #
+          # Consequence to accept knowingly: a drop from ~550 to ~300 is a 45%
+          # regression this will NOT catch. That is the price of not crying wolf
+          # until there is a real baseline distribution to set a number from.
+          expr: avg(speedtest_tracker_upload_bits) < 250e6
           for: 6h
           labels:
             severity: warning
           annotations:
             summary: "Internet upload degraded ({{ $value | humanize }}bps)"
             description: >-
-              Six consecutive hourly speedtests measured upload below 500 Mbps on
-              a 1 Gbps symmetric line. Worth noticing on its own: every offsite
-              backup (Longhorn → S3, Thanos, Loki, restic) is upload-bound, so a
-              sustained upload drop shows up as backup jobs overrunning long
-              before anyone notices it browsing.
+              Six consecutive hourly speedtests measured upload below 250 Mbps —
+              well under even the ~500-600 Mbps this line actually delivers (see
+              the provisional-threshold note in the rule). Worth noticing on its
+              own: every offsite backup (Longhorn → S3, Thanos, Loki, restic) is
+              upload-bound, so a sustained upload drop shows up as backup jobs
+              overrunning long before anyone notices it browsing.
 
         - alert: SpeedtestHighLatency
           # A gigabit line that idles well above 100ms is not behaving, whatever

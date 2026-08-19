@@ -160,13 +160,30 @@ Grafana panels are empty.
 
 ## Alerting
 
-Thresholds are set for a **1 Gbps symmetric** line and live in
-`kube-prometheus-stack/prometheusrule-speedtest.yaml`. Change them there if the plan changes.
+Thresholds live in `kube-prometheus-stack/prometheusrule-speedtest.yaml`. Download, latency and
+loss are set for a **1 Gbps symmetric** line. Upload is **provisional and deliberately lower** — see
+below.
+
+### ⚠️ The upload threshold does not match the rated line speed
+
+First readings (2026-08-19) put upload at **288.6–515.7 Mbps**, and fast.com from a LAN client
+independently reported **500–600 Mbps** — two different measurement paths agreeing on roughly *half*
+the rated 1 Gbps up, while download sat at a steady ≥935 Mbps. That is an ISP provisioning problem
+to chase, not something to tune away.
+
+Setting the alert at half the *rated* speed (500 Mbps) would therefore fire permanently and tell you
+nothing new. It is set to **250 Mbps** instead — below the observed floor, since the 289 Mbps reading
+was taken with a remote Plex stream running and anything higher would page on ordinary household
+upload contention.
+
+**Knowingly accepted:** a drop from ~550 to ~300 Mbps is a 45% regression this will *not* catch.
+Recalibrate once ~24h of scheduled results give a real baseline distribution — three hours with a
+confounding Plex stream is not enough to pick a good number from.
 
 | Alert | Fires when |
 |-------|-----------|
 | `SpeedtestDownloadDegraded` | download < 500 Mbps for 6h |
-| `SpeedtestUploadDegraded` | upload < 500 Mbps for 6h |
+| `SpeedtestUploadDegraded` | upload < 250 Mbps for 6h (provisional — see above) |
 | `SpeedtestHighLatency` | idle ping > 100ms for 6h |
 | `SpeedtestPacketLoss` | packet loss > 2% for 6h |
 | `SpeedtestTargetDown` | Prometheus cannot scrape the app for 15m |
