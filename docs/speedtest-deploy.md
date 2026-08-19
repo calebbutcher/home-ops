@@ -131,8 +131,9 @@ Grafana panels are empty.
    ```
 
    Expect `speedtest_tracker_download_bits`, `speedtest_tracker_upload_bits`,
-   `speedtest_tracker_ping_ms`, `speedtest_tracker_packet_loss_percent`, and friends. If it is
-   empty or 403s, step 2 is not done (or the CIDR is wrong).
+   `speedtest_tracker_ping_ms`, `speedtest_tracker_packet_loss_percent`, and friends (plus a
+   `php_info` gauge the app emits alongside them). A **404** means step 2 is not done; an empty or
+   403 response means it is enabled but the CIDR does not match.
 
 4. **Optional — pin the test servers.** `SPEEDTEST_SERVERS` is deliberately *absent* from the
    HelmRelease so Ookla auto-selects the nearest server. If it turns out to rotate between
@@ -164,17 +165,17 @@ Thresholds are set for a **1 Gbps symmetric** line and live in
 
 | Alert | Fires when |
 |-------|-----------|
-| `SpeedtestDownloadDegraded` | download < 500 Mbps for 2h |
-| `SpeedtestUploadDegraded` | upload < 500 Mbps for 2h |
-| `SpeedtestHighLatency` | idle ping > 100ms for 2h |
-| `SpeedtestPacketLoss` | packet loss > 2% for 2h |
+| `SpeedtestDownloadDegraded` | download < 500 Mbps for 6h |
+| `SpeedtestUploadDegraded` | upload < 500 Mbps for 6h |
+| `SpeedtestHighLatency` | idle ping > 100ms for 6h |
+| `SpeedtestPacketLoss` | packet loss > 2% for 6h |
 | `SpeedtestTargetDown` | Prometheus cannot scrape the app for 15m |
 | `SpeedtestNoRecentResults` | no new result in 6h, or no metrics at all |
 
 Two things that make these rules read oddly until you know why:
 
 - The metrics are **gauges holding the last result**, not live measurements — a test runs hourly
-  and the value then sits flat. So `for: 2h` means "two consecutive hourly tests came back slow",
+  and the value then sits flat. So `for: 6h` means "six consecutive hourly tests came back slow",
   which is deliberate: one bad test (someone streaming 4K, a Wi-Fi blip) must not page anyone.
 - Every rule aggregates with `avg()` to collapse the per-server labels. Ookla auto-selection can
   rotate servers between tests, and without the aggregation a server change starts a brand new
