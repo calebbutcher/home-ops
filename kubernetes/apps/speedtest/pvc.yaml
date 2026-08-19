@@ -1,0 +1,29 @@
+---
+# speedtest-tracker's /config: the SQLite database holding every speed test
+# result, plus Laravel's storage dir. The result history IS the product here —
+# a speedtest you cannot compare against last month tells you nothing — so this
+# needs to survive a node loss, but it is a few MB of rows, not a dataset.
+#
+# No ReplicationSource, same reasoning as coc-trade-bot: Longhorn's
+# `daily-backup` RecurringJob covers the `default` group, which every volume
+# joins automatically, so this PVC is already backed up to s3://longhorn-backups
+# nightly at 04:00. VolSync on top would be a second copy of a small SQLite file.
+#
+# 2Gi is deliberate headroom, not a sizing estimate: Longhorn schedules on the
+# DECLARED size, so this reserves 4Gi of cluster capacity across its 2 replicas.
+# One hourly result is a single row; PRUNE_RESULTS_OLDER_THAN caps the table at
+# a year (~8,760 rows).
+#
+# RWO and SQLite's single-writer rule ⇒ the controller uses strategy: Recreate.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: speedtest-config
+  namespace: speedtest
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 2Gi

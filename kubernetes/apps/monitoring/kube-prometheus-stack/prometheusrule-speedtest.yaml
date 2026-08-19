@@ -1,0 +1,135 @@
+---
+# WAN link health, fed by speedtest-tracker's /prometheus endpoint
+# (kubernetes/apps/speedtest) scraped through its ServiceMonitor. No `release:`
+# label needed — ruleSelectorNilUsesHelmValues: false — and the `severity` labels
+# route to Discord via the catch-all `discord` AlertmanagerConfig.
+#
+# Thresholds below are half of a 1 Gbps symmetric line. Update them here (and in
+# the docs) if the plan changes.
+#
+# TWO THINGS TO KNOW ABOUT THESE SERIES:
+#
+#   1. They are GAUGES HOLDING THE LAST RESULT, not a live measurement. A test
+#      runs hourly (SPEEDTEST_SCHEDULE) and the value then sits flat until the
+#      next one. So `for: 2h` is not "degraded for two hours of samples" — it is
+#      "two consecutive hourly tests came back slow", which is exactly the point:
+#      one bad test (someone streaming 4K, a Wi-Fi blip) must not page anyone.
+#
+#   2. Every series carries per-server labels (server_id, server_name,
+#      server_location, server_country) from Ookla's auto-selection, which can
+#      rotate between tests. Every rule therefore aggregates with avg() — without
+#      it a server change starts a brand new series, which both splits the
+#      comparison and resets any range function looking back over it.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: speedtest
+  namespace: monitoring
+spec:
+  groups:
+    - name: speedtest.rules
+      rules:
+        - alert: SpeedtestDownloadDegraded
+          # 500 Mbps = 50% of the rated 1 Gbps down. Below half rate for two
+          # consecutive hourly tests is an ISP problem, not household traffic.
+          expr: avg(speedtest_tracker_download_bits) < 500e6
+          for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Internet download degraded ({{ $value | humanize }}bps)"
+            description: >-
+              Two consecutive hourly speedtests measured download below 500 Mbps
+              on a 1 Gbps line. Check the Speedtest Tracker dashboard for when it
+              started and whether upload/latency moved with it — a clean drop on
+              download alone usually means the ISP, all three together usually
+              means the local link or the modem.
+
+        - alert: SpeedtestUploadDegraded
+          expr: avg(speedtest_tracker_upload_bits) < 500e6
+          for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Internet upload degraded ({{ $value | humanize }}bps)"
+            description: >-
+              Two consecutive hourly speedtests measured upload below 500 Mbps on
+              a 1 Gbps symmetric line. Worth noticing on its own: every offsite
+              backup (Longhorn → S3, Thanos, Loki, restic) is upload-bound, so a
+              sustained upload drop shows up as backup jobs overrunning long
+              before anyone notices it browsing.
+
+        - alert: SpeedtestHighLatency
+          # A gigabit line that idles well above 100ms is not behaving, whatever
+          # the throughput number says.
+          expr: avg(speedtest_tracker_ping_ms) > 100
+          for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Internet latency high ({{ $value | humanize }}ms)"
+            description: >-
+              Idle ping to the nearest Ookla server has been above 100ms across
+              two consecutive tests. If throughput is still fine this is usually
+              upstream congestion or a routing change rather than a dead link.
+
+        - alert: SpeedtestPacketLoss
+          expr: avg(speedtest_tracker_packet_loss_percent) > 2
+          for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Internet packet loss ({{ $value | humanize }}%)"
+            description: >-
+              Over 2% packet loss across two consecutive tests. This is the one
+              that explains "the internet is fine but calls keep dropping" —
+              throughput can look normal while interactive traffic falls apart.
+
+        - alert: SpeedtestTargetDown
+          # The app itself, not the link. If this fires the numbers above are
+          # stale rather than good, so it has to be distinguishable from silence.
+          expr: up{job="speedtest-tracker"} == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "speedtest-tracker target down"
+            description: >-
+              Prometheus cannot scrape speedtest-tracker. WAN speed alerts are
+              blind until this recovers — check the pod in the speedtest namespace.
+
+        - alert: SpeedtestNoRecentResults
+          # The scrape target can be perfectly healthy while the app has stopped
+          # actually testing — a wedged Laravel scheduler, or the /prometheus
+          # endpoint switched off in the UI. Both leave the gauges frozen at
+          # their last value, which reads as "everything is fine" forever.
+          #
+          # absent() catches the endpoint returning nothing at all. The changes()
+          # arm catches a frozen value: this is a heuristic, but a deliberate one
+          # — two real speedtests returning a bit-identical throughput figure six
+          # hours apart does not happen. avg() first so an Ookla server change
+          # cannot reset the lookback (see the header note).
+          #
+          # The count_over_time() guard is what stops this firing on every fresh
+          # deploy. Without it the first 30m after rollout look identical to a
+          # wedged scheduler: the series exists but has not changed yet, because
+          # only one test has run. 6h at 5m resolution is 72 steps, so requiring
+          # 70 means "the series covered essentially the whole window" — i.e.
+          # only judge staleness once there is a full window to judge.
+          expr: |
+            absent(speedtest_tracker_download_bits)
+              or (
+                changes(avg(speedtest_tracker_download_bits)[6h:5m]) == 0
+                  and count_over_time(avg(speedtest_tracker_download_bits)[6h:5m]) >= 70
+              )
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "No new speedtest results in 6h"
+            description: >-
+              speedtest-tracker has not recorded a new result in 6 hours despite
+              an hourly schedule, or is exporting no metrics at all. Check that
+              the Prometheus endpoint is still enabled under Settings → Data
+              Platforms (it is UI state, not git — see docs/speedtest-deploy.md)
+              and that the scheduler is running.

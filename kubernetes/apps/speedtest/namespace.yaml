@@ -1,0 +1,19 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: speedtest
+  labels:
+    # PodSecurity baseline: blocks the container-escape primitives (privileged,
+    # host namespaces, hostPath, hostPort, unsafe capabilities). Nothing here
+    # needs any of them — speedtest-tracker is an ordinary web app whose only
+    # host interaction is outbound TCP to Ookla's servers.
+    #
+    # 'restricted' is deliberately NOT used, not even as a warning. Beyond the
+    # cluster-wide reason (every pod fails it — no seccompProfile, no
+    # runAsNonRoot — so it would train us to ignore warnings), this image would
+    # fail it for a specific reason: LinuxServer images boot s6-overlay as root
+    # and drop to PUID/PGID themselves, which is exactly what runAsNonRoot
+    # forbids. See the securityContext note in helmrelease.yaml.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
