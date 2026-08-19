@@ -11,9 +11,15 @@
 #
 #   1. They are GAUGES HOLDING THE LAST RESULT, not a live measurement. A test
 #      runs hourly (SPEEDTEST_SCHEDULE) and the value then sits flat until the
-#      next one. So `for: 2h` is not "degraded for two hours of samples" — it is
-#      "two consecutive hourly tests came back slow", which is exactly the point:
-#      one bad test (someone streaming 4K, a Wi-Fi blip) must not page anyone.
+#      next one. So `for: 6h` is not "degraded for six hours of samples" — it is
+#      "six consecutive hourly tests came back slow", which is exactly the point:
+#      one bad test (someone streaming 4K, a Wi-Fi blip, a big upload running)
+#      must not page anyone.
+#
+#      6h rather than 2h deliberately. The very first measurement after rollout
+#      (2026-08-19) put upload at 289 Mbps against this 500 Mbps threshold, which
+#      would have paged off a single manual test taken while someone was using
+#      the link. Six agreeing tests is a real trend; two is a coincidence.
 #
 #   2. Every series carries per-server labels (server_id, server_name,
 #      server_location, server_country) from Ookla's auto-selection, which can
@@ -30,16 +36,16 @@ spec:
     - name: speedtest.rules
       rules:
         - alert: SpeedtestDownloadDegraded
-          # 500 Mbps = 50% of the rated 1 Gbps down. Below half rate for two
+          # 500 Mbps = 50% of the rated 1 Gbps down. Below half rate for six
           # consecutive hourly tests is an ISP problem, not household traffic.
           expr: avg(speedtest_tracker_download_bits) < 500e6
-          for: 2h
+          for: 6h
           labels:
             severity: warning
           annotations:
             summary: "Internet download degraded ({{ $value | humanize }}bps)"
             description: >-
-              Two consecutive hourly speedtests measured download below 500 Mbps
+              Six consecutive hourly speedtests measured download below 500 Mbps
               on a 1 Gbps line. Check the Speedtest Tracker dashboard for when it
               started and whether upload/latency moved with it — a clean drop on
               download alone usually means the ISP, all three together usually
@@ -47,13 +53,13 @@ spec:
 
         - alert: SpeedtestUploadDegraded
           expr: avg(speedtest_tracker_upload_bits) < 500e6
-          for: 2h
+          for: 6h
           labels:
             severity: warning
           annotations:
             summary: "Internet upload degraded ({{ $value | humanize }}bps)"
             description: >-
-              Two consecutive hourly speedtests measured upload below 500 Mbps on
+              Six consecutive hourly speedtests measured upload below 500 Mbps on
               a 1 Gbps symmetric line. Worth noticing on its own: every offsite
               backup (Longhorn → S3, Thanos, Loki, restic) is upload-bound, so a
               sustained upload drop shows up as backup jobs overrunning long
@@ -63,25 +69,25 @@ spec:
           # A gigabit line that idles well above 100ms is not behaving, whatever
           # the throughput number says.
           expr: avg(speedtest_tracker_ping_ms) > 100
-          for: 2h
+          for: 6h
           labels:
             severity: warning
           annotations:
             summary: "Internet latency high ({{ $value | humanize }}ms)"
             description: >-
               Idle ping to the nearest Ookla server has been above 100ms across
-              two consecutive tests. If throughput is still fine this is usually
+              six consecutive tests. If throughput is still fine this is usually
               upstream congestion or a routing change rather than a dead link.
 
         - alert: SpeedtestPacketLoss
           expr: avg(speedtest_tracker_packet_loss_percent) > 2
-          for: 2h
+          for: 6h
           labels:
             severity: warning
           annotations:
             summary: "Internet packet loss ({{ $value | humanize }}%)"
             description: >-
-              Over 2% packet loss across two consecutive tests. This is the one
+              Over 2% packet loss across six consecutive tests. This is the one
               that explains "the internet is fine but calls keep dropping" —
               throughput can look normal while interactive traffic falls apart.
 
