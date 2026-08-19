@@ -44,6 +44,7 @@ spec:
         - http://audiobookshelf.audiobookshelf:13378
         - http://authentik-server.authentik:80
         - http://bazarr.media:6767
+        - http://bentopdf.tools:80
         - http://gitea-app.gitea:3000
         - http://home-assistant.home-assistant:8123
         - http://immich-server.immich:2283

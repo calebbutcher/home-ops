@@ -107,6 +107,7 @@ Ansible; see **Networking** above.
 | Tracearr | `media` | tracearr.nerdbox.dev | Backed by CNPG Postgres |
 | Uptime Kuma | `uptime-kuma` | uptime.nerdbox.dev | Status/monitoring, MariaDB-backed |
 | IT-Tools | `tools` | it-tools.int.nerdbox.dev | Utilities |
+| BentoPDF | `tools` | pdf.int.nerdbox.dev | Client-side PDF toolkit |
 | kube-prometheus-stack | `monitoring` | — | Prometheus / Grafana / Alertmanager |
 
 ## Bootstrapping from scratch
