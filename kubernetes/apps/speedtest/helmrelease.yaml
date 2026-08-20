@@ -87,15 +87,46 @@ spec:
               DB_CONNECTION: sqlite
               # Hourly, on the hour. Each test saturates the link for ~30s.
               SPEEDTEST_SCHEDULE: "0 * * * *"
-              # SPEEDTEST_SERVERS is deliberately absent, not set to "". Upstream
-              # marks it optional and falls back to Ookla's nearest-server pick
-              # when unset, but Laravel's env() hands a set-but-empty variable
-              # through as the empty string — which explodes into a list holding
-              # one invalid server ID rather than meaning "choose for me".
-              # If auto-selection turns out to rotate between servers, add it
-              # here with real IDs: that makes results comparable and bounds the
-              # server_* label cardinality the alert rules aggregate away.
-              # See docs/speedtest-deploy.md.
+              # Pin the scheduled test to ONE server. Auto-selection kept landing
+              # on GoNetspeed Rochester (49674), which returned 83–478 Mbps down
+              # on a link that does a steady ~935 elsewhere, and is the prime
+              # suspect for the 7/20 scheduled tests that died with the Ookla
+              # CLI's "Cannot read from socket". The measurements were tracking
+              # that server's congestion, not the WAN: SpeedtestDownloadDegraded
+              # went `pending` on 2026-08-20 with the line perfectly healthy.
+              #
+              # 14229 is Frontier Ashburn — lowest latency of the whole nearby
+              # list (~13-14ms), and eight results across two days all landed at
+              # 908-944 down / 500-601 up.
+              #
+              # ONE id, not several. SelectSpeedtestServerJob::getConfigServer()
+              # does Arr::random() over this list, so extra entries do not mean
+              # "fall back if the first is unreachable" — they mean a coin flip
+              # per test. Since upload varies by server far more than download
+              # (530 on 14229 vs ~380 on Greenlight 21276), a list would make the
+              # upload series bimodal and impossible to threshold. The nearest
+              # neutral alternative is 21276 if this one ever needs replacing.
+              #
+              # ⚠️ Caveat worth remembering: 14229 is our own ISP's server, so
+              # this measures Frontier's network rather than a true internet
+              # path. That is the right trade here — it is also the cleanest
+              # evidence for the open upload complaint (their own server, their
+              # own line, ~530 Mbps up on a 1G symmetric plan).
+              #
+              # Only applies to SCHEDULED tests — the job checks
+              # `$this->result->scheduled` first, so manual UI runs still
+              # auto-select. SPEEDTEST_BLOCKED_SERVERS below covers those.
+              #
+              # Set real IDs or omit entirely — never "". Laravel's env() hands a
+              # set-but-empty variable through as the empty string, which
+              # explodes into a list holding one invalid server ID rather than
+              # meaning "choose for me". See docs/speedtest-deploy.md.
+              SPEEDTEST_SERVERS: "14229"
+              # Manual runs from the UI skip SPEEDTEST_SERVERS and fall through
+              # to this filter, so keep the bad server out of those too —
+              # otherwise a hand-run sanity check can still draw 49674 and look
+              # like a WAN fault.
+              SPEEDTEST_BLOCKED_SERVERS: "49674"
               #
               # Keep a year of history, then prune. Long enough to argue with an
               # ISP about a gradual decline; short enough that SQLite stays small.
