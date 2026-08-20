@@ -135,15 +135,74 @@ Grafana panels are empty.
    `php_info` gauge the app emits alongside them). A **404** means step 2 is not done; an empty or
    403 response means it is enabled but the CIDR does not match.
 
-4. **Optional — pin the test servers.** `SPEEDTEST_SERVERS` is deliberately *absent* from the
-   HelmRelease so Ookla auto-selects the nearest server. If it turns out to rotate between
-   servers, add it back with real IDs (comma separated): results become comparable across time,
-   and it bounds the `server_id` / `server_name` / `server_location` / `server_country` label
-   cardinality that every alert rule has to `avg()` away.
+4. **Nothing — the test server is pinned in git.** See below for why.
 
-   Set it to real IDs or omit it entirely — **never** to `""`. Laravel's `env()` hands a
-   set-but-empty variable through as the empty string, which explodes into a list holding one
-   invalid server ID rather than meaning "choose for me".
+## The test server is pinned (and why that mattered)
+
+`SPEEDTEST_SERVERS: "14229"` in the HelmRelease. It started out deliberately *absent*, letting
+Ookla auto-select the nearest server. That turned out to be the single largest source of noise in
+the data.
+
+### What auto-selection actually did
+
+Auto-selection kept landing on **GoNetspeed Rochester (49674)** for scheduled runs — 10 of the
+first 13 successful ones. Grouping the first two days of results by server:
+
+| Server | n | Download min/avg/max | Upload min/avg/max | Ping |
+|--------|---|----------------------|--------------------|------|
+| 14229 Frontier, Ashburn VA | 6 | 928 / 936 / **944** | 500 / 543 / 601 | 13.6ms |
+| 14228 Frontier, Chicago IL | 3 | 923 / 931 / 936 | 428 / 454 / 495 | 15.5ms |
+| 21276 Greenlight, Rochester NY | 2 | 932 / 932 / 932 | 379 / 384 / 389 | 22.0ms |
+| 45389 U of Rochester | 1 | 742 | 293 | 24.6ms |
+| **49674 GoNetspeed, Rochester NY** | **10** | **83 / 362 / 478** | 159 / 301 / 387 | 25.1ms |
+
+GoNetspeed never once cleared 478 Mbps down on a link that does a steady ~935 everywhere else,
+and bottomed out at **83 Mbps**. Every other server in the list agrees the line is healthy, so
+this is that server's congestion — not the WAN.
+
+It also almost certainly explains the failures. **7 of 20 scheduled tests (35%) died** with the
+Ookla CLI's `Error: [0] Cannot read from socket:` — a server-side abort, recorded with
+`server.id = null` so it cannot be attributed directly. But GoNetspeed was the auto-pick for
+essentially every scheduled run in that window, and **zero** manual runs (which drew other
+servers) failed. If failures continue after this pin, the server was not the cause.
+
+The consequence was a false page in the making: **`SpeedtestDownloadDegraded` was `pending` on
+2026-08-20** — six hours from firing to Discord — with the connection perfectly fine.
+
+### Why exactly one ID, not a list
+
+`SelectSpeedtestServerJob::getConfigServer()` does **`Arr::random($servers)`** over the list. A
+second entry is *not* a fallback for when the first is unreachable — it is a coin flip on every
+test. Since upload varies by server far more than download does (530 Mbps on 14229 vs ~380 on
+Greenlight), a list would make the upload series **bimodal** and impossible to threshold
+sensibly. One ID keeps the series comparable across time, and collapses the `server_*` label
+cardinality the alert rules `avg()` away to a single value.
+
+14229 was chosen because it is the lowest-latency entry in the entire nearby-server list and the
+only one sustaining 900+ down *and* 500+ up.
+
+> ⚠️ **Caveat:** 14229 is our own ISP's server, so this measures *Frontier's* network rather than
+> a true internet path — it will not catch a bad peering/transit link. Accepted deliberately: it
+> is also the cleanest possible evidence for the open upload complaint below (their own server,
+> their own line). The nearest **neutral** replacement is **21276** (Greenlight Rochester), which
+> held 932 Mbps down across every sample.
+
+### Scheduled only
+
+The job checks `$this->result->scheduled` *before* consulting `SPEEDTEST_SERVERS`, so manual runs
+from the UI still auto-select and can still draw GoNetspeed. `SPEEDTEST_BLOCKED_SERVERS: "49674"`
+covers those — manual runs skip the server list and fall through to the blocked-server filter.
+
+Set `SPEEDTEST_SERVERS` to real IDs or omit it entirely — **never** `""`. Laravel's `env()` hands
+a set-but-empty variable through as the empty string, which explodes into a list holding one
+invalid server ID rather than meaning "choose for me".
+
+To re-survey the field (the CLI orders its output nearest-first):
+
+```sh
+kubectl -n speedtest exec deploy/speedtest-tracker -- \
+  speedtest --servers --format=json --accept-license --accept-gdpr
+```
 
 ## Verify the monitoring path
 
@@ -180,6 +239,15 @@ upload contention.
 Recalibrate once ~24h of scheduled results give a real baseline distribution — three hours with a
 confounding Plex stream is not enough to pick a good number from.
 
+> **The recalibration clock restarts from the server pin (2026-08-20).** The scheduled results
+> collected before it are unusable as a baseline: they are overwhelmingly GoNetspeed 49674, whose
+> upload ran 159–387 Mbps against 500–601 on the pinned server. Averaging the two populations
+> would set the threshold from the bad server's congestion. Wait for ~24h of post-pin results.
+
+Note that the same contamination made the **download** threshold nearly misfire: `< 500 Mbps for
+6h` is a sane number for this line, but GoNetspeed alone would have tripped it. That rule was
+`pending` on 2026-08-20 with the WAN healthy — the pin is what makes 500 Mbps meaningful.
+
 | Alert | Fires when |
 |-------|-----------|
 | `SpeedtestDownloadDegraded` | download < 500 Mbps for 6h |
@@ -194,9 +262,10 @@ Two things that make these rules read oddly until you know why:
 - The metrics are **gauges holding the last result**, not live measurements — a test runs hourly
   and the value then sits flat. So `for: 6h` means "six consecutive hourly tests came back slow",
   which is deliberate: one bad test (someone streaming 4K, a Wi-Fi blip) must not page anyone.
-- Every rule aggregates with `avg()` to collapse the per-server labels. Ookla auto-selection can
-  rotate servers between tests, and without the aggregation a server change starts a brand new
-  series — splitting the comparison and resetting any range function looking back over it.
+- Every rule aggregates with `avg()` to collapse the per-server labels. With the server pinned
+  this is now a no-op on scheduled results, but keep it: a manual UI run auto-selects and emits a
+  different `server_id`, and without the aggregation that starts a brand new series — splitting
+  the comparison and resetting any range function looking back over it.
 
 `SpeedtestNoRecentResults` exists because the failure that matters most here is silent: a wedged
 scheduler or a disabled `/prometheus` endpoint leaves the gauges frozen at their last value, which
