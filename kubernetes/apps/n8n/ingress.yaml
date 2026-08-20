@@ -16,6 +16,11 @@ metadata:
     external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # Priority pinned: the catch-all "/" router must sort BELOW the specific
+    # API-path router in the sibling Ingress. Traefik's default priority is the
+    # rule length, which happens to produce this order -- pinning states the
+    # intent so a change to that heuristic cannot silently invert the split.
+    traefik.ingress.kubernetes.io/router.priority: "10"
     traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-internal-only@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
 spec:
   ingressClassName: traefik
@@ -56,6 +61,9 @@ metadata:
     # flaps the record between CNAME and A.
     external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # Priority pinned ABOVE the sibling "/" router so these paths keep bypassing
+    # forward-auth. See the UI Ingress for why this is stated rather than inferred.
+    traefik.ingress.kubernetes.io/router.priority: "100"
     # This is the only Ingress in the cluster that is deliberately UNauthenticated,
     # so it is the one that most needs a request ceiling: the rate limit is here to
     # stop a runaway workflow loop or a stuck external caller from hammering n8n

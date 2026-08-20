@@ -7,9 +7,12 @@
 # bazarr.media.svc.cluster.local. Nothing outside the cluster calls Bazarr's API, so
 # an unauthenticated router would be exposure with no consumer.
 #
-# No rate-limit or crowdsec middleware either: those are on sonarr/radarr because
-# those two carry PUBLIC *.nerdbox.dev hostnames. This host is internal-only, which
-# matches maintainerr.
+# No rate-limit or crowdsec middleware either. The old reason given here — that
+# sonarr/radarr "carry PUBLIC *.nerdbox.dev hostnames" — was wrong: those bare names
+# exist on the Ingress and the cert, but resolve in NO public DNS (checked 2026-08-20,
+# and 30d of access logs show zero external requests to either). Only immich, seerr and
+# ha are actually published. sonarr/radarr keep their bouncer for historical reasons,
+# where it is inert behind `internal-only` just as it would be here.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
