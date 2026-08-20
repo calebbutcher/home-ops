@@ -1,0 +1,558 @@
+---
+# Who reaches this cluster from outside, and which route did they ask for?
+#
+# Traefik matches on the Host header, so the `.int` naming convention is not a
+# routing boundary: any hostname answers a request sent to the WAN IP with that
+# Host, no DNS record required. cert-manager also publishes every name to
+# Certificate Transparency logs (`crt.sh -q '%.int.nerdbox.dev'`), so the names
+# are enumerable. This dashboard measures what that actually amounts to in
+# practice, and is the evidence base for the `internal-only` ipAllowList
+# middleware in kubernetes/infrastructure/controllers/traefik/middleware.yaml.
+#
+# Baseline when it was built (30 days of Traefik access logs, Loki retention is
+# 8760h so this is queryable well past it): external traffic reached ONLY
+# nerdbox.dev (apex, 404s), ha / requests / overseerr / seerr / immich .nerdbox.dev
+# (the three deliberately-public apps), and the raw WAN IP plus its frontiernet
+# reverse-DNS name. ZERO external requests to any *.int hostname, and zero to the
+# bare radarr/sonarr/audiobookshelf/uptime/tracearr names that exist on Ingresses
+# and certs but resolve in no public DNS.
+#
+# ⚠️ Loki label-filter regexes are FULLY ANCHORED, like Prometheus. The private-range
+# pattern therefore ends in `.*` — without it `10\.` matches only the literal
+# string "10." and every panel reports ~100% of traffic as external. Keep the
+# trailing `.*` if you edit these queries.
+#
+# ⚠️ These panels depend on `externalTrafficPolicy: Local` on the Traefik Service.
+# Under the chart default `Cluster`, kube-proxy SNATs every external client to a
+# node flannel IP and this dashboard would show zero external traffic forever
+# while the cluster was wide open.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: traefik-edge-exposure-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  traefik-edge-exposure.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "editable": true,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "type": "stat",
+          "title": "External requests (total)",
+          "description": "Requests from outside RFC1918 / Tailscale reaching Traefik in the selected range. A non-zero number is normal \u2014 immich, seerr and ha are deliberately public, and the apex plus the raw WAN IP collect constant background scanning.",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "loki",
+                "uid": "${loki}"
+              },
+              "editorMode": "code",
+              "expr": "sum(count_over_time({namespace=\"traefik\"} | json | __error__=\"\" | ClientHost !~ `(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.|127\\.|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.).*` [$__range]))",
+              "queryType": "instant",
+              "refId": "A",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "text"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "none",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "type": "stat",
+          "title": "\u26a0 Internal routes reached externally",
+          "description": "THE PANEL THAT MATTERS. Count of requests from a public IP to any *.int hostname. This must be 0.\n\nTraefik routes on the Host header, so the .int label is a naming convention, not a boundary \u2014 every one of these names is also enumerable from Certificate Transparency logs. If this goes non-zero, someone outside is addressing an internal route by name and the `internal-only` ipAllowList middleware is either missing from that Ingress or not working.\n\nMeasured over 30d before the allowlist was introduced: zero, on every .int host.",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "loki",
+                "uid": "${loki}"
+              },
+              "editorMode": "code",
+              "expr": "sum(count_over_time({namespace=\"traefik\"} | json | __error__=\"\" | ClientHost !~ `(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.|127\\.|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.).*` | RequestHost =~ `.*\\.int\\..*` [$__range])) or vector(0)",
+              "queryType": "instant",
+              "refId": "A",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Distinct external client IPs",
+          "description": "How many separate public addresses reached Traefik in the range.",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 12,
+            "y": 0
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "loki",
+                "uid": "${loki}"
+              },
+              "editorMode": "code",
+              "expr": "count(sum by (ClientHost) (count_over_time({namespace=\"traefik\"} | json | __error__=\"\" | ClientHost !~ `(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.|127\\.|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.).*` [$__range])))",
+              "queryType": "instant",
+              "refId": "A",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "text"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "none",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Distinct external routes",
+          "description": "How many distinct Host values external clients addressed.",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 18,
+            "y": 0
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "loki",
+                "uid": "${loki}"
+              },
+              "editorMode": "code",
+              "expr": "count(sum by (RequestHost) (count_over_time({namespace=\"traefik\"} | json | __error__=\"\" | ClientHost !~ `(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.|127\\.|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.).*` [$__range])))",
+              "queryType": "instant",
+              "refId": "A",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "text"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "none",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "type": "table",
+          "title": "External requests by route",
+          "description": "Which hostnames public clients actually address. Expect only: the three public apps (immich / seerr+requests+overseerr / ha), the bare apex nerdbox.dev, and the raw WAN IP or its frontiernet reverse-DNS name. Anything ending in .int here is a finding.",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "gridPos": {
+            "h": 11,
+            "w": 12,
+            "x": 0,
+            "y": 5
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "loki",
+                "uid": "${loki}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (RequestHost) (count_over_time({namespace=\"traefik\"} | json | __error__=\"\" | ClientHost !~ `(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.|127\\.|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.).*` [$__range]))",
+              "queryType": "instant",
+              "refId": "A",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "desc": true,
+                "displayName": "Requests"
+              }
+            ]
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "align": "auto",
+                "filterable": true
+              }
+            },
+            "overrides": []
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "Value": "Requests",
+                  "RequestHost": "Route (Host header)"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "Top external client IPs",
+          "description": "Mostly cloud-hosted scanners (Azure 20.x/40.x, GCP 34.x/35.x). CrowdSec's bouncer acts on these; the LAN whitelist means it is inert for everything else.",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "gridPos": {
+            "h": 11,
+            "w": 12,
+            "x": 12,
+            "y": 5
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "loki",
+                "uid": "${loki}"
+              },
+              "editorMode": "code",
+              "expr": "topk(25, sum by (ClientHost) (count_over_time({namespace=\"traefik\"} | json | __error__=\"\" | ClientHost !~ `(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.|127\\.|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.).*` [$__range])))",
+              "queryType": "instant",
+              "refId": "A",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "desc": true,
+                "displayName": "Requests"
+              }
+            ]
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "align": "auto",
+                "filterable": true
+              }
+            },
+            "overrides": []
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "Value": "Requests",
+                  "ClientHost": "Client IP"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "External requests over time, by route",
+          "description": "Shape of external traffic. Spikes on the apex or the raw IP are scanning waves, not users.",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 24,
+            "x": 0,
+            "y": 16
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "loki",
+                "uid": "${loki}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (RequestHost) (count_over_time({namespace=\"traefik\"} | json | __error__=\"\" | ClientHost !~ `(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.|127\\.|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.).*` [$__interval]))",
+              "queryType": "range",
+              "refId": "A",
+              "legendFormat": "{{RequestHost}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "showPoints": "never",
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": [
+                "sum"
+              ],
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "type": "table",
+          "title": "External requests by response status",
+          "description": "403 here is the allowlist or the CrowdSec bouncer doing its job. 404 on the apex and raw IP is the usual background probing. A 200 on an unexpected route is worth chasing.",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "gridPos": {
+            "h": 11,
+            "w": 24,
+            "x": 0,
+            "y": 25
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "loki",
+                "uid": "${loki}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (RequestHost, DownstreamStatus) (count_over_time({namespace=\"traefik\"} | json | __error__=\"\" | ClientHost !~ `(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.|127\\.|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.).*` [$__range]))",
+              "queryType": "instant",
+              "refId": "A",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "desc": true,
+                "displayName": "Requests"
+              }
+            ]
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "align": "auto",
+                "filterable": true
+              }
+            },
+            "overrides": []
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "Value": "Requests",
+                  "RequestHost": "Route (Host header)",
+                  "DownstreamStatus": "Status"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "refresh": "",
+      "schemaVersion": 39,
+      "tags": [
+        "traefik",
+        "security",
+        "edge"
+      ],
+      "templating": {
+        "list": [
+          {
+            "name": "loki",
+            "label": "Logs",
+            "type": "datasource",
+            "query": "loki",
+            "current": {
+              "selected": false,
+              "text": "Loki",
+              "value": "loki"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "options": [],
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false
+          }
+        ]
+      },
+      "time": {
+        "from": "now-7d",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "",
+      "title": "Traefik / Edge Exposure",
+      "uid": "traefik-edge-exposure",
+      "version": 1,
+      "weekStart": ""
+    }
