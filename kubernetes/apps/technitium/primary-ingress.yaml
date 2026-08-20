@@ -82,7 +82,7 @@ metadata:
     # Rate limit on top of the usual headers: this fronts an admin login form.
     # No forwardAuth — Technitium has its own session login, and an auth hop
     # would break the API the admin UI calls.
-    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-rate-limit@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-internal-only@kubernetescrd,traefik-rate-limit@kubernetescrd
     external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
 spec:
   ingressClassName: traefik

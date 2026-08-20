@@ -105,3 +105,52 @@ spec:
     average: 50
     period: 1s
     burst: 100
+---
+# Makes "internal-only" an actual enforced boundary instead of a naming convention.
+# Referenced as `traefik-internal-only@kubernetescrd`.
+#
+# THE PROBLEM THIS SOLVES. Traefik matches on the Host header, so every hostname in
+# the cluster answers a request sent to the WAN IP with that Host — no DNS record
+# required. The `.int` label routes nothing; it is just a name. And cert-manager
+# publishes every name to Certificate Transparency logs the moment it issues a cert
+# (`crt.sh -q '%.int.nerdbox.dev'` returns ~38 of them), so there is no obscurity
+# either. Before this middleware, `curl --resolve prowlarr.int.nerdbox.dev:443:<WAN>`
+# returned HTTP 200, and the same trick reached the Technitium DNS admin console and
+# the Longhorn UI (which has no login of its own at all).
+#
+# WHY THESE RANGES. 30 days of Traefik access logs were classified by ClientHost
+# before this was written (see the "Traefik / Edge Exposure" dashboard, which keeps
+# that query live). External traffic reached ONLY the three deliberately-public apps
+# — immich, seerr/requests/overseerr, ha — plus the bare apex and the raw WAN IP.
+# ZERO external requests to any *.int host, and zero to the bare radarr/sonarr/
+# audiobookshelf/uptime/tracearr names that exist on Ingresses and certs but resolve
+# in no public DNS. So this rejects nothing that has ever legitimately connected.
+#
+# 100.64.0.0/10 is Tailscale's CGNAT range. No client has ever actually presented one
+# — the subnet router SNATs to the Connector pod IP, which is inside 10.0.0.0/8 — but
+# it is listed so that turning off `--snat-subnet-routes` later does not lock us out
+# of every internal app at once.
+#
+# ⚠️ DEPENDS ON `externalTrafficPolicy: Local` ON THE TRAEFIK SERVICE. That is what
+# puts the real client address in front of this middleware. Under the chart default
+# `Cluster`, kube-proxy SNATs every external client to a node flannel IP — which is
+# inside 10.0.0.0/8 — and this middleware would silently allow the entire internet
+# while still looking correctly configured. Same dependency as the rate limiter's
+# sourceCriterion and the CrowdSec bouncer's clientTrustedIPs.
+#
+# ⚠️ NOT attached to the immich, seerr or home-assistant Ingresses: each serves its
+# `.int` and its public hostname from a SINGLE Ingress object, so the annotation
+# cannot be applied selectively to one of the two. Those three keep the CrowdSec
+# bouncer (and AppSec) as their edge control instead.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: internal-only
+  namespace: traefik
+spec:
+  ipAllowList:
+    sourceRange:
+      - 10.0.0.0/8        # LAN VLANs + pod/service CIDRs + Tailscale subnet-router SNAT
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 100.64.0.0/10     # Tailscale CGNAT, if SNAT is ever disabled

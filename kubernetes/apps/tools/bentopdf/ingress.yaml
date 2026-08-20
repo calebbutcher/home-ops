@@ -15,7 +15,7 @@ metadata:
     # Cross-Origin-Embedder-Policy and a middleware that overwrote either would
     # silently disable SharedArrayBuffer, hanging every WASM-backed tool
     # (compress, OCR, Office conversion) at ~55% while merge/split kept working.
-    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-internal-only@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
