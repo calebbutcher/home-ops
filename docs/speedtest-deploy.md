@@ -160,14 +160,16 @@ GoNetspeed never once cleared 478 Mbps down on a link that does a steady ~935 ev
 and bottomed out at **83 Mbps**. Every other server in the list agrees the line is healthy, so
 this is that server's congestion — not the WAN.
 
-It also almost certainly explains the failures. **7 of 20 scheduled tests (35%) died** with the
-Ookla CLI's `Error: [0] Cannot read from socket:` — a server-side abort, recorded with
-`server.id = null` so it cannot be attributed directly. But GoNetspeed was the auto-pick for
-essentially every scheduled run in that window, and **zero** manual runs (which drew other
-servers) failed. If failures continue after this pin, the server was not the cause.
-
 The consequence was a false page in the making: **`SpeedtestDownloadDegraded` was `pending` on
 2026-08-20** — six hours from firing to Discord — with the connection perfectly fine.
+
+> **The pin fixed the bad numbers, not the failures.** The original diagnosis also blamed
+> GoNetspeed for the ~35% of scheduled tests dying with `Cannot read from socket:`, on the
+> reasoning that it was the auto-pick for nearly every scheduled run while zero manual runs
+> failed. That was wrong — the two were confounded, because scheduled runs were *also* the only
+> ones happening at `:00:00`. See [the schedule is jittered](#the-schedule-is-jittered-off-the-hour)
+> below. Worth keeping in mind when reading the table above: it is a *throughput* argument, and
+> it stands on its own.
 
 ### Why exactly one ID, not a list
 
@@ -203,6 +205,58 @@ To re-survey the field (the CLI orders its output nearest-first):
 kubectl -n speedtest exec deploy/speedtest-tracker -- \
   speedtest --servers --format=json --accept-license --accept-gdpr
 ```
+
+## The schedule is jittered off the hour
+
+`SPEEDTEST_SCHEDULE: "37 * * * *"`, **not** `"0 * * * *"`. This is load-bearing, and it is the
+actual cause of the failed tests.
+
+On the hour, tests failed **36% of the time** with the Ookla CLI's
+`Error: [0] Cannot read from socket:`. Off the hour, they never failed:
+
+| When | Completed | Failed | Failure rate |
+|------|-----------|--------|--------------|
+| minute `:00` | 18 | 10 | **36%** |
+| any other minute | 13 | 0 | **0%** |
+
+`Cannot read from socket` is the CLI reporting that the *far end* closed the connection — what a
+speedtest server at its concurrent-session cap looks like. `:00:00` is when every automated
+speedtest scheduler on the internet fires simultaneously.
+
+### Why it took two passes to find
+
+Scheduled runs were confounded with the top of the hour: they were the *only* tests running at
+`:00`, and (before the pin) the only ones drawing GoNetspeed. Pinning the server separated the
+two variables, and the failures followed the clock, not the server:
+
+```text
+37  21:03:38  manual     srv=14229  completed  936/513
+38  21:22:54  manual     srv=14229  completed  917/482
+39  22:00:00  SCHEDULED  srv=14229  FAILED     Cannot read from socket
+40  22:45:23  manual     srv=14229  completed  916/544
+41  23:00:00  SCHEDULED  srv=14229  FAILED     Cannot read from socket
+```
+
+Plus three back-to-back off-hour runs against 14229 using the app's exact argv
+(`--selection-details` included): 927/518, 931/553, 926/518, all clean.
+
+Things this rules out, so they need not be re-checked:
+
+- **Not the code path.** `RunSpeedtestJob` builds an identical command for scheduled and manual
+  runs — same flags, same `$timeout = 120`. Before the pin, *both* ran without `--server-id`, so
+  there was never a command difference to explain the split.
+- **Not internal WAN contention.** No CronJob or VolSync `ReplicationSource` in the cluster runs
+  hourly; every one is daily. Nothing collides with `:00`.
+- **Not in-app contention.** `routes/console.php` schedules only a per-minute
+  `CheckForScheduledSpeedtests` plus daily/weekly maintenance.
+- **Not the server or the WAN.** See the successes above, minutes either side of each failure.
+
+`:37` was picked over `:15`/`:30`/`:45`, which are the next most crowded slots. Since nothing
+internal is hourly, the choice is purely about the far end — any unround minute works.
+
+> There is no retry to fall back on: `RunSpeedtestJob` calls `$this->batch()->cancel()` in its
+> failure path, so a socket error costs the whole hour and writes a `failed` row. That is why the
+> schedule minute matters as much as it does.
 
 ## Verify the monitoring path
 

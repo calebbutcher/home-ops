@@ -85,8 +85,22 @@ spec:
               # there), so Postgres would be purely additive for a table that
               # gains one row an hour.
               DB_CONNECTION: sqlite
-              # Hourly, on the hour. Each test saturates the link for ~30s.
-              SPEEDTEST_SCHEDULE: "0 * * * *"
+              # Hourly, but deliberately NOT on the hour. Each test saturates
+              # the link for ~30s.
+              #
+              # At "0 * * * *" this failed 36% of the time (10 of 28 runs) with
+              # the Ookla CLI's `Error: [0] Cannot read from socket:` — the
+              # server closing the connection. Off-hour runs failed 0 of 13.
+              # That split holds against a fixed server and an identical command
+              # (RunSpeedtestJob builds the same argv for scheduled and manual
+              # runs), so the only variable left is the minute: :00 is when every
+              # automated speedtest scheduler on the internet fires at once, and
+              # the target hits its concurrent-session cap.
+              #
+              # :37 rather than :15/:30/:45, which are the next most crowded
+              # slots. Nothing else in the cluster runs hourly, so there is no
+              # internal collision to avoid — this is purely about the far end.
+              SPEEDTEST_SCHEDULE: "37 * * * *"
               # Pin the scheduled test to ONE server. Auto-selection kept landing
               # on GoNetspeed Rochester (49674), which returned 83–478 Mbps down
               # on a link that does a steady ~935 elsewhere, and is the prime
