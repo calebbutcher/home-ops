@@ -1,0 +1,71 @@
+---
+# Make MFA REQUIRED rather than merely offered.
+#
+# THE FINDING. authentik's default authentication flow validates MFA with
+# `not_configured_action: skip` — verified against the live database. "Skip" means
+# exactly what it says: a user with no enrolled authenticator is waved past the MFA
+# stage and logs in with a password alone. MFA was never enforced here, only
+# honoured for accounts that happened to have a device.
+#
+# It has not bitten yet because both human accounts (caleb, akadmin) have TOTP AND
+# WebAuthn enrolled, so both are always challenged. The exposure is the next account
+# that gets created, or an existing one whose device is removed — either becomes
+# password-only silently, with no error and no log line saying MFA was skipped.
+#
+# WHY `configure` AND NOT `deny`. Both enforce, but they fail in opposite directions:
+#   * deny      — a user with no device cannot log in at all. A new account is locked
+#                 out until an admin enrols it out-of-band.
+#   * configure — a user with no device is sent through enrolment on their next login
+#                 and continues once done. Self-service, and no account can end up
+#                 password-only.
+# `configure` is chosen because it cannot hard-lock anyone out, which matters more
+# than usual here: this flow gates ALL SSO — 13 forwardAuth routes plus OIDC for
+# immich, grafana, paperless, gitea, tandoor and audiobookshelf. A mistake in this
+# file is a total sign-in outage, not a degraded control.
+#
+# ⚠️ NO RECOVERY CODES EXIST. Checked at the time of writing: zero confirmed static
+# devices on either human account (authentik_stages_authenticator_static_staticdevice
+# is empty for both). So today, a lost phone means falling back to the other admin
+# account or to `ak shell` against the CNPG database. Enrolling static backup codes
+# from the user-settings flow is worth doing and is deliberately NOT forced here —
+# backup codes are offered below as an enrolment option, but making them a valid
+# PRIMARY factor would let a new user satisfy MFA with codes alone, which is weaker
+# than the TOTP/WebAuthn this is meant to guarantee.
+#
+# ⚠️ THIS MODIFIES AN AUTHENTIK BUILT-IN. `default-authentication-mfa-validation`
+# ships with authentik; the blueprint upserts it by name rather than creating
+# anything. An authentik upgrade that rewrites its own default stage may revert
+# this — the worker reapplies custom blueprints, so it should win, but after a major
+# upgrade confirm the stage still reads `configure` before assuming MFA is enforced.
+#
+# ROLLBACK, if login breaks: set not_configured_action back to `skip` here, or in the
+# UI under Flows & Stages -> Stages -> default-authentication-mfa-validation. Both
+# current humans have devices, so reverting cannot lock anyone out.
+version: 1
+metadata:
+  name: security-mfa-enforcement
+  labels:
+    blueprints.goauthentik.io/instantiate: "true"
+entries:
+  - model: authentik_stages_authenticator_validate.authenticatorvalidatestage
+    identifiers:
+      name: default-authentication-mfa-validation
+    attrs:
+      not_configured_action: configure
+      # Which enrolment a device-less user is sent to. `configuration_stages` is a
+      # many-to-many to STAGES (not flows) — authentik happens to name the stage and
+      # its flow identically, which makes this easy to get wrong. With more than one
+      # entry the user is offered a choice.
+      configuration_stages:
+        - !Find [authentik_stages_authenticator_totp.authenticatortotpstage, [name, default-authenticator-totp-setup]]
+        - !Find [authentik_stages_authenticator_webauthn.authenticatorwebauthnstage, [name, default-authenticator-webauthn-setup]]
+      # Left at the shipped default: every device class stays acceptable for
+      # VALIDATION, so existing TOTP and WebAuthn logins are unaffected. Narrowing
+      # this is a separate decision from enforcing enrolment.
+      device_classes:
+        - static
+        - totp
+        - webauthn
+        - duo
+        - sms
+        - email

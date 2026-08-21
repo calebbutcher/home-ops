@@ -32,3 +32,6 @@ configMapGenerator:
       - blueprints/gitea-oauth2.yaml
       - blueprints/tandoor-oauth2.yaml
       - blueprints/audiobookshelf-oauth2.yaml
+      # Not app onboarding — policy hardening for the login flow itself.
+      - blueprints/security-brute-force.yaml
+      - blueprints/security-mfa-enforcement.yaml

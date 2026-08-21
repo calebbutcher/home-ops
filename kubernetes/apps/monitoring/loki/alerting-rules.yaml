@@ -4,12 +4,25 @@
 # since auth_enabled:false); each data key below becomes a rule file the ruler
 # loads. Firing alerts go to the kube-prometheus-stack Alertmanager, which routes
 # them to Discord (#cluster-alerts) via the catch-all `discord` AlertmanagerConfig.
-# Two rule files:
+# Six rule files (this list said "two" until 2026-08-20, when it had already been
+# five for some time — if you add a data key, add a line here):
 #   * truenas-nic.yaml — kernel NIC-hang signatures (the bnxt_en/bond01 stall).
 #   * truenas-zfs.yaml — real-time ZFS events from ZED (checksum/IO/data errors,
 #     vdev state changes, scrub completion). These complement the metric-based
 #     rules in prometheusrule-truenas{,-zfs}.yaml, catching point-in-time events a
 #     5-minute metric scrape can miss.
+#   * proxmox.yaml — corosync link loss, fencing/watchdog, kernel hardware errors.
+#   * ceph.yaml — HEALTH_ERR, OSD flapping, slow requests, scrub errors, clock skew.
+#   * k3s-nodes.yaml — OOM kills, failed systemd units, filesystem/hung tasks, and
+#     the SSH/sudo auth-failure rules.
+#   * security-authentik.yaml — brute-force detection on the IdP, which has no
+#     other coverage at all (see that section for why it has to live here).
+#
+# ⚠️ This file was `rules-truenas.yaml` until 2026-08-20. It is NOT truenas-only,
+# and it cannot be split: the ruler reads a single directory, and the HelmRelease
+# mounts exactly one ConfigMap (`loki-alerting-rules`) at /etc/loki/rules/fake.
+# A second ConfigMap would have to mount at the same path and would shadow this
+# one, so every LogQL rule in the cluster has to be a data key below.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -370,3 +383,42 @@ data:
                 A sudo attempt was rejected on {{ $labels.node }} in the last 10m
                 (not in sudoers, or wrong password). Check who in Loki
                 ({job="journal", node="{{ $labels.node }}"}).
+
+  # Brute-force detection for Authentik. This has to be a LogQL rule rather than a
+  # PrometheusRule for a blunt reason: authentik exports NO Prometheus metrics to
+  # this cluster at all. Checked live — `count by (__name__) ({__name__=~"authentik.*"})`
+  # returns zero series. There is no login-failure counter to alert on.
+  #
+  # Nor is it covered anywhere else. CrowdSec parses Traefik and Home Assistant logs,
+  # but authentik was tried and did not work, so the IdP — the credential endpoint for
+  # domain-wide SSO, and the redirect target of every forwardAuth route — currently has
+  # no brute-force detection of any kind. Authentik's own Reputation policy throttles
+  # attackers but reports nothing outward, so a sustained attempt is invisible today.
+  security-authentik.yaml: |
+    groups:
+      - name: authentik-security
+        rules:
+          - alert: AuthentikLoginFailureBurst
+            # ⚠️ MATCH THE EXACT JSON FIELD, never a bare `login_failed` substring.
+            # Authentik's admin UI polls /api/v3/events/events/?actions=login_failed,
+            # and those request logs contain the word. Measured over 30d: the exact
+            # form below matches 1 line (a real failure); `|~ "login_failed"` matches
+            # 17 — i.e. 16 of 17 hits would have been the dashboard watching itself.
+            #
+            # Threshold is 5 in 10m against a baseline of ONE failure in 30 days, so a
+            # mistyped password cannot reach it but a guessing loop does immediately.
+            expr: |
+              sum by (client_ip) (count_over_time({namespace="authentik"} |= `"action": "login_failed"` | json | __error__="" [10m])) > 5
+            for: 0m
+            labels:
+              severity: warning
+              component: security
+            annotations:
+              summary: "Authentik login-failure burst from {{ $labels.client_ip }}"
+              description: >-
+                {{ $value }} failed Authentik logins from {{ $labels.client_ip }} in
+                10m, against a baseline of one failure per month. This is the IdP for
+                every SSO app in the cluster. If the source is not a private address,
+                note that authentik.int.nerdbox.dev is behind the internal-only
+                allowlist — a public IP here would mean that allowlist is not working.
+                Inspect in Loki: {namespace="authentik"} |= `"action": "login_failed"`
