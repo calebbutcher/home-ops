@@ -1,0 +1,52 @@
+---
+# falco.yaml fragment: where detections go.
+#
+# Config CRs are merged into the operator's baked base config by ascending
+# `priority`, so this only has to state what differs from that base. Notably it
+# does NOT need to set any of the following, all of which the operator already
+# gets right for a DaemonSet on this cluster:
+#
+#   engine.kind: modern_ebpf     — hardcoded by the operator for DaemonSet mode.
+#                                  Correct here anyway: every node is Ubuntu 24.04
+#                                  on kernel 6.8, far past the ~5.8 floor for BPF
+#                                  ring buffer + BTF. It is also the only sane
+#                                  choice for a fleet that gets rolled by the
+#                                  system-upgrade-controller — CO-RE means a
+#                                  kernel bump can never leave us with a driver
+#                                  that will not rebuild. (The legacy `ebpf`
+#                                  probe was REMOVED in Falco 0.44.0, not
+#                                  deprecated, along with gVisor and gRPC output.)
+#   metrics.enabled              — already true in the base config.
+#   webserver.prometheus_metrics_enabled — already true. Both are required for
+#                                  /metrics to answer; the operator sets both.
+#
+# metrics.interval in the base config is 1h, which looks alarming and is not: the
+# /metrics endpoint is computed at scrape time. `interval` only governs snapshot
+# emission to output_rule/output_file, which we do not use.
+apiVersion: artifact.falcosecurity.dev/v1alpha1
+kind: Config
+metadata:
+  name: falco-output
+  namespace: falco
+spec:
+  priority: 60
+  config:
+    # Detections leave Falco by two independent paths, on purpose.
+    #
+    # 1. stdout as JSON. Alloy already tails /var/log/pods on every node, so this
+    #    lands the COMPLETE unfiltered event stream in Loki for free — no new
+    #    integration, no extra config, no PVC. This is the surface used to tune
+    #    the ruleset and the reason Discord can start deliberately quiet.
+    # 2. http_output to falcosidekick, which applies its own priority floor and
+    #    forwards to Discord.
+    json_output: true
+    json_include_output_property: true
+    stdout_output:
+      enabled: true
+    http_output:
+      enabled: true
+      # Resolves to the Service the operator creates for the falcosidekick
+      # Component. The name is NOT discovered — it is literally the Component's
+      # metadata.name. Rename that CR and Falco silently stops delivering, with
+      # no error on either side. See component-falcosidekick.yaml.
+      url: "http://falcosidekick.falco.svc.cluster.local:2801"

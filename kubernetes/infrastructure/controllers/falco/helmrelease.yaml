@@ -1,0 +1,66 @@
+---
+# The Falco Operator — runtime security for the cluster.
+#
+# This deploys ONLY the operator (a small Deployment + five CRDs). The Falco
+# DaemonSet itself, falcosidekick, the rules and the plugins are all Custom
+# Resources, and they live in ./config applied by a separate Flux Kustomization
+# (kubernetes/flux/cluster/falco-config.yaml) because their CRDs come from this
+# HelmRelease. Same CRD-ordering deadlock as the tailscale Connector, PR #186.
+#
+# Why the operator and not the plain `falco` chart (9.1.0, considerably more
+# mature): rules and plugins become OCI artifacts referenced by digest-pinnable
+# CRs, with per-node selectors and priority-ordered merging — i.e. rule tuning is
+# git-native and reviewable instead of a wall of Helm values. The cost is real
+# and worth stating: the operator is v0.4.1 with v1alpha1 CRDs, and it ships no
+# ServiceMonitor, no dashboards, no PrometheusRule and no least-privileged mode,
+# so all of that is hand-written here.
+#
+# 0.x bumps from Renovate can change CRD schemas. Read them, do not rubber-stamp.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: falco-operator
+  namespace: falco
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: falco-operator
+      version: "0.3.1"
+      sourceRef:
+        kind: HelmRepository
+        name: falcosecurity
+        namespace: flux-system
+  install:
+    # The chart ships all five CRDs in crds/, which Helm installs but never
+    # upgrades. CreateReplace on upgrade is what actually keeps them current.
+    crds: Create
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # Load-bearing for GitOps. The operator copies metadata.labels from the Falco
+    # and Component CRs onto every resource it generates — including the
+    # cluster-scoped ClusterRole/ClusterRoleBinding, which cannot carry an
+    # OwnerReference. Flux stamps kustomize.toolkit.fluxcd.io/{name,namespace}
+    # onto those CRs, so without this the operator re-emits objects wearing Flux's
+    # ownership labels that Flux never applied and does not have in its inventory.
+    # Upstream issue #349 documents the resulting delete/recreate loop on Argo CD.
+    #
+    # Flux prunes from its status inventory rather than from labels, so it is not
+    # certain this reproduces here — but the mitigation is free and the failure
+    # mode is ugly. The chart ships this empty with these exact keys commented out
+    # as the suggested value.
+    excludedLabels:
+      - kustomize.toolkit.fluxcd.io/name
+      - kustomize.toolkit.fluxcd.io/namespace
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        memory: 128Mi

@@ -1,0 +1,33 @@
+---
+# The Falco CRs are applied in their own Flux Kustomization, separate from the
+# `infrastructure` set, because their CRDs (instance.falcosecurity.dev/Falco and
+# Component, artifact.falcosecurity.dev/Config, Rulesfile and Plugin) are
+# installed by the falco-operator HelmRelease. Keeping them in `infrastructure`
+# makes the whole kustomization dry-run fail ("no matches for kind Falco") until
+# the operator is up — a deadlock, since the operator itself is in that same set.
+#
+# Same pattern and same reason as tailscale-connector.yaml.
+#
+# dependsOn infrastructure → the operator installs (and registers the CRDs)
+# first; retryInterval lets this converge quickly once they exist. Isolated here
+# it can never re-block the `apps` Kustomization.
+#
+# No `decryption:` block: the only secret in this stack is the Discord webhook,
+# which deliberately lives one directory up in the operator's own kustomization
+# so that `infrastructure` (which already decrypts) creates it before the
+# Component here references it.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: falco-config
+  namespace: flux-system
+spec:
+  interval: 30m
+  retryInterval: 2m
+  path: ./kubernetes/infrastructure/controllers/falco/config
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    - name: infrastructure

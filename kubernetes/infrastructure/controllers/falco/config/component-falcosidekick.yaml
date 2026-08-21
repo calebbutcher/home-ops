@@ -1,0 +1,76 @@
+---
+# falcosidekick — fans Falco events out to Discord.
+#
+# `Component` is why this stack needs no second HelmRelease: falcosidekick is a
+# first-class operator-managed component, alongside `falcosidekick-ui` and
+# `metacollector`.
+#
+# metacollector is deliberately NOT deployed. Its only job is to add owner
+# metadata (deployment / replicaset / service). The container plugin already
+# supplies k8s.pod.name, k8s.ns.name, k8s.pod.uid and k8s.pod.labels straight off
+# the CRI socket, which is enough to identify what tripped a rule. Adding a third
+# component for owner-chain enrichment is not worth the footprint here.
+#
+# falcosidekick-ui is also skipped: it requires its own Redis with RediSearch
+# (redis-stack, not the plain caches we already run), which means another PVC
+# against the Longhorn budget, and its auth is a single shared admin:admin string
+# — the one thing in the cluster that would not sit behind Authentik. Loki
+# already gives search and retention over the same events, with backups.
+#
+# metadata.name is load-bearing: it becomes the Service name that
+# config.yaml's http_output.url points at. Renaming this CR silently breaks
+# delivery with no error on either side.
+apiVersion: instance.falcosecurity.dev/v1alpha1
+kind: Component
+metadata:
+  name: falcosidekick
+  namespace: falco
+  labels:
+    app.kubernetes.io/name: falcosidekick
+spec:
+  component:
+    type: falcosidekick
+  # Operator default. Two small pods behind the Service, so a node going down
+  # does not take the alerting path with it.
+  replicas: 2
+  podTemplateSpec:
+    spec:
+      containers:
+        - name: falcosidekick
+          # Merged additively over the operator's defaults: containers merge by
+          # `name` and env has patchMergeKey `name` under server-side apply, so
+          # the operator's image, ports and probes all survive this patch.
+          env:
+            # Non-empty enables the Discord output; empty disables it cleanly.
+            # The Secret ships empty (see discord-webhook.sops.yaml) so that a
+            # deploy before the webhook exists is a no-op rather than a retry
+            # loop against a fake URL.
+            - name: DISCORD_WEBHOOKURL
+              valueFrom:
+                secretKeyRef:
+                  name: falco-discord-webhook
+                  key: webhook-url
+            # Start LOUD-PROOF, not loud. Of the 25 stable rules, exactly 3 are
+            # CRITICAL, so this is a very narrow, very high-signal Discord feed on
+            # day one — among them "Drop and execute new binary in container",
+            # which is close to the definition of post-exploitation.
+            #
+            # This is not the end state. The full 25-rule stream is in Loki from
+            # the first minute via stdout, and in Prometheus as
+            # falcosecurity_falco_rules_matches_total{rule_name}. Watch which
+            # rules actually fire here for a week or two, add a tuning Rulesfile
+            # for the confirmed-benign ones (the usual suspects in a cluster this
+            # operator-dense are "Contact K8S API Server From Container" and
+            # "Terminal shell in container"), and only then drop this to warning
+            # or notice.
+            #
+            # Doing it the other way round — open the firehose, then tune — is how
+            # a security channel becomes a channel nobody reads.
+            - name: DISCORD_MINIMUMPRIORITY
+              value: critical
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi

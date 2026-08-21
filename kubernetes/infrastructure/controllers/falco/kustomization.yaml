@@ -1,0 +1,19 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# NOTE: no top-level transformers (namespace/commonLabels) — they would rewrite
+# the .sops.yaml secret's metadata and corrupt the SOPS MAC. Every manifest sets
+# its own namespace explicitly.
+resources:
+  - namespace.yaml
+  - helmrepository.yaml
+  - discord-webhook.sops.yaml
+  - helmrelease.yaml
+# The Falco / Component / Config / Rulesfile / Plugin CRs live in ./config and are
+# applied by the `falco-config` Flux Kustomization (dependsOn infrastructure) —
+# their CRDs are installed by the HelmRelease above, so they cannot be in this
+# same dry-run/apply. See kubernetes/flux/cluster/falco-config.yaml.
+#
+# The Discord secret is deliberately HERE rather than in ./config: this
+# kustomization is applied by `infrastructure`, which already carries the SOPS
+# decryption stanza, so the secret exists before the Component that mounts it.

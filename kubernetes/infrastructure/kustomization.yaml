@@ -15,4 +15,5 @@ resources:
   - controllers/tailscale-operator
   - controllers/external-dns
   - controllers/coredns-autoscaler
+  - controllers/falco
   - configs

@@ -1,0 +1,46 @@
+---
+# Scrapes the Falco DaemonSet's native Prometheus endpoint.
+#
+# Falco has exposed /metrics itself since 0.38.0; the old falco-exporter sidecar
+# is archived upstream (it died with Falco 0.44.0 dropping gRPC output), so
+# anything referencing it — including the popular Grafana dashboard 11914 — is
+# dead and should not be reintroduced.
+#
+# No config needed to turn this on: the operator's baked base config already sets
+# both metrics.enabled and webserver.prometheus_metrics_enabled, and BOTH are
+# required for /metrics to answer.
+#
+# The Service is created by the operator, not by us: name and namespace come from
+# the Falco CR, and its labels are a copy of that CR's labels. That is exactly why
+# the HelmRelease sets excludedLabels for kustomize.toolkit.fluxcd.io/* — without
+# it the Flux ownership labels would be copied here too. Select on the
+# app.kubernetes.io/name label we set deliberately on the CR, never on those.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: falco
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - falco
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: falco
+  endpoints:
+    - port: web
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      metricRelabelings:
+        # Cardinality guard. falcosecurity_falco_rules_matches_total carries one
+        # label PER RULE TAG — tag_maturity_stable, tag_mitre_execution,
+        # tag_container, and so on — which multiplies series for no benefit here:
+        # nothing in the Falco dashboard queries them, and rule_name already
+        # identifies what fired. Dropping them at scrape time keeps this off the
+        # local TSDB and out of Thanos.
+        #
+        # If you ever want to slice detections by MITRE tactic, do it from the
+        # Loki stream (which has the full JSON event), not by re-enabling these.
+        - action: labeldrop
+          regex: tag_.*

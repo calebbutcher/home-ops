@@ -1,0 +1,39 @@
+---
+# The stable Falco ruleset, pulled as an OCI artifact.
+#
+# Also not optional — the operator ships no rules of its own.
+#
+# This is the `falco-rules` artifact only, which is 25 rules: 14 WARNING,
+# 7 NOTICE, 3 CRITICAL, 1 INFO. The `falco-incubating-rules` and
+# `falco-sandbox-rules` artifacts are deliberately NOT loaded; they are a further
+# ~68 rules and they are where most of Falco's noisy reputation actually comes
+# from. Start narrow, widen once the baseline is quiet.
+#
+# Tuning goes in a SECOND Rulesfile CR with a HIGHER priority than this one
+# (higher = loaded later = wins), using `inlineRules`. Do not edit this artifact.
+# Every noisy stable rule ships a `user_known_*` hook macro defaulting to
+# (never_true) that exists precisely to be overridden, e.g.:
+#
+#   - macro: user_known_contact_k8s_api_server_activities
+#     condition: (proc.name = flux and k8s.ns.name = flux-system)
+#     override:
+#       condition: replace
+#
+# Use `override:` — the older `append:` syntax is deprecated since Falco 0.36 and
+# is removed in 1.0.0. An appended condition must start with `and`/`or`, since it
+# is textual concatenation.
+#
+# Manual version management, same as the container plugin above.
+apiVersion: artifact.falcosecurity.dev/v1alpha1
+kind: Rulesfile
+metadata:
+  name: falco-rules
+  namespace: falco
+spec:
+  ociArtifact:
+    image:
+      repository: falcosecurity/rules/falco-rules
+      tag: "5.1.0"
+    registry:
+      name: ghcr.io
+  priority: 40

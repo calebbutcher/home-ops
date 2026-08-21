@@ -1,0 +1,17 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Applied by the `falco-config` Flux Kustomization, separately from the operator
+# that installs these CRDs. See kubernetes/flux/cluster/falco-config.yaml.
+#
+# Order here is documentation, not enforcement — Flux applies the whole set in one
+# server-side apply and the operator reconciles as things appear. It is written
+# artifacts-first because that is the order things must exist in at runtime: the
+# plugin and rules are what make the instance useful, and the instance is what
+# makes falcosidekick have anything to forward.
+resources:
+  - plugin-container.yaml
+  - rulesfile-falco.yaml
+  - config.yaml
+  - falco.yaml
+  - component-falcosidekick.yaml

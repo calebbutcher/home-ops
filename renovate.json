@@ -138,6 +138,19 @@
       "prBodyNotes": [
         "⚠️ **Database version change.** After the pod restarts on the new image, run `mariadb-upgrade` inside it by hand — the operator will not. There is no in-place downgrade, so take a dump first."
       ]
+    },
+    {
+      "description": [
+        "Falco Operator. Pre-1.0 with v1alpha1 CRDs, and it has already shipped one breaking API change (v0.1.x -> v0.2.0 required a migration guide). A 0.x bump here can change the schema of the Falco, Component, Config, Rulesfile and Plugin CRs in kubernetes/infrastructure/controllers/falco/config/.",
+        "CI cannot catch that: those kinds are absent from the datreeio CRD catalog, so kubeconform reports them as 'no schema, NOT validated' and the build stays green. A schema break surfaces as a stalled Flux Kustomization after merge, not as a red PR."
+      ],
+      "matchDatasources": ["helm", "docker"],
+      "matchPackageNames": ["falco-operator", "falcosecurity/falco-operator"],
+      "labels": ["renovate", "type/operator-upgrade"],
+      "prBodyNotes": [
+        "⚠️ **Read the changelog before merging — do not rubber-stamp.** Diff the chart's `crds/` against the CRs in `kubernetes/infrastructure/controllers/falco/config/`, and check the [release notes](https://github.com/falcosecurity/falco-operator/releases) for a migration guide.",
+        "The OCI artifact versions (container plugin, falco-rules) are *not* managed by Renovate — they live in CRD fields rather than `image:` strings. Check them by hand against the `falco` chart's `containerEngine.pluginRef` when the bundled Falco version moves. See [`docs/falco-deploy.md`](docs/falco-deploy.md)."
+      ]
     }
   ]
 }

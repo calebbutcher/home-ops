@@ -1,0 +1,30 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: falco
+  labels:
+    # PodSecurity `privileged`, and unlike every other controller namespace here
+    # the labels are set EXPLICITLY rather than omitted.
+    #
+    # Omitting them would work — an unlabelled namespace is already privileged by
+    # default — but Falco is the one workload in the cluster whose whole job is to
+    # watch for container escapes, and it does that by being the most privileged
+    # thing running. That deserves to be stated in the manifest rather than
+    # inherited from a default, so nobody later "tightens" this to baseline and
+    # spends an afternoon on CreateContainerConfigError.
+    #
+    # It cannot be baseline. The operator hardcodes `privileged: true` on the Falco
+    # container (internal/pkg/resources/falco.go — there is no least-privileged
+    # option in v0.4.1), and the DaemonSet hostPath-mounts /proc, /dev, /boot,
+    # /etc, /usr, /lib/modules and the containerd sockets. hostPath alone
+    # disqualifies it from baseline; the rest disqualifies it several times over.
+    #
+    # audit/warn are set to match enforce. Left at their defaults they would
+    # evaluate against `restricted` and annotate/warn on every single pod
+    # admission even though the pod is admitted — noise that trains you to ignore
+    # PSA warnings.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged

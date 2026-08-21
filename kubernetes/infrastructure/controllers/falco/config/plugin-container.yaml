@@ -1,0 +1,36 @@
+---
+# The container plugin. This is NOT optional and it is the single easiest thing
+# to get wrong with the operator.
+#
+# The operator's baked-in base config ships `plugins: []` and `load_plugins: []`.
+# Unlike the plain falco Helm chart, nothing here is wired up for you. Without
+# this CR Falco starts cleanly, reports Ready, loads its rules and then matches
+# almost nothing useful — every `container.*` and `k8s.*` field evaluates empty,
+# and the stable ruleset declares `required_plugin_versions: [container >= 0.4.0]`.
+# A healthy-looking Falco that silently sees nothing is exactly the failure mode
+# the FalcoIngestionStalled alert exists to catch.
+#
+# The plugin reads container metadata off the CRI socket. On k3s that is
+# /run/k3s/containerd/containerd.sock, which needs NO configuration here: it is
+# already in the plugin's compiled-in default socket list (plugin_config.cpp), and
+# the operator already hostPath-mounts /run/k3s/containerd into the Falco pod.
+# Note also that if you ever DO override the socket list, you write plain node
+# paths — the plugin prepends HOST_ROOT itself, so a leading /host breaks it.
+#
+# Version tracks what the falco chart 9.1.0 pins for Falco 0.44.1. Renovate does
+# not manage this field (it is not a standard `image:` string), so bumps are
+# manual — check `ghcr.io/falcosecurity/plugins/plugin/container` against the
+# falco chart's containerEngine.pluginRef when upgrading Falco.
+apiVersion: artifact.falcosecurity.dev/v1alpha1
+kind: Plugin
+metadata:
+  name: container
+  namespace: falco
+spec:
+  ociArtifact:
+    image:
+      repository: falcosecurity/plugins/plugin/container
+      tag: "0.7.1"
+    registry:
+      name: ghcr.io
+  priority: 30

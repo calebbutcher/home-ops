@@ -95,6 +95,7 @@ Ansible; see **Networking** above.
 | mariadb-operator | MariaDB operator (per-app instances, native backups) |
 | system-upgrade-controller | Rolling k3s version upgrades (see [`docs/updates.md`](docs/updates.md)) |
 | tailscale-operator | Tailscale exit node + LAN subnet router |
+| Falco | Runtime security — syscall monitoring via eBPF, alerts to Discord (see [`docs/falco-deploy.md`](docs/falco-deploy.md)) |
 
 ## Applications
 
