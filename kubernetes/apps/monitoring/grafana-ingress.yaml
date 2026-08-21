@@ -12,7 +12,7 @@ metadata:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     # frame-deny variant: Grafana already sends X-Frame-Options: deny (allow_embedding
     # is off) and must not be relaxed to SAMEORIGIN by the shared middleware.
-    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers-frame-deny@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers-frame-deny@kubernetescrd,traefik-internal-only@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:

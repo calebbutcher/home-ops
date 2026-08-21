@@ -28,7 +28,7 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-internal-only@kubernetescrd
     # CNAME to the single self-healing ingress record rather than a second A
     # record — see Surface B. Harmless before external-dns exists.
     external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
