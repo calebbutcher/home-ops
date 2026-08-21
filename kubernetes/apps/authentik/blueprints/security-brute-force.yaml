@@ -73,10 +73,41 @@ entries:
   # Bind both to the authentication flow itself. `order` here is the policy
   # evaluation order within the flow's binding list, unrelated to the flow's
   # stage `order` values (identification=10, password=20, mfa=30, login=100).
+  #
+  # ⚠️ BOTH IDENTIFIERS LOOK ODD ON PURPOSE. They are written this way so the
+  # blueprint is IDEMPOTENT. The first version used
+  #   target: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+  #   policy: !KeyOf reputation-ip
+  # which created the right objects on the FIRST apply and then failed on every
+  # re-apply with "The fields policy, target, order must make a unique set",
+  # leaving the blueprint permanently in `error` while looking fine in the UI.
+  # Two independent causes, both confirmed against the authentik source:
+  #
+  # 1. `!KeyOf` resolves by scanning the blueprint for an entry with that id AND a
+  #    populated `_state.instance` (blueprints/v1/common.py, class KeyOf). On a
+  #    re-apply the policy entries are unchanged, so no instance is attached and the
+  #    reference resolves to nothing. `!Find` queries the database instead and does
+  #    not care whether the entry changed this run.
+  #
+  # 2. The target is subtler. A Flow's `pk` is its `flow_uuid`, but a PolicyBinding
+  #    stores the flow's INHERITED `policybindingmodel_ptr_id` — a different UUID.
+  #    Writes still work, because PolicyBindingSerializer declares
+  #    `target = PolicyBindingModelForeignKey(...)` which accepts the subclass pk and
+  #    resolves it. But the importer's LOOKUP is a plain
+  #    `Q(target=<value>)` (blueprints/v1/importer.py, __query_from_identifier), so a
+  #    flow_uuid there matches no existing row, the binding is treated as new, and it
+  #    collides with the real one on the unique constraint. authentik's own blueprints
+  #    dodge this because `!KeyOf` has an explicit special case returning `pbm_uuid`
+  #    for policybinding targets — which only works when the flow is declared in the
+  #    same blueprint, and ours is not.
+  #
+  # Querying `policybindingmodel` through its reverse `flow__slug` accessor yields the
+  # pbm_uuid directly, which is exactly what is stored. Verified on the live cluster:
+  # this resolves to the same UUID as the existing bindings' target_id.
   - model: authentik_policies.policybinding
     identifiers:
-      target: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-      policy: !KeyOf reputation-ip
+      target: !Find [authentik_policies.policybindingmodel, [flow__slug, default-authentication-flow]]
+      policy: !Find [authentik_policies_reputation.reputationpolicy, [name, security-reputation-ip]]
       order: 0
     attrs:
       enabled: true
@@ -85,8 +116,8 @@ entries:
 
   - model: authentik_policies.policybinding
     identifiers:
-      target: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-      policy: !KeyOf reputation-username
+      target: !Find [authentik_policies.policybindingmodel, [flow__slug, default-authentication-flow]]
+      policy: !Find [authentik_policies_reputation.reputationpolicy, [name, security-reputation-username]]
       order: 1
     attrs:
       enabled: true
