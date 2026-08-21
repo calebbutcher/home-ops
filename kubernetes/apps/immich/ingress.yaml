@@ -12,7 +12,15 @@ metadata:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     # CrowdSec bouncer is IP-reputation only (drops known-bad IPs), NOT auth — it does
     # not challenge/redirect, so unlike forward-auth (below) it is safe for the mobile app.
-    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-rate-limit@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd
+    #
+    # AppSec (WAF) added via the large-upload variant, which caps body inspection at
+    # 8 KiB so photo/video uploads are not buffered into Traefik — that cost was the
+    # original reason immich had no WAF. immich is one of only three routes genuinely
+    # published in public DNS, and was the last of the three without one.
+    #
+    # NO `internal-only` here: this Ingress serves immich.int AND immich.nerdbox.dev
+    # from one object, so the allowlist cannot be applied to just the internal name.
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-rate-limit@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd,crowdsec-crowdsec-appsec-large-upload@kubernetescrd
     # NOTE: do not add the authentik forwardauth middleware here — it breaks the
     # Immich mobile app/API. Use Immich's native OIDC against Authentik instead.
 spec:
