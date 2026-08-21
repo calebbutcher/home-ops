@@ -1,0 +1,31 @@
+---
+# Scrapes falcosidekick, which is the delivery half of the alerting path.
+#
+# Worth scraping separately from Falco because the two fail independently: Falco
+# can be detecting perfectly while falcosidekick fails every POST to Discord, and
+# from Falco's side that looks like success. The gap between
+# falcosecurity_falcosidekick_falco_events_total (received) and
+# falcosecurity_falcosidekick_outputs_total{status="error"} (delivered) is the
+# only place that failure is visible.
+#
+# Port name and number are the operator's defaults for a falcosidekick Component
+# (http/2801) — the same port serves both the event intake from Falco and this
+# metrics endpoint. There is no separate "prometheus output" to enable; the event
+# counter is incremented unconditionally and cannot be turned off.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: falcosidekick
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - falco
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: falcosidekick
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

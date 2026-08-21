@@ -1,0 +1,138 @@
+---
+# Alerts for Falco, the runtime-security stack.
+#
+# Same theme as prometheusrule-security.yaml: these alert on "the control stopped
+# working", never on "an attack happened". A Falco detection is the system doing
+# its job and goes to Discord via falcosidekick; a Falco that quietly stopped
+# detecting is invisible everywhere else and is what these rules are for.
+#
+# Concretely, there is deliberately NO alert on falcosecurity_falco_rules_matches_total
+# being high, and none on it being zero either. Zero rule matches is the normal,
+# healthy, boring state of a cluster nobody is attacking — alerting on it would
+# fire continuously forever. The health signal is event INGESTION
+# (falcosecurity_scap_n_evts_total), which is nonzero on every live node at all
+# times because it counts syscalls observed, not rules matched.
+#
+# ⚠️ Honesty note, because this file breaks the convention set by its neighbours:
+# the sibling rule files state that every expression was checked against live
+# series before being written. That could only be done here for the
+# kube_daemonset_* series (verified: labels are `namespace` and `daemonset`, and
+# node-exporter reads 9/9, confirming a tolerated DaemonSet does reach every
+# node). The falcosecurity_* series cannot exist until Falco is running. Verify
+# them on first deploy with:
+#
+#   kubectl -n falco port-forward ds/falco 8765:8765
+#   curl -s localhost:8765/metrics | grep -E 'scap_n_(evts|drops)_total|rules_matches'
+#
+# and confirm the `job` label really is "falco"/"falcosidekick" (Prometheus
+# Operator derives it from the Service name unless jobLabel is set — the same
+# jobName→job plumbing that bit the blackbox Probes).
+#
+# No `release:` label needed — ruleSelectorNilUsesHelmValues: false — and the
+# `severity` labels route via the catch-all Discord AlertmanagerConfig.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: falco
+  namespace: monitoring
+spec:
+  groups:
+    - name: falco.rules
+      rules:
+        # Falco is a DaemonSet with `tolerations: [operator: Exists]`, so desired
+        # should be 9 — six workers plus the three control planes. Any shortfall
+        # means specific nodes are running unmonitored, and the control planes are
+        # the ones that would hurt: they run etcd and kube-apiserver.
+        #
+        # This is also the alert that catches an OOMKill. The memory limit is set
+        # deliberately tight (512Mi) so that a Falco memory spike kills Falco
+        # rather than pressuring a 4Gi control plane into evicting etcd — which
+        # means a spike is *supposed* to show up here rather than as node trouble.
+        - alert: FalcoAgentDown
+          expr: |
+            kube_daemonset_status_number_ready{namespace="falco", daemonset="falco"}
+              < kube_daemonset_status_desired_number_scheduled{namespace="falco", daemonset="falco"}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Falco not running on all nodes ({{ $value }} ready)"
+            description: >-
+              The Falco DaemonSet has fewer ready pods than nodes, so some nodes have
+              no runtime-security monitoring at all. Check for OOMKills first
+              (kubectl -n falco describe pod), then eBPF driver errors in the logs.
+
+        # THE alert of this file. Kernel-side drops mean the ring buffer overflowed
+        # and syscalls were never seen by the rule engine — Falco was blind for
+        # that window while continuing to report perfectly healthy. Nothing else
+        # in the stack can tell you this happened.
+        #
+        # Expressed as a ratio rather than an absolute count: a handful of drops
+        # under a burst is not interesting, a sustained fraction is. 0.1% over 30m
+        # is the starting threshold; tune it once there is a real baseline.
+        # clamp_min guards the division when a node is genuinely idle.
+        - alert: FalcoEventDrops
+          expr: |
+            increase(falcosecurity_scap_n_drops_total[30m])
+              / clamp_min(increase(falcosecurity_scap_n_evts_total[30m]), 1) > 0.001
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Falco dropping events on {{ $labels.instance }} ({{ $value | humanizePercentage }})"
+            description: >-
+              Falco is losing syscalls before they reach the rule engine, so detections
+              in this window may be missed silently. Usually means the node is under
+              load or the ring buffer is undersized — raise buf_size_preset or
+              cpus_for_each_buffer under engine.modern_ebpf in a Config CR.
+
+        # The direct analogue of CrowdSecIngestionStalled, and the same class of
+        # failure: the process is up, healthy and heartbeating while doing no work
+        # at all. A live node always generates syscalls, so a flat event counter
+        # means the driver detached or the engine wedged. Health checks cannot see
+        # this because nothing is unhealthy.
+        - alert: FalcoIngestionStalled
+          expr: rate(falcosecurity_scap_n_evts_total[15m]) == 0
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Falco ingesting zero events on {{ $labels.instance }}"
+            description: >-
+              Falco is running and scrapeable but has processed no syscalls for 30m.
+              On a live node that is impossible unless the modern_ebpf driver has
+              detached — Falco is up and detecting nothing. Restart the pod and check
+              for eBPF verifier errors.
+
+        # Falco and falcosidekick fail independently. Falco POSTs an event, gets a
+        # non-2xx from Discord, and carries on — from Falco's side everything looks
+        # fine. This is the only place "detections are firing but nobody is being
+        # told" becomes visible. Expired or deleted webhook is the usual cause.
+        - alert: FalcosidekickOutputErrors
+          expr: increase(falcosecurity_falcosidekick_outputs_total{status="error"}[15m]) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Falcosidekick failing to deliver to {{ $labels.destination }}"
+            description: >-
+              Falco detections are reaching falcosidekick but not reaching their
+              destination, so alerts are being lost. Check the Discord webhook in the
+              falco-discord-webhook Secret is still valid.
+
+        # Covers the case the two above cannot: pods Running, DaemonSet fully
+        # ready, but the metrics endpoint unreachable — a broken ServiceMonitor
+        # selector, a renamed Service, or webserver.prometheus_metrics_enabled
+        # being turned off. Without this, a dead scrape target would make
+        # FalcoEventDrops and FalcoIngestionStalled silently unevaluable, and an
+        # alert that cannot fire looks exactly like an alert that is not firing.
+        - alert: FalcoMetricsDown
+          expr: up{job=~"falco|falcosidekick"} == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Falco metrics target {{ $labels.job }} is down"
+            description: >-
+              Prometheus cannot scrape {{ $labels.job }}. Falco may still be detecting,
+              but every other alert in this group is blind while this is true.

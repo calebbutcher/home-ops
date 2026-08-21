@@ -1,0 +1,68 @@
+---
+# The Falco instance itself — a DaemonSet across all 9 nodes.
+#
+# The spec is deliberately thin: `type`, `version`, `podTemplateSpec` and update
+# strategy are all it has. There is no driver field (that is engine.kind in a
+# Config CR) and no resources field (that is podTemplateSpec, below).
+apiVersion: instance.falcosecurity.dev/v1alpha1
+kind: Falco
+metadata:
+  name: falco
+  namespace: falco
+  labels:
+    # The operator copies THIS label set onto the Service it generates, and that
+    # Service is what the ServiceMonitor in kubernetes/apps/monitoring/falco
+    # selects on. Select on a label we set here, never on the Flux-injected
+    # kustomize.toolkit.fluxcd.io/* labels (which also land on the Service, and
+    # which the operator is told to strip via excludedLabels in the HelmRelease).
+    app.kubernetes.io/name: falco
+spec:
+  type: DaemonSet
+  # Pinned rather than left to the operator's bundled default so a Falco upgrade
+  # is a reviewable diff instead of a side effect of bumping the operator chart.
+  version: "0.44.1"
+  podTemplateSpec:
+    spec:
+      # Tolerate everything, so Falco runs on all 9 nodes.
+      #
+      # Strictly speaking this is redundant today: the control planes carry only
+      # node-role.kubernetes.io/master:NoSchedule, and the operator's default
+      # tolerations already cover exactly that (plus control-plane). It is set
+      # anyway, and deliberately as a blanket Exists rather than a matching pair.
+      #
+      # The reasoning is that for a security DaemonSet the failure mode of a
+      # too-narrow toleration is silent and bad: taint a node for some unrelated
+      # reason later, and it quietly stops being monitored with nothing to
+      # indicate it. FalcoAgentDown would catch it, but only because desired
+      # count drops too — better to just never skip a node. Same blanket form
+      # Alloy and node-exporter use here for the same reason.
+      #
+      # Note this replaces rather than merges with the operator's defaults:
+      # tolerations is an atomic list with no patch merge key.
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: falco
+          # The operator defaults are requests 100m/512Mi, limits 1000m/1024Mi.
+          # Both are lowered here, and the reason is the control planes: they are
+          # 4Gi nodes already sitting at 60-71% memory (control-01 is ~2.8Gi of
+          # 3.8Gi), while the workers are 12Gi at 36-65%. The DaemonSet has to fit
+          # the smallest node, not the average one.
+          #
+          # Observed Falco RSS with modern_ebpf is typically 100-300Mi; memory
+          # scales with core count because there is one ring buffer per CPU, and
+          # these are 4-core nodes. 256Mi requested is comfortably above that.
+          #
+          # The 512Mi limit is a deliberate blast-radius choice, not just thrift.
+          # Upstream issue #3733 (random memory spikes) is still open. On a
+          # control plane with ~1Gi headroom the right outcome of a Falco memory
+          # spike is Falco being OOMKilled — which the FalcoAgentDown alert
+          # catches — and NOT node memory pressure evicting etcd or the
+          # apiserver. Revisit from `kubectl top pods -n falco` after a week.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
