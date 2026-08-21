@@ -67,7 +67,11 @@ spec:
           value: "6379"
 
     # Blueprints-as-code: every *.yaml key in this ConfigMap is mounted at
-    # /blueprints/custom/ on server+worker and auto-applied by the worker.
+    # /blueprints/mounted/cm-authentik-blueprints/ on server+worker and auto-applied
+    # by the worker. (This comment said /blueprints/custom/ until 2026-08-21; that
+    # path does not exist, which sends you the wrong way when a blueprint misbehaves.
+    # The real path is /blueprints/mounted/cm-<configMap name>/, and
+    # `ak apply_blueprint` rejects anything outside /blueprints.)
     # The ConfigMap is produced by the kustomization's configMapGenerator from
     # blueprints/*.yaml. Onboarding an app to SSO = add a blueprint file.
     blueprints:
