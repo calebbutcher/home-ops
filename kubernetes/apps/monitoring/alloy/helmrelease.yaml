@@ -36,10 +36,46 @@ spec:
       # Run on control-plane/etcd nodes too so their pod logs are captured.
       tolerations:
         - operator: Exists
+      # The MaxMind databases the geoip stages read. They are NOT downloaded and
+      # there is no MaxMind account or licence key involved: the CrowdSec image
+      # already ships GeoLite2-City.mmdb (63MB) and GeoLite2-ASN.mmdb (11MB) baked
+      # in at /staging/var/lib/crowdsec/data/, and CrowdSec is already a dependency
+      # of this cluster's edge. This initContainer copies them into an emptyDir the
+      # Alloy container then reads.
+      #
+      # Pinning the crowdsec tag matters: it fixes the vintage of the data (the
+      # databases in v1.7.8 are dated 2026-05-11). Renovate tracks the same image for
+      # the crowdsec HelmRelease, so bumping there and here keeps them in step. Stale
+      # geo data degrades gracefully — a wrong city, not a broken pipeline.
+      volumes:
+        extra:
+          - name: geoip
+            emptyDir: {}
+      initContainers:
+        - name: geoip-db
+          image: crowdsecurity/crowdsec:v1.7.8
+          command:
+            - sh
+            - -c
+            - cp /staging/var/lib/crowdsec/data/GeoLite2-City.mmdb /staging/var/lib/crowdsec/data/GeoLite2-ASN.mmdb /geoip/
+          volumeMounts:
+            - name: geoip
+              mountPath: /geoip
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+
     alloy:
       # Mount the host's /var/log so /var/log/pods/**/*.log is readable.
       mounts:
         varlog: true
+        extra:
+          - name: geoip
+            mountPath: /geoip
+            readOnly: true
       # Log files under /var/log/pods are root-owned; read them as root.
       securityContext:
         runAsUser: 0
@@ -97,6 +133,73 @@ spec:
           // timestamp, and stream (stdout/stderr) are extracted.
           loki.process "pods" {
             stage.cri {}
+
+            // ---------------------------------------------------------------
+            // GeoIP enrichment — Traefik access logs ONLY
+            // ---------------------------------------------------------------
+            // Feeds the map on the "Traefik / Edge Exposure" dashboard. Traefik's
+            // JSON access log carries ClientHost but no geography, and Loki cannot
+            // enrich at query time, so it has to happen here at ingest.
+            //
+            // ⚠️ SCOPED WITH stage.match ON PURPOSE. Every pod log line in the
+            // cluster flows through this one loki.process. An unscoped geoip stage
+            // would run an mmdb lookup on all of them — overwhelmingly lines with no
+            // IP in them at all — for no benefit. The selector keeps the work on the
+            // ~1% of lines that are actually edge traffic.
+            //
+            // ⚠️ STRUCTURED METADATA, NOT LABELS. These values are per-request and
+            // effectively unbounded (a city/lat/lon per source IP). As labels they
+            // would mint a new Loki stream per location and wreck the index — the
+            // same class of mistake the journal `unit` guard below exists to prevent.
+            // Structured metadata is queryable in LogQL but never indexed. Needs
+            // schema v13 + tsdb, which loki/helmrelease.yaml already runs.
+            //
+            // Failure mode if this goes wrong is a blank map, NOT lost logs: a line
+            // that is not JSON, or an IP the database does not know, simply yields no
+            // extracted fields and passes through untouched. Traefik's own non-JSON
+            // startup lines take exactly that path.
+            stage.match {
+              selector = "{namespace=\"traefik\", container=\"traefik\"}"
+
+              // Pull the real client IP out of the access-log JSON. This is the true
+              // remote address only because the Traefik Service runs
+              // externalTrafficPolicy: Local — under the chart default `Cluster`,
+              // kube-proxy would SNAT every client to a node IP and this would
+              // geolocate our own datacentre on every request.
+              stage.json {
+                expressions = {ClientHost = "ClientHost"}
+              }
+
+              stage.geoip {
+                db      = "/geoip/GeoLite2-City.mmdb"
+                db_type = "city"
+                source  = "ClientHost"
+              }
+
+              // ASN is the single most useful field on the map: it names the network
+              // rather than a point on a map, and the scanners hitting this cluster
+              // are overwhelmingly cloud-hosted (MICROSOFT-CORP-MSN-AS-BLOCK,
+              // GOOGLE-CLOUD-PLATFORM) where the city is a datacentre, not a person.
+              stage.geoip {
+                db      = "/geoip/GeoLite2-ASN.mmdb"
+                db_type = "asn"
+                source  = "ClientHost"
+              }
+
+              // An empty value means "same name as the key".
+              stage.structured_metadata {
+                values = {
+                  geoip_country_code                  = "",
+                  geoip_country_name                  = "",
+                  geoip_city_name                     = "",
+                  geoip_location_latitude             = "",
+                  geoip_location_longitude            = "",
+                  geoip_autonomous_system_number      = "",
+                  geoip_autonomous_system_organization = "",
+                }
+              }
+            }
+
             forward_to = [loki.write.default.receiver]
           }
 
