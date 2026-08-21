@@ -95,12 +95,55 @@ spec:
           memory: 512Mi
         limits:
           memory: 1Gi
+      # Prometheus metrics. The container has always listened on :9300 — what was
+      # missing is the metrics Service and the ServiceMonitor, both of which the
+      # chart gates behind `enabled: false`. Until this, authentik had ZERO metric
+      # coverage: `count by (__name__) ({__name__=~"authentik.*"})` returned nothing,
+      # on the component that gates every forwardAuth route and six OIDC apps.
+      #
+      # Server exposes 38 metric families: flow plan/stage execution timings by
+      # flow_slug and stage_type, policy + property-mapping execution time, outpost
+      # connectivity, and the django_* request/response/DB series.
+      #
+      # ⚠️ These metrics CANNOT tell you about failed logins — see the worker block
+      # and prometheusrule-security.yaml. Brute-force detection stays in LogQL.
+      #
+      # scrapeTimeout is 10s rather than the chart's 3s. Measured cost is ~0.17s for
+      # a ~170KB payload, so 3s would work today — but a scrape timeout is exactly
+      # how the CrowdSec LAPI target flapped when it got CPU-throttled, taking every
+      # series with it. The margin is free; the failure mode is silent.
+      metrics:
+        enabled: true
+        serviceMonitor:
+          enabled: true
+          interval: 30s
+          scrapeTimeout: 10s
 
     worker:
       # Stateless (blueprints, outpost sync, email) and off the login path, so a
       # second replica is cheap insurance rather than an outage fix. Inherits the
       # hard anti-affinity preset set under `global` above.
       replicas: 2
+      # Scraped SEPARATELY from the server on purpose: the worker exports a
+      # different, non-overlapping set (19 families vs the server's 38). It is the
+      # only source of authentik_tasks_queued / authentik_tasks_workers, i.e. the
+      # blueprint-apply and outpost-sync backlog. Scraping only the server would
+      # leave the component that applies every blueprint in this repo unmonitored.
+      #
+      # ⚠️ WHAT NEITHER SIDE EXPORTS: any authentication event. There is no
+      # login-failure counter anywhere in the 38+19 families — grepping the live
+      # endpoints for login/failed/denied/event/reputation returns nothing. And the
+      # HTTP status series cannot substitute: authentik's login flow is API-driven,
+      # so a WRONG PASSWORD still returns HTTP 200 with the failure in the JSON body
+      # (verified live — only 200/302/204 appear, no 4xx, in a window that contained
+      # a real failed login). That is why AuthentikLoginFailureBurst is a LogQL rule
+      # against `"action": "login_failed"` and must stay one.
+      metrics:
+        enabled: true
+        serviceMonitor:
+          enabled: true
+          interval: 30s
+          scrapeTimeout: 10s
       env:
         # Surfaced to blueprints via `!Env <NAME>` so OIDC client secrets never
         # appear in a blueprint file in Git.
