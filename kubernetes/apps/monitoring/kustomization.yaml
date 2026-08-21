@@ -53,6 +53,7 @@ resources:
   - tailscale/dashboard.yaml
   - loki/dashboard-logs-explorer.yaml
   - traefik/dashboard.yaml
+  - traefik/dashboard-exposure.yaml
   - unpackerr/dashboard.yaml
   - exportarr/dashboard.yaml
   - qbittorrent/dashboard.yaml
