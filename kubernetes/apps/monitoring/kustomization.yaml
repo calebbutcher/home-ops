@@ -41,7 +41,7 @@ resources:
   - thanos/dashboard-store.yaml
   - thanos/dashboard-compact.yaml
   - loki/helmrelease.yaml
-  - loki/rules-truenas.yaml
+  - loki/alerting-rules.yaml
   - loki/dashboard-health.yaml
   - truenas/dashboard-system.yaml
   - truenas/dashboard-zfs.yaml

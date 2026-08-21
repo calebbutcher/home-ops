@@ -15,8 +15,13 @@ metadata:
     external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # Priority pinned: the catch-all "/" router must sort BELOW the specific
+    # API-path router in the sibling Ingress. Traefik's default priority is the
+    # rule length, which happens to produce this order -- pinning states the
+    # intent so a change to that heuristic cannot silently invert the split.
+    traefik.ingress.kubernetes.io/router.priority: "10"
     # Bouncer first (cheap IP-reputation check), then Authentik forward-auth.
-    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-rate-limit@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-internal-only@kubernetescrd,traefik-rate-limit@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
@@ -62,8 +67,11 @@ metadata:
     # flaps the record between CNAME and A.
     external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # Priority pinned ABOVE the sibling "/" router so these paths keep bypassing
+    # forward-auth. See the UI Ingress for why this is stated rather than inferred.
+    traefik.ingress.kubernetes.io/router.priority: "100"
     # CrowdSec IP-reputation bouncer in front of the open (unauthenticated) API paths.
-    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-rate-limit@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-internal-only@kubernetescrd,traefik-rate-limit@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:

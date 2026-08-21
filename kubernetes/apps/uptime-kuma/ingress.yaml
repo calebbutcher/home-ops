@@ -11,7 +11,7 @@ metadata:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     # CrowdSec IP-reputation bouncer (drops known-bad IPs before the app; own login handles auth).
-    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-rate-limit@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-internal-only@kubernetescrd,traefik-rate-limit@kubernetescrd,crowdsec-crowdsec-bouncer@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:

@@ -12,7 +12,13 @@ metadata:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     # frame-deny variant: Grafana already sends X-Frame-Options: deny (allow_embedding
     # is off) and must not be relaxed to SAMEORIGIN by the shared middleware.
-    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers-frame-deny@kubernetescrd
+    #
+    # Rate limit added for parity with authentik: this is the other login page in the
+    # cluster, and a flood backstop is cheap. Deliberately NO CrowdSec bouncer — the
+    # bouncer trusts all of RFC1918, and `internal-only` above guarantees that is the
+    # only thing that can reach this router, so attaching it would be an exact no-op
+    # that made the chain look more protective than it is.
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers-frame-deny@kubernetescrd,traefik-internal-only@kubernetescrd,traefik-rate-limit@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:

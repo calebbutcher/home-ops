@@ -99,8 +99,10 @@ spec:
 
     # CrowdSec bouncer plugin. Registered here as an experimental plugin; wired to LAPI by
     # the `crowdsec-bouncer` Middleware (crowdsec ns). Traefik downloads the plugin from the
-    # catalog at startup (needs egress). Enforcing on every Ingress — see that Middleware
-    # for what it does and does not cover; see docs/crowdsec-deploy.md.
+    # catalog at startup (needs egress). Attached to 13 of the 30 routers — NOT to every
+    # Ingress, despite what this comment claimed until 2026-08-20 — and meaningful on only
+    # the three publicly-resolvable ones. See that Middleware for why, and
+    # docs/crowdsec-deploy.md.
     experimental:
       plugins:
         bouncer:

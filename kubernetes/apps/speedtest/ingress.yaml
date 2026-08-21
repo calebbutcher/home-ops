@@ -19,7 +19,7 @@ metadata:
     #
     # This does NOT gate Prometheus: the ServiceMonitor scrapes the ClusterIP
     # Service directly and never traverses Traefik.
-    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-internal-only@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:

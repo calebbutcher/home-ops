@@ -5,8 +5,15 @@
 #
 # ⚠️ The Longhorn UI has NO authentication of its own and offers full destructive
 # control over every PVC in the cluster (detach volumes, delete replicas, change
-# the backup target). The forwardAuth middleware is the ONLY thing in front of
-# it — never remove that annotation, and never expose this host publicly.
+# the backup target). Two middlewares now stand in front of it and BOTH matter:
+# `internal-only` rejects any source outside RFC1918/Tailscale before the request is
+# routed at all, and forwardAuth requires an Authentik session. Never remove either.
+#
+# The "never expose this host publicly" instruction above used to be advice with
+# nothing enforcing it: Traefik routes on Host header, so before `internal-only` this
+# UI answered a request sent to the WAN IP with `Host: longhorn.int.nerdbox.dev` — a
+# name anyone can read out of Certificate Transparency logs. Authentik's 302 was the
+# only thing between the internet and this console.
 #
 # Auth needs nothing on the Authentik side: this cluster runs domain-wide
 # forward-auth (a single `forward_domain` proxy provider covering *.nerdbox.dev,
@@ -14,9 +21,11 @@
 # annotation — no per-app provider, application, blueprint, or
 # /outpost.goauthentik.io route. See docs/authentik-sso.md.
 #
-# DNS is manual in this repo (no external-dns): longhorn.int.nerdbox.dev must
-# point at the Traefik LoadBalancer, like every other *.int host. cert-manager
-# issues the certificate over DNS-01, so an internal-only name works fine.
+# DNS is managed by external-dns like every other *.int host — see the
+# external-dns.alpha.kubernetes.io/target annotation below, which CNAMEs this name to
+# the single self-healing ingress record. (This comment claimed DNS was manual here
+# until 2026-08-20; the target annotation had already been added.) cert-manager issues
+# the certificate over DNS-01, so an internal-only name works fine.
 #
 # namespace is set explicitly because longhorn/kustomization.yaml deliberately
 # runs no top-level transformers (they would corrupt the SOPS MAC on
@@ -29,7 +38,7 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-internal-only@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
     # CNAME to the single self-healing ingress record (see the Traefik Service)
     # rather than a second A record, so a Traefik IP change moves one record.
     external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev

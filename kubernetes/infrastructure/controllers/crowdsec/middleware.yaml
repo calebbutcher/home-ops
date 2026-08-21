@@ -4,15 +4,24 @@
 # the CrowdSec LAPI. Referenced cross-namespace as `crowdsec-crowdsec-bouncer@kubernetescrd`
 # (the `@kubernetescrd` FQ name works without allowCrossNamespace, same as authentik's).
 #
-# STATUS: ENFORCING. The observe-first rollout is over — this Middleware is now attached to
-# every Ingress in the cluster (see the router.middlewares annotation on each). It has real
-# decisions to act on: ~39k active bans, almost all pulled from the CAPI community blocklist
-# (http:scan, http:exploit, http:crawl) and the firehol lists.
+# STATUS: ENFORCING, on 13 of the 30 routers — NOT on every Ingress, despite what this
+# comment claimed until 2026-08-20. It has real decisions to act on: ~39k active bans,
+# almost all pulled from the CAPI community blocklist (http:scan, http:exploit,
+# http:crawl) and the firehol lists.
 #
-# ⚠️ Note what clientTrustedIPs below means in practice: RFC1918 is never blocked, so on the
-# ~30 hostnames that resolve only on the LAN this Middleware is INERT. It does real work on
-# the handful of names that are published in public DNS. Do not read its presence on an
-# internal route as protection. See docs/crowdsec-deploy.md.
+# ⚠️ WHERE IT ACTUALLY DOES SOMETHING — and it is a much shorter list than it looks.
+# clientTrustedIPs below covers all of RFC1918, so this Middleware never blocks a private
+# source. Since `traefik-internal-only` now restricts 27 of the 30 routers to exactly those
+# ranges, the bouncer is INERT on every one of them by construction: nothing that survives
+# the allowlist is a source it would ever act on.
+#
+# That leaves the three routers genuinely published in public DNS — immich, seerr and
+# home-assistant — as the only places this does real work. Those three cannot take the
+# allowlist (each serves its .int and public hostname from one Ingress object), which is
+# precisely why they keep the bouncer instead.
+#
+# So: do not read this Middleware's presence on an internal route as protection, and do not
+# add it to one expecting to gain any. See docs/crowdsec-deploy.md.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
@@ -88,6 +97,56 @@ spec:
       # Detect-first safety: never block just because AppSec errored or is unreachable.
       crowdsecAppsecFailureBlock: false
       crowdsecAppsecUnreachableBlock: false
+      # ⚠️ The plugin defaults this to TRUE — a fail-CLOSED path in an otherwise
+      # fail-open config: an unreadable body on any method with a body is dropped
+      # before AppSec is even consulted. Set false so every AppSec failure mode
+      # degrades the same way. (bouncer.go, `case isBodyUnreadable(httpReq)`.)
+      crowdsecAppsecUnreadableBodyBlock: false
+      clientTrustedIPs:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+---
+# AppSec variant for routes that carry LARGE uploads — immich, today.
+#
+# Why a separate middleware rather than adding immich to the one above: the plugin
+# buffers up to `crowdsecAppsecBodyLimit` bytes of every request body into memory and
+# POSTs them to AppSec for inspection. The default is 10 MiB, so every photo and video
+# upload would be read into Traefik and shipped to the WAF. That cost is the entire
+# reason immich was excluded from AppSec originally.
+#
+# `crowdsecAppsecBodyLimit: 8192` fixes that without giving up the WAF. Reading
+# bouncer.go: the limit is applied with `io.LimitReader` and the full body is handed
+# on to the backend intact via `io.MultiReader`, so a large upload is NOT blocked and
+# NOT truncated — only the portion AppSec gets to look at is capped. 8 KiB covers the
+# URI, headers, query string and the head of a JSON body, which is where the rules
+# that have actually fired here live (vpatch-git-config and friends are URI matches).
+#
+# ⚠️ If immich uploads start failing, this is the first thing to drop from the Ingress
+# — same triage order as home-assistant. Then check `cscli alerts list` (kind `waf`).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: crowdsec-appsec-large-upload
+  namespace: crowdsec
+spec:
+  plugin:
+    bouncer:
+      enabled: true
+      logLevel: INFO
+      crowdsecMode: appsec
+      crowdsecLapiScheme: https
+      crowdsecLapiTlsInsecureVerify: true
+      crowdsecLapiHost: crowdsec-service.crowdsec.svc.cluster.local:8080
+      crowdsecLapiKeyFile: /var/run/secrets/crowdsec/bouncer-key
+      crowdsecAppsecEnabled: true
+      crowdsecAppsecScheme: http
+      crowdsecAppsecHost: crowdsec-appsec-service.crowdsec.svc.cluster.local:7422
+      crowdsecAppsecFailureBlock: false
+      crowdsecAppsecUnreachableBlock: false
+      crowdsecAppsecUnreadableBodyBlock: false
+      # Inspect the first 8 KiB only — see the rationale above.
+      crowdsecAppsecBodyLimit: 8192
       clientTrustedIPs:
         - 10.0.0.0/8
         - 172.16.0.0/12

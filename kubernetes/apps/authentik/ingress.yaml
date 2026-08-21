@@ -12,7 +12,7 @@ metadata:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     # frame-deny variant: authentik already sends X-Frame-Options: DENY and must not be
     # relaxed to SAMEORIGIN. Rate limit added because this is the credential endpoint.
-    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers-frame-deny@kubernetescrd,traefik-rate-limit@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers-frame-deny@kubernetescrd,traefik-internal-only@kubernetescrd,traefik-rate-limit@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
