@@ -17,29 +17,99 @@
 #     control against anything already on the LAN, on Tailscale, or on a guest SSID.
 #
 # HOW REPUTATION WORKS. authentik scores each source IP and each attempted username,
-# decrementing on every failed login. A negative score below the threshold makes the
-# policy fail, and because the policy is bound to the flow itself the attacker is
-# refused the login flow entirely rather than merely being told "wrong password".
-# Scores decay back toward zero over time, so this throttles rather than permabans.
+# decrementing on every failed login. Scores decay back toward zero over time (each
+# row carries an `expires`), so this throttles rather than permabans. Because the
+# policy is bound to the FLOW rather than to a stage, a throttled client is refused
+# the login flow outright instead of being told "wrong password" — see ORDERING.
 #
-# THRESHOLDS. -5 means five failed attempts. Measured baseline before writing this:
+# 🔴 THE POLARITY TRAP — READ BEFORE TOUCHING `negate`. `ReputationPolicy.passes()`
+# is written from the ATTACKER's point of view, not the flow's:
+#
+#     passing = score <= self.threshold      # authentik/policies/reputation/models.py
+#
+# It returns PASS when reputation is BAD. Bound to a flow with the obvious-looking
+# `negate: false`, that reads as "this flow applies only to clients already flagged as
+# attackers" — which denies every normal user, because a clean client has no
+# Reputation row at all, scores 0, and `0 <= -5` is false.
+#
+# That is not hypothetical: the first version of this file bound both policies
+# un-negated and took the whole IdP down with it. Every session already open kept
+# working, so nothing looked broken; but from the moment it was applied (2026-08-20
+# 21:09) NOT ONE login succeeded. The flow executor logged
+# `FlowNonApplicableException` and users got "Request has been denied" / "Flow does
+# not apply to current user" — a message that points at group membership and sends
+# you looking in entirely the wrong place. First failure 23:02 the same evening,
+# found 2026-08-21 only because a phone's session happened to expire.
+#
+# So: `negate: true` is REQUIRED here. Negated, the binding reads correctly —
+# the flow applies while reputation is above the threshold, and stops applying once
+# the client has burned through it.
+#
+# ⚠️ WHAT THIS ACTUALLY PROTECTS, precisely: one source IP guessing repeatedly. Not
+# more than that, and the reason is worth knowing before trusting it further.
+#
+# `passes()` filters `Q(ip=...) | Q(identifier=request.user.username)` and SUMS the
+# matching rows. But a flow-applicability check runs BEFORE the identification stage —
+# by design, see ORDERING — so the visitor is still anonymous and
+# `request.user.username` is "", which matches no Reputation row. Only the ip term can
+# ever contribute here. Measured against the live DB (blueprint applied inside a
+# rolled-back transaction, `PolicyEngine` with the cache off):
+#
+#     clean IP                         -> flow applicable: True
+#     IP at -4  (under threshold)      -> flow applicable: True
+#     IP at -6  (over threshold)       -> flow applicable: False   <- the control
+#     two IPs at -3 on one username    -> flow applicable: True    <- NOT caught
+#
+# So a distributed attempt at a single account — the thing the old
+# `security-reputation-username` policy was added for — is NOT covered, and never was:
+# bound to the flow, that policy could not see a username either. Covering it needs a
+# binding AFTER identification (the password stage), which is a separate decision with
+# its own tradeoff, since by then the flow has already confirmed the username exists.
+# `check_username` stays enabled here only because it costs one OR-term and starts
+# working for free if this is ever additionally bound later in the flow.
+#
+# ⚠️ ONE POLICY, NOT TWO, and this is deliberate — it is what makes the binding safe
+# under the flow's `policy_engine_mode: any`. Splitting it into a per-IP policy and a
+# per-username policy — which this file did until PR #392 — is the trap. Under `any`,
+# two negated bindings mean an attacker need only satisfy ONE of them, and per the
+# above the username side is unconditionally clean, so it would have voided the IP
+# block entirely. Two policies would additionally require flipping the built-in flow to
+# `policy_engine_mode: all`, i.e. a second built-in mutation that an upgrade could
+# silently revert straight back into "control does nothing".
+#
+# THRESHOLD. -5 means five failed attempts. Measured baseline before writing this:
 # exactly ONE failed login in the preceding 30 days, against 20 successful ones, so
 # a legitimate user mistyping a password twice is nowhere near this. Both human
 # accounts have TOTP and WebAuthn enrolled, so a password failure is already the
 # uncommon case.
 #
-# ⚠️ TWO POLICIES, NOT ONE, and they catch different attacks. The IP policy stops one
-# host guessing many passwords. The username policy stops a distributed attempt at a
-# single account from many hosts, which the IP policy alone would never see. Binding
-# only the first is the common mistake.
+# ⚠️ ORDERING. Bound to the FLOW (`default-authentication-flow`), not to a single
+# stage, so it is evaluated before the identification stage renders. Do not rebind
+# this to the password stage — by then the flow has already told an attacker that the
+# username exists.
 #
-# ⚠️ ORDERING. Both are bound to the FLOW (`default-authentication-flow`), not to a
-# single stage, so they are evaluated before the identification stage renders. Do not
-# rebind these to the password stage — by then the flow has already told an attacker
-# that the username exists.
+# ⚠️ VERIFY AFTER CHANGING ANYTHING HERE, from a machine with no authentik session
+# (a private window is enough — an existing session never re-plans the flow, which
+# is exactly why the outage above stayed invisible for two hours). Or check it
+# directly, which does not need a browser:
 #
-# ROLLBACK: delete this file (and its configMapGenerator entry). Blueprint-created
-# objects are removed when the blueprint stops declaring them. If you are locked out
+#   kubectl -n authentik exec deploy/authentik-server -- ak shell -c "
+#   from django.contrib.auth.models import AnonymousUser
+#   from django.test import RequestFactory
+#   from authentik.flows.models import Flow
+#   from authentik.policies.engine import PolicyEngine
+#   r = RequestFactory().get('/'); r.META['REMOTE_ADDR'] = '10.1.20.50'
+#   e = PolicyEngine(Flow.objects.get(slug='default-authentication-flow'),
+#                    AnonymousUser(), r)
+#   e.use_cache = False; e.build(); print('flow applicable:', e.result.passing)"
+#
+# It must print True. False means nobody can log in.
+#
+# ROLLBACK: set `state: absent` on the entries below (and clear the bindings the same
+# way). Deleting this file is NOT enough and NOT a rollback — the importer only ever
+# deletes on an explicit `state: absent` entry (blueprints/v1/importer.py, the
+# `BlueprintEntryDesiredState.ABSENT` branch); objects a blueprint simply stops
+# declaring are left in place, still bound and still enforcing. If you are locked out
 # while testing, the reputation scores live in authentik_policies_reputation_reputation
 # and can be cleared directly in the CNPG database.
 version: 1
@@ -48,32 +118,33 @@ metadata:
   labels:
     blueprints.goauthentik.io/instantiate: "true"
 entries:
-  # Per-source-IP reputation.
+  # Retire the split IP/username pair this file used to declare. Both must be removed
+  # explicitly — see ROLLBACK above; dropping them from `entries` would leave them
+  # bound and enforcing forever. `PolicyBinding.policy` is `on_delete=CASCADE`, so
+  # deleting each policy takes its binding with it and no separate binding-removal
+  # entry is needed. Both are no-ops once the objects are gone ("Entry to delete with
+  # no instance, skipping"), so this stays idempotent and can be dropped from the file
+  # after it has run once everywhere.
   - model: authentik_policies_reputation.reputationpolicy
-    id: reputation-ip
+    state: absent
     identifiers:
       name: security-reputation-ip
-    attrs:
-      name: security-reputation-ip
-      check_ip: true
-      check_username: false
-      threshold: -5
 
-  # Per-username reputation — catches a distributed attack on one account.
   - model: authentik_policies_reputation.reputationpolicy
-    id: reputation-username
+    state: absent
     identifiers:
       name: security-reputation-username
+
+  # The replacement: one policy, both checks — see "ONE POLICY, NOT TWO" above.
+  - model: authentik_policies_reputation.reputationpolicy
+    identifiers:
+      name: security-reputation
     attrs:
-      name: security-reputation-username
-      check_ip: false
+      name: security-reputation
+      check_ip: true
       check_username: true
       threshold: -5
 
-  # Bind both to the authentication flow itself. `order` here is the policy
-  # evaluation order within the flow's binding list, unrelated to the flow's
-  # stage `order` values (identification=10, password=20, mfa=30, login=100).
-  #
   # ⚠️ BOTH IDENTIFIERS LOOK ODD ON PURPOSE. They are written this way so the
   # blueprint is IDEMPOTENT. The first version used
   #   target: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
@@ -85,9 +156,11 @@ entries:
   #
   # 1. `!KeyOf` resolves by scanning the blueprint for an entry with that id AND a
   #    populated `_state.instance` (blueprints/v1/common.py, class KeyOf). On a
-  #    re-apply the policy entries are unchanged, so no instance is attached and the
+  #    re-apply the policy entry is unchanged, so no instance is attached and the
   #    reference resolves to nothing. `!Find` queries the database instead and does
-  #    not care whether the entry changed this run.
+  #    not care whether the entry changed this run. (It still resolves on the very
+  #    first apply, because entries are imported in order inside one transaction, so
+  #    the policy row above is already visible to this query.)
   #
   # 2. The target is subtler. A Flow's `pk` is its `flow_uuid`, but a PolicyBinding
   #    stores the flow's INHERITED `policybindingmodel_ptr_id` — a different UUID.
@@ -104,21 +177,19 @@ entries:
   # Querying `policybindingmodel` through its reverse `flow__slug` accessor yields the
   # pbm_uuid directly, which is exactly what is stored. Verified on the live cluster:
   # this resolves to the same UUID as the existing bindings' target_id.
+  #
+  # `order` is the policy evaluation order within the flow's binding list, unrelated
+  # to the flow's stage `order` values (identification=10, password=20, mfa=30,
+  # login=100).
   - model: authentik_policies.policybinding
     identifiers:
       target: !Find [authentik_policies.policybindingmodel, [flow__slug, default-authentication-flow]]
-      policy: !Find [authentik_policies_reputation.reputationpolicy, [name, security-reputation-ip]]
+      policy: !Find [authentik_policies_reputation.reputationpolicy, [name, security-reputation]]
       order: 0
     attrs:
       enabled: true
+      # 🔴 Load-bearing. See "THE POLARITY TRAP" above — without this the flow
+      # applies to nobody and all SSO login stops.
+      negate: true
       # Evaluate on every request through the flow, not once per session.
-      timeout: 30
-
-  - model: authentik_policies.policybinding
-    identifiers:
-      target: !Find [authentik_policies.policybindingmodel, [flow__slug, default-authentication-flow]]
-      policy: !Find [authentik_policies_reputation.reputationpolicy, [name, security-reputation-username]]
-      order: 1
-    attrs:
-      enabled: true
       timeout: 30
