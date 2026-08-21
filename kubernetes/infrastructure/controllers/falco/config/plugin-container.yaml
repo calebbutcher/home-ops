@@ -33,4 +33,13 @@ spec:
       tag: "0.7.1"
     registry:
       name: ghcr.io
-  priority: 30
+# NOTE: no `priority:` here. Config and Rulesfile have one — they are merged
+# in priority order — but the Plugin CRD's spec is only config/ociArtifact/selector.
+# Plugins are loaded, not merged, so there is nothing to order.
+#
+# Setting it anyway is not a harmless no-op: it fails the Flux dry-run outright
+# with `.spec.priority: field not declared in schema`, which blocks the entire
+# falco-config Kustomization. Note that this is stricter than plain schema
+# validation — CRD structural schemas do not set additionalProperties: false, so
+# an unknown field passes an offline JSON-Schema check and is only rejected by
+# the server-side-apply typed patch.
