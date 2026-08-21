@@ -1,0 +1,93 @@
+---
+# Brute-force protection for the authentik login flow.
+#
+# WHY THIS EXISTS. Before this blueprint the cluster had NO brute-force control on
+# its identity provider at all — verified against the live database, the
+# authentik_policies_reputation_reputationpolicy table was empty and nothing was
+# bound to any flow. That is a bigger gap than it looks:
+#
+#   * authentik is the credential endpoint for domain-wide SSO. It is the redirect
+#     target of every forwardAuth-gated route and the OIDC issuer for immich,
+#     grafana, paperless, gitea, tandoor and audiobookshelf.
+#   * CrowdSec does NOT cover it. The agent parses Traefik and Home Assistant logs
+#     only; authentik was tried as a log source and did not work, so failed logins
+#     here have never produced a ban.
+#   * The `internal-only` Traefik middleware keeps the login page off the public
+#     internet, which is the main reason this was survivable — but it is not a
+#     control against anything already on the LAN, on Tailscale, or on a guest SSID.
+#
+# HOW REPUTATION WORKS. authentik scores each source IP and each attempted username,
+# decrementing on every failed login. A negative score below the threshold makes the
+# policy fail, and because the policy is bound to the flow itself the attacker is
+# refused the login flow entirely rather than merely being told "wrong password".
+# Scores decay back toward zero over time, so this throttles rather than permabans.
+#
+# THRESHOLDS. -5 means five failed attempts. Measured baseline before writing this:
+# exactly ONE failed login in the preceding 30 days, against 20 successful ones, so
+# a legitimate user mistyping a password twice is nowhere near this. Both human
+# accounts have TOTP and WebAuthn enrolled, so a password failure is already the
+# uncommon case.
+#
+# ⚠️ TWO POLICIES, NOT ONE, and they catch different attacks. The IP policy stops one
+# host guessing many passwords. The username policy stops a distributed attempt at a
+# single account from many hosts, which the IP policy alone would never see. Binding
+# only the first is the common mistake.
+#
+# ⚠️ ORDERING. Both are bound to the FLOW (`default-authentication-flow`), not to a
+# single stage, so they are evaluated before the identification stage renders. Do not
+# rebind these to the password stage — by then the flow has already told an attacker
+# that the username exists.
+#
+# ROLLBACK: delete this file (and its configMapGenerator entry). Blueprint-created
+# objects are removed when the blueprint stops declaring them. If you are locked out
+# while testing, the reputation scores live in authentik_policies_reputation_reputation
+# and can be cleared directly in the CNPG database.
+version: 1
+metadata:
+  name: security-brute-force
+  labels:
+    blueprints.goauthentik.io/instantiate: "true"
+entries:
+  # Per-source-IP reputation.
+  - model: authentik_policies_reputation.reputationpolicy
+    id: reputation-ip
+    identifiers:
+      name: security-reputation-ip
+    attrs:
+      name: security-reputation-ip
+      check_ip: true
+      check_username: false
+      threshold: -5
+
+  # Per-username reputation — catches a distributed attack on one account.
+  - model: authentik_policies_reputation.reputationpolicy
+    id: reputation-username
+    identifiers:
+      name: security-reputation-username
+    attrs:
+      name: security-reputation-username
+      check_ip: false
+      check_username: true
+      threshold: -5
+
+  # Bind both to the authentication flow itself. `order` here is the policy
+  # evaluation order within the flow's binding list, unrelated to the flow's
+  # stage `order` values (identification=10, password=20, mfa=30, login=100).
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+      policy: !KeyOf reputation-ip
+      order: 0
+    attrs:
+      enabled: true
+      # Evaluate on every request through the flow, not once per session.
+      timeout: 30
+
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+      policy: !KeyOf reputation-username
+      order: 1
+    attrs:
+      enabled: true
+      timeout: 30

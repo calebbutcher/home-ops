@@ -234,3 +234,100 @@ spec:
             description: >-
               More than 10% of requests to this backend have failed with a 5xx for
               >15m. Traefik is routing fine — look at the app itself and its database.
+
+        # ── Edge behaviour, not control health ────────────────────────────────
+        # The three below are the exception to this file's "the control stopped
+        # working" theme: they watch what the edge is being ASKED to do. They exist
+        # because the `internal-only` ipAllowList changed what a 4xx at the edge
+        # means — a 403 there is now usually the allowlist refusing a source, which
+        # is either an attacker (fine, ignore) or us locking ourselves out (not fine).
+        #
+        # ⚠️ THE `or vector(0)` IS LOAD-BEARING, not defensive noise. Both expressions
+        # subtract the service-level counter from the entrypoint-level one to isolate
+        # responses Traefik generated ITSELF, before any backend. When no service has
+        # served that code, `sum(...)` returns an EMPTY vector, and `X - empty` is
+        # empty — so the alert silently never fires. Verified live: the 403 form
+        # returns 0 series unguarded and 1 series guarded. Do not "simplify" these.
+        #
+        # ⚠️ traefik_entrypoint_* carries no host/router label (addRoutersLabels is
+        # false, and traefik_router_* does not exist here), so these alerts can say
+        # THAT the edge denied traffic but never WHICH hostname. Attribution lives in
+        # the "Traefik / Edge Exposure" dashboard, which reads RequestHost/ClientHost
+        # out of the JSON access logs in Loki. Every description points there.
+
+        # 403s that never reached a backend: the internal-only allowlist, the CrowdSec
+        # bouncer, or an AppSec block. Baseline is 3 per DAY (measured over 24h, with
+        # service-level 403s at zero), so 20 in 15m is a step change, not drift.
+        #
+        # Most likely cause after a rollout is us, not an attacker: a client on a
+        # network that is not in the allowlist (a new VLAN, a guest SSID, a Tailscale
+        # client presenting a 100.64/10 address if subnet-route SNAT is ever turned
+        # off). That is why this is worth a message even though "requests were blocked"
+        # normally is not.
+        - alert: TraefikEdgeDeniedSpike
+          expr: |
+            sum(increase(traefik_entrypoint_requests_total{code="403"}[15m]))
+            -
+            (sum(increase(traefik_service_requests_total{code="403"}[15m])) or vector(0))
+            > 20
+          for: 10m
+          labels:
+            severity: warning
+            component: security
+          annotations:
+            summary: "Traefik denied {{ $value | printf \"%.0f\" }} requests at the edge in 15m"
+            description: >-
+              Well above the 3-per-day baseline. Check whether this is scanning or a
+              legitimate client being locked out by the internal-only allowlist: open
+              the "Traefik / Edge Exposure" dashboard and look at the 403 rows in
+              "External requests by response status" for the client IP and hostname.
+              If a real client is being refused, add its range to the internal-only
+              Middleware (kubernetes/infrastructure/controllers/traefik/middleware.yaml).
+
+        # 404s Traefik generated because NO router matched — i.e. somebody asked for a
+        # hostname this cluster does not serve. This is the signal for host-header
+        # enumeration against the WAN IP, and it is why the entrypoint-minus-service
+        # subtraction matters: raw entrypoint 404s are dominated by ordinary app 404s
+        # (869/24h at the entrypoint vs 151/24h that actually reached a backend).
+        #
+        # Unrouted baseline is ~718/24h (~30/hr) of steady background scanning on the
+        # apex and the raw IP, worst 15m burst in 7d = 246. 500 in 15m is ~2x that
+        # worst burst, so ordinary probing stays quiet and a real sweep does not.
+        - alert: TraefikUnroutedHostProbing
+          expr: |
+            sum(increase(traefik_entrypoint_requests_total{code="404"}[15m]))
+            -
+            (sum(increase(traefik_service_requests_total{code="404"}[15m])) or vector(0))
+            > 500
+          for: 10m
+          labels:
+            severity: warning
+            component: security
+          annotations:
+            summary: "{{ $value | printf \"%.0f\" }} requests in 15m for hostnames this cluster does not serve"
+            description: >-
+              A burst of unrouted requests — someone is enumerating hostnames against
+              the edge. Harmless on its own (no router matched, nothing was reached),
+              but worth knowing about because every name this cluster DOES serve is
+              enumerable from Certificate Transparency logs. Identify the source in the
+              "Traefik / Edge Exposure" dashboard.
+
+        # Sustained 401/403 from a backend that DID serve the request — the app itself
+        # rejecting credentials, rather than the edge refusing a source. Per service so
+        # the alert names the app. Worst 15m in 7d is grafana at 9.3 (its API returns
+        # 401 to unauthenticated polls as a matter of course), so 50 is ~5x the noisiest
+        # real service and nothing legitimate reaches it.
+        - alert: TraefikBackendUnauthorizedSurge
+          expr: sum by (exported_service) (increase(traefik_service_requests_total{code=~"401|403"}[15m])) > 50
+          for: 10m
+          labels:
+            severity: warning
+            component: security
+          annotations:
+            summary: "{{ $labels.exported_service }} rejected {{ $value | printf \"%.0f\" }} requests as unauthorized in 15m"
+            description: >-
+              An app is refusing credentials at a rate nothing normal produces — a
+              broken integration re-trying with a stale API key, or credential
+              guessing against an app that has no CrowdSec coverage. Note this counts
+              only requests that REACHED the backend; edge denials are
+              TraefikEdgeDeniedSpike.
