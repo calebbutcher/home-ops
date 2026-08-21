@@ -71,13 +71,13 @@ spec:
               # what fsGroup above matches so /config is writable.
               PUID: "1000"
               PGID: "1000"
-              TZ: America/Chicago
+              TZ: America/New_York
               # What the UI renders result timestamps in. APP_TIMEZONE is
               # deliberately NOT set: upstream documents it as the escape hatch
               # for a database that does not default to UTC, which does not apply
               # to SQLite here. The schedule below is hourly on the hour, so the
               # timezone does not change when tests run either way.
-              DISPLAY_TIMEZONE: America/Chicago
+              DISPLAY_TIMEZONE: America/New_York
               # Used to build absolute links in the UI and notifications.
               APP_URL: https://speedtest.int.nerdbox.dev
               # SQLite in /config rather than a CNPG cluster. The /config PVC is
