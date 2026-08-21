@@ -271,6 +271,193 @@ data:
           }
         },
         {
+          "type": "geomap",
+          "title": "Where external traffic comes from",
+          "description": "Two scales on one map. The shaded/bubbled country layer is the broad picture; the per-IP layer is the detail, one marker per source address sized by request volume.\n\nOnly non-RFC1918 clients appear, so this is by definition traffic from outside the LAN and Tailscale. Expect the three public apps plus constant background scanning against the apex and the raw WAN IP.\n\nGeo comes from Alloy's geoip stage, which enriches ONLY Traefik access logs at ingest (see the alloy HelmRelease). It is not retroactive \u2014 the map starts at the moment that shipped and fills going forward.",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "gridPos": {
+            "h": 12,
+            "w": 24,
+            "x": 0,
+            "y": 5
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "loki",
+                "uid": "${loki}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (geoip_country_code, geoip_country_name) (count_over_time({namespace=\"traefik\", container=\"traefik\"} | json | __error__=\"\" | ClientHost !~ `(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.|127\\.|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.).*` | geoip_country_code != \"\" [$__range]))",
+              "instant": true,
+              "range": false,
+              "queryType": "instant",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "loki",
+                "uid": "${loki}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (geoip_location_latitude, geoip_location_longitude, ClientHost, geoip_city_name, geoip_country_code, geoip_autonomous_system_organization) (count_over_time({namespace=\"traefik\", container=\"traefik\"} | json | __error__=\"\" | ClientHost !~ `(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.|127\\.|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.).*` | geoip_location_latitude != \"\" [$__range]))",
+              "instant": true,
+              "range": false,
+              "queryType": "instant",
+              "refId": "B"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "convertFieldType",
+              "options": {
+                "conversions": [
+                  {
+                    "destinationType": "number",
+                    "targetField": "geoip_location_latitude"
+                  },
+                  {
+                    "destinationType": "number",
+                    "targetField": "geoip_location_longitude"
+                  }
+                ],
+                "fields": {}
+              }
+            }
+          ],
+          "options": {
+            "basemap": {
+              "config": {},
+              "name": "Basemap",
+              "type": "default"
+            },
+            "controls": {
+              "mouseWheelZoom": true,
+              "showAttribution": true,
+              "showDebug": false,
+              "showMeasure": false,
+              "showScale": false,
+              "showZoom": true
+            },
+            "tooltip": {
+              "mode": "details"
+            },
+            "view": {
+              "allLayers": true,
+              "id": "zero",
+              "lat": 25,
+              "lon": 0,
+              "zoom": 1.5
+            },
+            "layers": [
+              {
+                "name": "By country",
+                "type": "markers",
+                "filterData": {
+                  "id": "byRefId",
+                  "options": "A"
+                },
+                "location": {
+                  "mode": "lookup",
+                  "lookup": "geoip_country_code",
+                  "gazetteer": "public/gazetteer/countries.json"
+                },
+                "config": {
+                  "showLegend": false,
+                  "style": {
+                    "color": {
+                      "fixed": "super-light-blue"
+                    },
+                    "opacity": 0.25,
+                    "size": {
+                      "field": "Value",
+                      "fixed": 5,
+                      "max": 40,
+                      "min": 12
+                    },
+                    "symbol": {
+                      "fixed": "img/icons/marker/circle.svg",
+                      "mode": "fixed"
+                    },
+                    "symbolAlign": {
+                      "horizontal": "center",
+                      "vertical": "center"
+                    },
+                    "textConfig": {
+                      "fontSize": 12,
+                      "offsetX": 0,
+                      "offsetY": 0
+                    }
+                  }
+                },
+                "tooltip": true
+              },
+              {
+                "name": "By client IP",
+                "type": "markers",
+                "filterData": {
+                  "id": "byRefId",
+                  "options": "B"
+                },
+                "location": {
+                  "mode": "coords",
+                  "latitude": "geoip_location_latitude",
+                  "longitude": "geoip_location_longitude"
+                },
+                "config": {
+                  "showLegend": false,
+                  "style": {
+                    "color": {
+                      "field": "Value",
+                      "fixed": "orange"
+                    },
+                    "opacity": 0.9,
+                    "size": {
+                      "field": "Value",
+                      "fixed": 4,
+                      "max": 14,
+                      "min": 4
+                    },
+                    "symbol": {
+                      "fixed": "img/icons/marker/circle.svg",
+                      "mode": "fixed"
+                    },
+                    "symbolAlign": {
+                      "horizontal": "center",
+                      "vertical": "center"
+                    },
+                    "textConfig": {
+                      "fontSize": 12,
+                      "offsetX": 0,
+                      "offsetY": 0
+                    }
+                  }
+                },
+                "tooltip": true
+              }
+            ]
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "continuous-YlOrRd"
+              },
+              "custom": {
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                }
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          }
+        },
+        {
           "type": "table",
           "title": "External requests by route",
           "description": "Which hostnames public clients actually address. Expect only: the three public apps (immich / seerr+requests+overseerr / ha), the bare apex nerdbox.dev, and the raw WAN IP or its frontiernet reverse-DNS name. Anything ending in .int here is a finding.",
@@ -282,7 +469,7 @@ data:
             "h": 11,
             "w": 12,
             "x": 0,
-            "y": 5
+            "y": 17
           },
           "targets": [
             {
@@ -344,7 +531,7 @@ data:
             "h": 11,
             "w": 12,
             "x": 12,
-            "y": 5
+            "y": 17
           },
           "targets": [
             {
@@ -406,7 +593,7 @@ data:
             "h": 9,
             "w": 24,
             "x": 0,
-            "y": 16
+            "y": 28
           },
           "targets": [
             {
@@ -464,7 +651,7 @@ data:
             "h": 11,
             "w": 24,
             "x": 0,
-            "y": 25
+            "y": 37
           },
           "targets": [
             {
