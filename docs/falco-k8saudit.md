@@ -124,6 +124,32 @@ Two properties are load-bearing:
 policy will not see. Widening the last rule's verb filter would restore it at the
 cost of reinstating the firehose. Not worth it here.
 
+### Grafana dashboards dominate the volume
+
+Measured on the live cluster over the first ~9 minutes:
+
+| | |
+| --- | --- |
+| Total audit volume | 17.4 MB / 3,606 events |
+| **`configmaps` in `monitoring`** | **10.3 MB — 59.3%, from only 100 events** |
+| Largest single event | 523 KB |
+| Events over the plugin's 256 KB `maxEventSize` | 7 — **all of them monitoring ConfigMaps** |
+
+Vendored Grafana dashboards are hundreds of KB each and kustomize-controller
+rewrites them on every reconcile. They were both the majority of the volume *and*
+100% of the events the plugin could not read — each producing `bufio.Scanner: token
+too long` and a silently dropped event.
+
+Dropping them to `Metadata` removes ~60% of the volume and takes the largest
+remaining line from 523 KB to **74 KB**, comfortably inside the default, so nothing
+is discarded. The precise cost: `Create/Modify Configmap With Private Credentials`
+reads the ConfigMap body, so it no longer applies to the `monitoring` namespace.
+These are vendored dashboards and generated rulefiles; Grafana's real credentials
+are Secrets and unaffected. The rule still covers every other namespace.
+
+> Changing the policy means **re-running the playbook**, which restarts each API
+> server again — `--audit-policy-file` is read only at kube-apiserver startup.
+
 ## Files
 
 | Path | Purpose |
