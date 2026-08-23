@@ -1,0 +1,18 @@
+---
+# Applied by the `falco-k8saudit-config` Flux Kustomization, separately from the
+# parent directory, because these kinds are CRDs installed by the falco-operator
+# HelmRelease. See kubernetes/flux/cluster/falco-k8saudit-config.yaml.
+#
+# Order is cosmetic — Flux applies by kind, and the artifact-operator sidecar in
+# each Falco pod reconciles plugins and rules independently of apply order. Listed
+# so it reads as the dependency chain: plugins, then rules, then config, then the
+# instance that consumes them, then the output.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - plugin-k8saudit.yaml
+  - plugin-json.yaml
+  - rulesfile-k8saudit.yaml
+  - config.yaml
+  - falco.yaml
+  - component-falcosidekick.yaml

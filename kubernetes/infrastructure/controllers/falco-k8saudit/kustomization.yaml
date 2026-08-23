@@ -1,0 +1,20 @@
+---
+# NOTE: no top-level `namespace:` or `commonLabels:` transformer here.
+# discord-webhook.sops.yaml is SOPS-encrypted; a kustomize transformer rewriting
+# any field in it corrupts the MAC, and Flux then fails to decrypt while the sops
+# CLI still appears to work locally. Set metadata.namespace in each manifest.
+#
+# The Falco CRs are NOT listed here — they live in ./config and are applied by a
+# separate Flux Kustomization, because their CRDs are installed by the
+# falco-operator HelmRelease. Same CRD-ordering deadlock as the tailscale
+# Connector (PR #186). See kubernetes/flux/cluster/falco-k8saudit-config.yaml.
+#
+# There is no HelmRelease in this directory on purpose: the falco-operator
+# running in the `falco` namespace is cluster-scoped (falco-operator-role is a
+# ClusterRole, and the Deployment carries no namespace-restricting args), so it
+# reconciles the Falco and Component CRs here without a second copy of itself.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - discord-webhook.sops.yaml

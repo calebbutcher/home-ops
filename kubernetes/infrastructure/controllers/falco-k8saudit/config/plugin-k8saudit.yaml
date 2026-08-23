@@ -1,0 +1,44 @@
+---
+# The k8saudit plugin — this instance's event source.
+#
+# openParams uses the `file://` scheme, NOT a bare path. The two are different
+# code paths in the plugin: a bare path reads the file once and stops (intended
+# for replay/Stratoshark), while `file://` opens a continuous watch and handles
+# log rotation, which is what makes it safe against the API server's
+# --audit-log-maxsize rollover. Getting this wrong yields an instance that ingests
+# whatever happened to be in the file at startup and then goes permanently quiet
+# while still reporting healthy.
+#
+# The path is the host directory mounted read-only by falco.yaml. It is a
+# dedicated directory rather than the audit log's more conventional home under
+# /var/lib/rancher/k3s/server/: mounting that path into a pod would expose the
+# etcd certificates and the cluster join token alongside the log.
+#
+# Version tracks the ruleset in lockstep — k8saudit-rules 0.18.0 declares
+# `required_plugin_versions: [k8saudit 0.18.0]`, so these two must move together.
+# Renovate does not manage either (they are CRD fields, not `image:` strings).
+apiVersion: artifact.falcosecurity.dev/v1alpha1
+kind: Plugin
+metadata:
+  name: k8saudit
+  namespace: falco-k8saudit
+spec:
+  ociArtifact:
+    image:
+      repository: falcosecurity/plugins/plugin/k8saudit
+      tag: "0.18.0"
+    registry:
+      name: ghcr.io
+  config:
+    openParams: "file:///var/log/k3s-audit/audit.log"
+# NOTE: no `priority:` field. Config and Rulesfile have one because they are
+# merged in priority order; Plugin does not — its spec is only
+# config/ociArtifact/selector, and plugins are loaded rather than merged.
+# Adding it fails the Flux dry-run with `.spec.priority: field not declared in
+# schema` and blocks the whole Kustomization (this exact mistake cost PR #398).
+# Offline JSON-Schema validation does NOT catch it: CRD structural schemas omit
+# additionalProperties:false, so the field only gets rejected by server-side apply.
+#
+# `spec.selector` is also unused here. It selects NODES, not instances, and this
+# instance is already pinned to the control planes by the Falco CR's nodeSelector;
+# every Falco pod in this namespace should load every artifact in it.

@@ -149,7 +149,8 @@
       "labels": ["renovate", "type/operator-upgrade"],
       "prBodyNotes": [
         "⚠️ **Read the changelog before merging — do not rubber-stamp.** Diff the chart's `crds/` against the CRs in `kubernetes/infrastructure/controllers/falco/config/`, and check the [release notes](https://github.com/falcosecurity/falco-operator/releases) for a migration guide.",
-        "The OCI artifact versions (container plugin, falco-rules) are *not* managed by Renovate — they live in CRD fields rather than `image:` strings. Check them by hand against the `falco` chart's `containerEngine.pluginRef` when the bundled Falco version moves. See [`docs/falco-deploy.md`](docs/falco-deploy.md)."
+        "The OCI artifact versions (container plugin, falco-rules) are *not* managed by Renovate — they live in CRD fields rather than `image:` strings. Check them by hand against the `falco` chart's `containerEngine.pluginRef` when the bundled Falco version moves. See [`docs/falco-deploy.md`](docs/falco-deploy.md).",
+        "The same applies to the SECOND Falco instance in `kubernetes/infrastructure/controllers/falco-k8saudit/config/` (k8saudit plugin, k8saudit ruleset, json plugin). The k8saudit plugin and its ruleset must be bumped TOGETHER — the ruleset declares `required_plugin_versions` against an exact plugin version. See [`docs/falco-k8saudit.md`](docs/falco-k8saudit.md)."
       ]
     }
   ]

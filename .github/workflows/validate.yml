@@ -76,6 +76,7 @@ jobs:
           kubernetes/infrastructure/controllers/longhorn/config
           kubernetes/infrastructure/controllers/tailscale-operator/config
           kubernetes/infrastructure/controllers/falco/config
+          kubernetes/infrastructure/controllers/falco-k8saudit/config
           "
 
           # Schema sources: upstream Kubernetes for core/built-in types, plus the

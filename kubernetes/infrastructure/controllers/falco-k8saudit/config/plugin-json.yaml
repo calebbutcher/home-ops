@@ -1,0 +1,27 @@
+---
+# The json plugin. This is NOT optional, despite reading like a nice-to-have.
+#
+# k8saudit-rules 0.18.0 uses `jevt.*` fields, and those belong to THIS plugin, not
+# to k8saudit — `jevt.value`, `jevt.obj` and `jevt.rawtime` are backwards-compatible
+# aliases for the json plugin's `json.*` extractor fields. They appear in enabled,
+# non-optional rules, including "Pod started with sensitive mount" (which reads
+# jevt.value[/requestObject/spec/volumes]) and the ephemeral-container rule.
+#
+# Omit it and Falco fails to load the ruleset rather than silently degrading, so
+# the failure is at least loud — but it fails at startup, on all three control
+# planes at once.
+#
+# This plugin has extractor capability only: it sources no events and so does not
+# conflict with k8saudit being the instance's event source.
+apiVersion: artifact.falcosecurity.dev/v1alpha1
+kind: Plugin
+metadata:
+  name: json
+  namespace: falco-k8saudit
+spec:
+  ociArtifact:
+    image:
+      repository: falcosecurity/plugins/plugin/json
+      tag: "0.7.4"
+    registry:
+      name: ghcr.io

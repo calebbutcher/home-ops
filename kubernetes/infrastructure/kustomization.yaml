@@ -16,4 +16,5 @@ resources:
   - controllers/external-dns
   - controllers/coredns-autoscaler
   - controllers/falco
+  - controllers/falco-k8saudit
   - configs

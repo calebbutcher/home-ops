@@ -1,0 +1,32 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: falco-k8saudit
+  labels:
+    # A SECOND Falco instance, separate from the one in the `falco` namespace.
+    #
+    # The namespace split is not organisational tidiness — it is the only
+    # isolation boundary the operator offers. Config/Rulesfile/Plugin CRs are
+    # reconciled by an `artifact-operator` sidecar running inside each Falco pod,
+    # scoped by POD_NAMESPACE and NODE_NAME. There is no "which instance does this
+    # artifact belong to" field: `spec.selector` selects NODES, not instances. So a
+    # k8saudit Plugin CR created in the `falco` namespace would be loaded by all
+    # nine syscall pods, and the two rulesets could not be versioned or tuned apart.
+    #
+    # It also buys the thing that makes this deployment useful at all: an
+    # independent falcosidekick with its own DISCORD_MINIMUMPRIORITY. Not one of
+    # the 48 rules in k8saudit-rules is CRITICAL, so routing them through the
+    # syscall sidekick (pinned at `critical`) would have alerted on nothing.
+    #
+    # PSA `privileged`, and for a weaker reason than the `falco` namespace.
+    # This instance runs NO driver — it reads a file — and the pod explicitly sets
+    # `privileged: false`, overriding the operator's hardcoded `true`. But the
+    # operator also hardcodes a fixed list of hostPath volumes (/proc, /etc, /usr,
+    # /dev, the container sockets) and a structured merge can override a field, not
+    # remove a list entry. hostPath alone disqualifies the pod from `baseline`, so
+    # the namespace label has to be `privileged` even though the container is not.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged

@@ -1,0 +1,31 @@
+---
+# falco.yaml settings for the k8saudit instance. Merged over the operator's baked
+# base config in `priority` order, same as the syscall instance's Config CR.
+apiVersion: artifact.falcosecurity.dev/v1alpha1
+kind: Config
+metadata:
+  name: falco-k8saudit-output
+  namespace: falco-k8saudit
+spec:
+  priority: 60
+  config:
+    # No kernel driver. This instance's only event source is the k8saudit plugin,
+    # so loading a BPF probe would burn memory on a 4 GB control plane to collect
+    # syscalls that the DaemonSet in the `falco` namespace is already collecting on
+    # this very node. Without this the operator's default engine (modern_ebpf)
+    # would apply and every control plane would run two syscall collectors.
+    engine:
+      kind: nodriver
+    # Same as the syscall instance: structured events on stdout, which Alloy
+    # already ships to Loki. That is the full unfiltered k8saudit stream, queryable
+    # from day one, independent of whatever DISCORD_MINIMUMPRIORITY is set to.
+    json_output: true
+    json_include_output_property: true
+    stdout_output:
+      enabled: true
+    http_output:
+      enabled: true
+      # This namespace's OWN falcosidekick — not the one in `falco`. That
+      # separation is the entire reason this namespace exists: it lets k8saudit
+      # alert at WARNING while syscalls stay at CRITICAL.
+      url: "http://falcosidekick.falco-k8saudit.svc.cluster.local:2801"

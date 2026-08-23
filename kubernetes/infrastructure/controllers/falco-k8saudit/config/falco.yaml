@@ -1,0 +1,87 @@
+---
+# The k8saudit Falco instance: a DaemonSet pinned to the three control-plane
+# nodes, each tailing its OWN local API server audit log.
+#
+# Why a DaemonSet on the control planes rather than the Deployment + webhook the
+# falco chart documents:
+#   - no listening socket. The chart's reference integration is a NodePort on
+#     9765 receiving unauthenticated POSTs, which means anything that can reach a
+#     node port can forge audit events and fabricate Falco alerts. For a security
+#     control, an endpoint that lets an attacker write the evidence is a poor trade.
+#   - the log on disk IS the buffer. With a webhook, audit events produced while
+#     the Falco pod is restarting are dropped by the API server and gone. Here the
+#     file persists and the plugin resumes from it.
+#   - no second apiserver-critical file. Webhook mode needs a webhook-config.yaml
+#     on every control plane, which is one more file that stops kube-apiserver from
+#     starting if it is malformed.
+#
+# Each API server writes only its own log, so this must run on all three, hence a
+# DaemonSet rather than a single replica.
+#
+# ⚠️ Requires ansible/k3s-audit.yml to have been run FIRST. The hostPath below is
+# deliberately `type: Directory`, not DirectoryOrCreate: if the play has not run on
+# a node, the pod stays in ContainerCreating with a `hostPath type check failed`
+# event, which names the problem exactly. DirectoryOrCreate would instead
+# manufacture an empty directory and leave Falco crash-looping on a missing file.
+apiVersion: instance.falcosecurity.dev/v1alpha1
+kind: Falco
+metadata:
+  name: falco
+  namespace: falco-k8saudit
+  labels:
+    # Propagated by the operator onto the generated Service, which is what the
+    # ServiceMonitor in kubernetes/apps/monitoring/falco/ selects on. The name
+    # matches the `falco` namespace's instance on purpose — the two are told apart
+    # by namespace, and the Prometheus `job` label is set by relabeling rather than
+    # by diverging these labels.
+    app.kubernetes.io/name: falco
+spec:
+  type: DaemonSet
+  version: "0.44.1"
+  podTemplateSpec:
+    spec:
+      # Only the control planes run an API server, so only they have an audit log.
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "true"
+      # Those nodes carry node-role.kubernetes.io/master=true:NoSchedule.
+      tolerations:
+        - operator: Exists
+      volumes:
+        - name: k3s-audit-log
+          hostPath:
+            path: /var/log/k3s-audit
+            type: Directory
+      containers:
+        - name: falco
+          securityContext:
+            # The operator hardcodes `privileged: true` for every Falco container
+            # (internal/pkg/resources/falco.go). It merges the user podTemplateSpec
+            # OVER its own base with structured-merge-diff, so this override wins —
+            # verified in internal/pkg/instance/merge.go (baseTyped.Merge(userTyped)).
+            #
+            # This instance genuinely does not need it: with engine.kind=nodriver it
+            # loads no kernel probe and only reads a file. If Falco ever fails to
+            # start here after an operator upgrade, THIS is the first line to
+            # suspect — flip it to true to confirm before looking anywhere else.
+            privileged: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: k3s-audit-log
+              mountPath: /var/log/k3s-audit
+              readOnly: true
+          resources:
+            # Substantially lighter than the syscall instance (256Mi/512Mi): no
+            # driver, no kernel ring buffers, just JSON parsing. Sized against the
+            # binding constraint — these are 4 GB control planes with ~1.1-1.7 GB
+            # free, and the memory limit is deliberately low enough that a runaway
+            # Falco is OOMKilled rather than pushing a control plane into evicting
+            # etcd. The scoped audit policy is what keeps this affordable; the
+            # upstream catch-all policy would need considerably more.
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

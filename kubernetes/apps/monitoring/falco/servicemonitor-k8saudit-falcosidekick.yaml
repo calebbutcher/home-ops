@@ -1,0 +1,33 @@
+---
+# Scrapes the falcosidekick belonging to the k8saudit instance.
+#
+# Same naming collision as the Falco Service — this one is also called
+# `falcosidekick` with app.kubernetes.io/name=falcosidekick, distinguished only by
+# namespace — so `job` is likewise forced by relabeling.
+#
+# Worth knowing when reading dashboards: falcosecurity_falcosidekick_outputs_total
+# is emitted by BOTH sidekicks, and the existing FalcosidekickOutputErrors alert
+# matches it without a job filter. That is intentional — a webhook failure is worth
+# alerting on from either instance — but it means the alert's $labels.destination
+# alone does not say which Falco produced the events. The job label does.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: falco-k8saudit-falcosidekick
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - falco-k8saudit
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: falcosidekick
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      relabelings:
+        - action: replace
+          targetLabel: job
+          replacement: falcosidekick-k8saudit
