@@ -28,7 +28,7 @@ spec:
           app:
             image:
               repository: louislam/uptime-kuma
-              tag: "2.5.0"
+              tag: "2.5.3"
             env:
               TZ: UTC
               UPTIME_KUMA_DB_TYPE: mariadb
