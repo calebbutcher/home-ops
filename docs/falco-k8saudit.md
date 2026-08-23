@@ -278,6 +278,47 @@ WARNING. This one is a judgement call rather than a noise fix; revert it if
 interactive exec turns out to be common. The rule already honours
 `user_known_exec_pod_activities` if specific automation needs exempting.
 
+### ⚠️ Secret-read noise is bursty — do not measure it with a short sample
+
+This caught me out and will catch the next person. Secret reads track **Flux's 30m
+reconcile cycle**, so a short window taken between reconciles looks near-silent and
+one taken during a reconcile looks like a flood.
+
+The first tuning pass was written from a 2.6-minute sample and concluded CNPG was
+the entire story. A longer look showed the larger source by far was
+**`kustomize-controller` reading all 52 SOPS-encrypted Secrets in the cluster** —
+which is simply what it does: it cannot apply an encrypted Secret without reading it.
+
+Measure across at least one full 30m interval, or better, use the cumulative
+counter instead of tailing logs:
+
+```bash
+kubectl get --raw "/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:http-web/proxy/api/v1/query?query=sum%20by%20(rule_name)%20(falcosecurity_falco_rules_matches_total%7Bjob%3D%22falco-k8saudit%22%7D)"
+```
+
+Exempting the flux-system controllers is broader than it first looks, and is
+justified rather than assumed: the rule cannot distinguish legitimate Flux
+decryption from a compromised Flux, because Flux reads every secret constantly — so
+for that identity the rule carries no signal, only volume. An attacker holding the
+kustomize-controller service account can already apply arbitrary manifests
+cluster-wide; secret-read alerting was never the control that catches them. Reads by
+an *application's* service account still alert, which is the realistic compromise
+path this rule is genuinely useful for.
+
+### The credential-in-ConfigMap rule is a substring match
+
+`Create/Modify Configmap With Private Credentials` fires if the ConfigMap body
+contains `"password"` or `"passphrase"` **anywhere** — it has no notion of whether
+that is a credential or just the word. Two ConfigMaps here trip it, both verified by
+hand as clean and both exempted by exact name:
+
+- `loki-alerting-rules` — LogQL patterns for SSH brute-force alerting, which
+  necessarily match on the literal strings `Failed password` / `incorrect password`
+- `authentik-blueprints` — Authentik blueprint field names
+
+The rule still fires for any other ConfigMap, including a new one that really does
+carry a credential.
+
 Validate any rules change against the *real* engine before merging — a bad
 `override:` crash-loops all three control-plane pods:
 
