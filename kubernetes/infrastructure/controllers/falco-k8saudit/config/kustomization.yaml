@@ -13,6 +13,7 @@ resources:
   - plugin-k8saudit.yaml
   - plugin-json.yaml
   - rulesfile-k8saudit.yaml
+  - rulesfile-tuning.yaml
   - config.yaml
   - falco.yaml
   - component-falcosidekick.yaml
