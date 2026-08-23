@@ -247,16 +247,45 @@ Same strategy as the syscall side: the full unfiltered stream is in Loki from da
 one via `json_output`, so tuning can be driven by data rather than guesswork while
 Discord stays at `warning`.
 
-Expect the INFO-level "created/deleted" rules to track Flux reconciles closely. If
-`warning` proves too loud, the options in order of preference are:
+`config/rulesfile-tuning.yaml` (priority **50**, above the vendored 40) holds local
+amendments. Do not edit the vendored ruleset in place — it is version-pinned and
+replaced wholesale on upgrade, so changes there are silently lost. Falco's
+`override:` blocks are the supported way to amend a rule you do not own.
 
-1. Add a **second `Rulesfile` CR at a higher priority** with `override:` exceptions
-   for the confirmed-benign rules. This keeps the vendored ruleset pristine.
-2. Raise `DISCORD_MINIMUMPRIORITY` to `error` — but note that only leaves 2 rules,
-   so this is close to muting.
+### What the first deploy actually measured
 
-Do not edit the vendored ruleset in place; it is version-pinned and replaced wholesale
-on upgrade.
+Over a 2.6-minute window across all three control planes:
+
+| Rule | Priority | Observed rate | To Discord? |
+| --- | --- | --- | --- |
+| `K8s Secret Get Successfully` | ERROR | **~3,300/day** | yes — floods it |
+| `K8s Serviceaccount Created` | Informational | ~2,800/day | no (below `warning`) |
+| `Attach/Exec Pod` | NOTICE | occasional | **no — and it should be** |
+
+Two problems, both fixed in `rulesfile-tuning.yaml`:
+
+**The secret rule was 100% CloudNativePG reading its own barman backup
+credentials** — routine, on a timer, forever. At ERROR it sits above the `warning`
+threshold and would have buried the Discord channel within hours. The exception is
+deliberately narrow: one secret name (`cnpg-rustfs-creds`), and only for service
+accounts ending `-postgres`. Any other secret, or that secret read by any other
+identity, still alerts. Note this rule ships with **no `user_known_*` hook**, so it
+must be amended with `override: condition: append` rather than by filling in a macro.
+
+**`Attach/Exec Pod` ships at NOTICE, below the threshold** — meaning the single most
+security-relevant thing this instance can see would never have alerted. Raised to
+WARNING. This one is a judgement call rather than a noise fix; revert it if
+interactive exec turns out to be common. The rule already honours
+`user_known_exec_pod_activities` if specific automation needs exempting.
+
+Validate any rules change against the *real* engine before merging — a bad
+`override:` crash-loops all three control-plane pods:
+
+```bash
+P=$(kubectl -n falco-k8saudit get pod -l app.kubernetes.io/name=falco -o name | head -1)
+kubectl -n falco-k8saudit exec $P -c falco -- falco \
+  -V /etc/falco/rules.d/40-01-k8saudit-rules-oci.yaml -V /tmp/tuning.yaml
+```
 
 ## Upgrades
 

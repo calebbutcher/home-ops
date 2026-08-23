@@ -1,0 +1,70 @@
+---
+# Local tuning for the k8saudit ruleset.
+#
+# Priority 50 — HIGHER than the vendored k8saudit-rules (40), so this merges on top
+# of it. The vendored ruleset is never edited in place: it is version-pinned and
+# replaced wholesale on upgrade, so any change made there would be silently lost.
+# The `override:` blocks below are Falco's supported mechanism for amending a rule
+# you do not own.
+#
+# ── Why this exists ──────────────────────────────────────────────────────────
+# Measured on the first deploy, over a 2.6-minute window across all three control
+# planes: `K8s Secret Get Successfully` fired 6 times, a rate of roughly
+# **3,300 Discord messages per day**. Every single one was a CloudNativePG instance
+# service account reading its own barman backup credentials — routine, expected,
+# and generated on a timer forever.
+#
+# That rule is ERROR priority, so it sits above this namespace's `warning`
+# threshold and goes straight to Discord. Left alone it would bury the channel
+# within hours and train everyone to ignore Falco, which costs more than the rule
+# was ever going to catch.
+apiVersion: artifact.falcosecurity.dev/v1alpha1
+kind: Rulesfile
+metadata:
+  name: k8saudit-tuning
+  namespace: falco-k8saudit
+spec:
+  priority: 50
+  inlineRules:
+    # ── 1. Silence CNPG backup-credential reads ─────────────────────────────
+    # Deliberately NARROW. It exempts exactly one secret name, and only when read
+    # by a service account whose name ends in `-postgres` (the CNPG per-cluster
+    # SAs: crowdsec-postgres, n8n-postgres, paperless-postgres, gitea-postgres...).
+    #
+    # A read of ANY other secret, by anyone, still alerts — including a read of
+    # this same secret by any other identity. The residual risk is that an attacker
+    # who has already compromised a CNPG instance SA could read that one backup
+    # credential unobserved; that is a far better trade than losing the rule
+    # entirely to noise, which is the only other option at this volume.
+    #
+    # `K8s Secret Get Successfully` ships with NO user_known_* exception macro —
+    # its condition is just `secret and kget and kactivity and response_successful`
+    # — so unlike most rules here it has to be amended with an `override: append`
+    # rather than by filling in a hook the ruleset provides.
+    - macro: cnpg_backup_credential_read
+      condition: >-
+        ka.target.name="cnpg-rustfs-creds"
+        and ka.user.name startswith "system:serviceaccount:"
+        and ka.user.name endswith "-postgres"
+
+    - rule: K8s Secret Get Successfully
+      condition: and not cnpg_backup_credential_read
+      override:
+        condition: append
+
+    # ── 2. Make exec/attach actually reach Discord ──────────────────────────
+    # Upstream ships `Attach/Exec Pod` at NOTICE, which is BELOW this namespace's
+    # `warning` threshold — so out of the box, someone shelling into a pod is the
+    # single most security-relevant thing this instance can observe and it would
+    # never have produced an alert. (Confirmed: it fired once during deployment
+    # verification and was correctly filtered out.)
+    #
+    # This is a judgement call rather than a noise fix, and it is easy to revert if
+    # it proves chatty: in a GitOps cluster an interactive exec is rare and is
+    # exactly the kind of manual action worth seeing. Note the rule already honours
+    # `user_known_exec_pod_activities`, so specific automation can be exempted
+    # later without touching the priority.
+    - rule: Attach/Exec Pod
+      priority: WARNING
+      override:
+        priority: replace
