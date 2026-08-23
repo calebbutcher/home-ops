@@ -8,16 +8,20 @@
 # you do not own.
 #
 # ── Why this exists ──────────────────────────────────────────────────────────
-# Measured on the first deploy, over a 2.6-minute window across all three control
-# planes: `K8s Secret Get Successfully` fired 6 times, a rate of roughly
-# **3,300 Discord messages per day**. Every single one was a CloudNativePG instance
-# service account reading its own barman backup credentials — routine, expected,
-# and generated on a timer forever.
+# `K8s Secret Get Successfully` is ERROR priority, so it sits above this
+# namespace's `warning` threshold and goes straight to Discord. On the live
+# cluster it is almost entirely routine platform activity, and left alone it would
+# bury the channel and train everyone to ignore Falco — which costs more than the
+# rule was ever going to catch.
 #
-# That rule is ERROR priority, so it sits above this namespace's `warning`
-# threshold and goes straight to Discord. Left alone it would bury the channel
-# within hours and train everyone to ignore Falco, which costs more than the rule
-# was ever going to catch.
+# A caution for whoever tunes this next: secret reads here are BURSTY, not steady,
+# because they track Flux's 30m reconcile cycle. A short sample taken between
+# reconciles reads as near-silent, and one taken during a reconcile reads as a
+# flood. The first pass at this file was written from a 2.6-minute window and
+# concluded CloudNativePG was the whole story; a longer look showed Flux reading
+# all 52 SOPS-encrypted Secrets in the cluster was the larger source by far.
+# Measure across at least one full 30m interval, or use the cumulative
+# falcosecurity_falco_rules_matches_total counter rather than tailing logs.
 apiVersion: artifact.falcosecurity.dev/v1alpha1
 kind: Rulesfile
 metadata:
@@ -47,12 +51,58 @@ spec:
         and ka.user.name startswith "system:serviceaccount:"
         and ka.user.name endswith "-postgres"
 
+    # Flux reads EVERY SOPS-encrypted Secret in the cluster on every reconcile —
+    # 52 distinct secrets observed, and `infrastructure` and `apps` both reconcile
+    # on a 30m interval. That is not incidental, it is what kustomize-controller
+    # exists to do: it cannot apply an encrypted Secret without reading it.
+    #
+    # This exemption is broader than the CNPG one above and deserves justification
+    # rather than a shrug. The rule cannot distinguish a legitimate Flux decryption
+    # from a compromised Flux, because Flux reads all of them all the time — so for
+    # this identity the rule carries no signal at all, only volume. And an attacker
+    # holding the kustomize-controller service account already has the ability to
+    # apply arbitrary manifests cluster-wide; secret-read alerting is not the
+    # control that catches them, and pretending otherwise while burying every other
+    # detection is a strictly worse position.
+    #
+    # Scoped to the flux-system controllers specifically, not to service accounts
+    # in general: a read by an application's service account still alerts, which is
+    # the realistic compromise path this rule is actually useful for.
+    - macro: flux_secret_decryption_read
+      condition: ka.user.name startswith "system:serviceaccount:flux-system:"
+
+    - macro: known_benign_secret_read
+      condition: (cnpg_backup_credential_read or flux_secret_decryption_read)
+
     - rule: K8s Secret Get Successfully
-      condition: and not cnpg_backup_credential_read
+      condition: and not known_benign_secret_read
       override:
         condition: append
 
-    # ── 2. Make exec/attach actually reach Discord ──────────────────────────
+    # ── 2. Silence two false-positive credential-in-ConfigMap detections ─────
+    # `Create/Modify Configmap With Private Credentials` is a plain substring match:
+    # its macro fires if the ConfigMap body contains "password" or "passphrase"
+    # anywhere. It has no notion of whether that is a credential or the word.
+    #
+    # Both ConfigMaps below were verified by hand and contain no credentials:
+    #   - loki-alerting-rules   — LogQL patterns for SSH brute-force alerting, which
+    #                             necessarily match on the literal strings
+    #                             "Failed password" and "incorrect password"
+    #   - authentik-blueprints  — Authentik blueprint field names
+    #
+    # Both are rewritten by kustomize-controller on every reconcile, so at WARNING
+    # they would reach Discord on a 30m cycle forever. Exempted by exact name, so
+    # the rule still fires for any other ConfigMap — including a new one that really
+    # does carry a credential.
+    - macro: known_benign_credential_configmap
+      condition: ka.req.configmap.name in (loki-alerting-rules, authentik-blueprints)
+
+    - rule: Create/Modify Configmap With Private Credentials
+      condition: and not known_benign_credential_configmap
+      override:
+        condition: append
+
+    # ── 3. Make exec/attach actually reach Discord ──────────────────────────
     # Upstream ships `Attach/Exec Pod` at NOTICE, which is BELOW this namespace's
     # `warning` threshold — so out of the box, someone shelling into a pod is the
     # single most security-relevant thing this instance can observe and it would
