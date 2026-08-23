@@ -304,6 +304,41 @@ WARNING. This one is a judgement call rather than a noise fix; revert it if
 interactive exec turns out to be common. The rule already honours
 `user_known_exec_pod_activities` if specific automation needs exempting.
 
+### The loudest rule was an upstream bug: TokenRequests reported as SA creations
+
+This one is worth knowing about because it is invisible until you read the output
+carefully, and it was by a wide margin the largest source of Discord traffic.
+
+Both serviceaccount rules gate on the `serviceaccount` macro — which is only
+`ka.target.resource=serviceaccounts` — combined with `ka.verb=create`. Nothing
+looks at the **subresource**. But the TokenRequest API, which every pod in the
+cluster uses to obtain and periodically refresh its projected service-account
+token, is literally a `create` on `serviceaccounts/token`. So every token refresh
+was reported as somebody creating a service account.
+
+Measured over a 2.34h steady-state window on the API-server node:
+
+| | rate | genuine |
+| --- | --- | --- |
+| `create serviceaccounts`, subresource=`token` | **4,721/day** | 0 |
+| …of those landing in `kube-system` → `Service Account Created in Kube Namespace` (WARNING → Discord) | **276/day** | 0 |
+
+The tell in the output is that `user=` is always a kubelet (`system:node:<node>`)
+and the "created" service account is a long-standing one like `kube-vip` or
+`metrics-server`:
+
+```text
+Warning Service account created in kube namespace
+  (user=system:node:k3s-worker-04 serviceaccount=metrics-server ns=kube-system)
+```
+
+Fixed by appending `and not ka.target.subresource=token` to both rules. The
+ruleset's own `user_known_sa_list` hook is deliberately **not** used: it matches
+service account *names*, so it would mean maintaining a list of every account in
+kube-system, would re-break the moment a new one appeared, and would also suppress
+the genuine creation of those same accounts. Filtering the subresource keeps real
+ServiceAccount creation alerting for every name.
+
 ### ⚠️ Secret-read noise is bursty — do not measure it with a short sample
 
 This caught me out and will catch the next person. Secret reads track **Flux's 30m
@@ -345,14 +380,56 @@ hand as clean and both exempted by exact name:
 The rule still fires for any other ConfigMap, including a new one that really does
 carry a credential.
 
-Validate any rules change against the *real* engine before merging — a bad
-`override:` crash-loops all three control-plane pods:
+### Validating a rules change
+
+Always validate against the *real* engine before merging — a bad `override:`
+crash-loops all three control-plane pods:
 
 ```bash
 P=$(kubectl -n falco-k8saudit get pod -l app.kubernetes.io/name=falco -o name | head -1)
 kubectl -n falco-k8saudit exec $P -c falco -- falco \
   -V /etc/falco/rules.d/40-01-k8saudit-rules-oci.yaml -V /tmp/tuning.yaml
 ```
+
+That only proves the rules **parse**. It says nothing about whether an exception
+actually matches the events you meant, or whether you silenced more than you
+intended — which is the failure that matters, because it is silent in both
+directions. To check the logic, replay real audit records through the engine.
+
+The k8saudit plugin reads a **bare path once and exits** (as opposed to `file://`,
+which watches forever) — normally a footgun, but exactly what a replay needs:
+
+```bash
+# /tmp/replay.yaml — standalone config; note the bare path, NOT file://
+plugins:
+  - {library_path: /usr/share/falco/plugins/json.so, name: json}
+  - {library_path: /usr/share/falco/plugins/k8saudit.so, name: k8saudit,
+     open_params: /tmp/replay-audit.log}
+load_plugins: [json, k8saudit]
+engine: {kind: nodriver}
+stdout_output: {enabled: true}
+json_output: false
+http_output: {enabled: false}
+```
+
+```bash
+# Baseline, then with the change — diff the two
+kubectl -n falco-k8saudit exec $P -c falco -- sh -c \
+  'timeout 40 falco -c /tmp/replay.yaml -r /etc/falco/rules.d/40-01-k8saudit-rules-oci.yaml'
+kubectl -n falco-k8saudit exec $P -c falco -- sh -c \
+  'timeout 40 falco -c /tmp/replay.yaml -r /etc/falco/rules.d/40-01-k8saudit-rules-oci.yaml -r /tmp/tuning.yaml'
+```
+
+Build `replay-audit.log` from **real** events pulled out of `/var/log/k3s-audit/`,
+and include deliberate **controls** — events that must still fire — alongside the
+ones you expect to silence. Copies of a real event with the username or object name
+edited work well. The TokenRequest and webhook-TLS exceptions above were verified
+this way: 6 benign events silenced, while a genuine `serviceaccounts` create in
+kube-system, a read by an unrelated service account, and a CNPG instance reading
+its `-app` password secret all still fired.
+
+Note `timeout` exists in the Falco image but **not** on macOS — run it inside the
+pod, not around `kubectl`, or the error gets swallowed by whatever you pipe into.
 
 ## Upgrades
 

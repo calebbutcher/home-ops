@@ -54,6 +54,7 @@ breaking API change. See *Upgrades* at the bottom.
 | `kustomization.yaml` | Applied by the `infrastructure` Flux Kustomization |
 | `config/plugin-container.yaml` | `Plugin` — container metadata plugin **(not optional)** |
 | `config/rulesfile-falco.yaml` | `Rulesfile` — the 25-rule stable ruleset **(not optional)** |
+| `config/rulesfile-tuning.yaml` | `Rulesfile` — local exceptions, priority 50 (above the vendored 40) |
 | `config/config.yaml` | `Config` — JSON to stdout, HTTP to falcosidekick |
 | `config/falco.yaml` | `Falco` — the DaemonSet: tolerations, version, resources |
 | `config/component-falcosidekick.yaml` | `Component` — falcosidekick + Discord env |
@@ -234,6 +235,38 @@ it is textual concatenation.
 
 Doing this the other way round — open the firehose, then tune — is how a security
 channel becomes a channel nobody reads.
+
+#### Step 1, measured — and the result argues for moving on step 3
+
+Over 24h this instance produced **33,733 events, of which zero were CRITICAL**:
+
+| Rule | Priority | Rate | Reaches Discord at `critical`? |
+| --- | --- | --- | --- |
+| `Packet socket created in container` | Notice | **28,656/day** | no |
+| `Redirect STDOUT/STDIN to Network Connection in Container` | Notice | ~2,987/day | no |
+| `Contact K8S API Server From Container` | Notice | ~2,648/day | no |
+| `Run shell untrusted` | Debug | ~480/day | no |
+| `Read sensitive file untrusted` | Warning | ~144/day | no |
+
+So today this instance **cannot alert on anything**, which is worth stating
+plainly: it looks healthy, its metrics are green, and it is structurally silent.
+That is the same trap the k8saudit instance was caught in before deployment (zero
+CRITICAL rules in that ruleset), and it is the argument for step 3 rather than
+leaving the threshold where it is indefinitely.
+
+`Packet socket created in container` alone is ~85% of all events and is entirely
+kube-vip broadcasting gratuitous ARP for the control-plane VIP — its actual job.
+It appears on exactly one node at a time (whichever control plane holds the VIP
+lease), which makes it look alarming in a per-node view. Exempted in
+`config/rulesfile-tuning.yaml` via the empty `user_known_packet_socket_binaries`
+list upstream ships for exactly this purpose. Any *other* binary opening a packet
+socket, including on the same node, still fires.
+
+Before lowering the threshold to `warning`, note the one Warning-level rule that
+does fire: `Read sensitive file untrusted`, ~144/day, and in every observed case
+it is host `systemd` reading `/etc/pam.d/*` while starting a unit
+(`container_id=host`, `proc.exepath=/usr/lib/systemd/systemd-executor`) — benign,
+and it needs its own exception first or the threshold change just moves the noise.
 
 ### What is deliberately not deployed
 

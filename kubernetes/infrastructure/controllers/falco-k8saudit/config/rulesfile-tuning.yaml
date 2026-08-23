@@ -8,11 +8,19 @@
 # you do not own.
 #
 # ── Why this exists ──────────────────────────────────────────────────────────
-# `K8s Secret Get Successfully` is ERROR priority, so it sits above this
-# namespace's `warning` threshold and goes straight to Discord. On the live
-# cluster it is almost entirely routine platform activity, and left alone it would
-# bury the channel and train everyone to ignore Falco — which costs more than the
-# rule was ever going to catch.
+# Several of the vendored rules sit above this namespace's `warning` threshold
+# and so go straight to Discord, while firing almost entirely on routine platform
+# activity. Left alone they bury the channel and train everyone to ignore Falco —
+# which costs more than the rules were ever going to catch.
+#
+# That is not only an attention problem. falcosidekick does NOT retry a failed
+# delivery: when Discord rate-limits it, the event is logged as an error and
+# dropped permanently. During the pre-tuning flood 95 of 178 detections were lost
+# that way. A genuine alert arriving during a noise burst is discarded along with
+# the noise, so keeping the volume down is a correctness requirement.
+#
+# Measured Discord volume before the section-4 fix was ~215 alerts/day, of which
+# roughly 97% were provably benign.
 #
 # A caution for whoever tunes this next: secret reads here are BURSTY, not steady,
 # because they track Flux's 30m reconcile cycle. A short sample taken between
@@ -71,8 +79,58 @@ spec:
     - macro: flux_secret_decryption_read
       condition: ka.user.name startswith "system:serviceaccount:flux-system:"
 
+    # Controllers reading the TLS material for their OWN admission webhook.
+    #
+    # Measured steady-state, this is the entire remaining volume of the rule: the
+    # CloudNativePG operator re-reads `cnpg-ca-secret` and `cnpg-webhook-cert`
+    # once an hour, on the hour, to check whether its serving certificate needs
+    # renewing. ~62 alerts/day, exactly two per hour, forever.
+    #
+    # The others listed here fire only when the controller's pod starts, so they
+    # are invisible day to day and then arrive as a burst during a node update —
+    # which is the worst possible moment, because that is also when a real signal
+    # is most likely and when the Discord rate limit is most likely to be hit.
+    #
+    # Scoped to an exact (identity, secret-name) pair in every case. A read of
+    # these same secrets by any other identity still alerts, which is the case
+    # that would actually matter: webhook TLS keys are worth stealing because they
+    # let an attacker impersonate an admission controller.
+    - macro: own_webhook_tls_read
+      condition: >-
+        (ka.user.name="system:serviceaccount:cnpg-system:cloudnative-pg"
+         and ka.target.name in (cnpg-ca-secret, cnpg-webhook-cert))
+        or (ka.user.name="system:serviceaccount:longhorn-system:longhorn-service-account"
+         and ka.target.name in (longhorn-webhook-ca, longhorn-webhook-tls))
+        or (ka.user.name="system:serviceaccount:cert-manager:cert-manager-cainjector"
+         and ka.target.name="cert-manager-webhook-ca")
+
+    # CNPG instances reading their own cluster's TLS material at startup.
+    #
+    # Every CNPG cluster gets three generated secrets — `<cluster>-ca`,
+    # `<cluster>-server`, `<cluster>-replication` — and the instance pod reads all
+    # three when it boots. Silent in steady state; roughly a hundred alerts during
+    # a full node-update cycle, when every Postgres pod restarts.
+    #
+    # Weaker than the exemptions above, and worth being honest about: this matches
+    # on name SHAPE, not on an exact pair, because Falco cannot compare two fields
+    # to each other. So a compromised `authentik-postgres` service account could
+    # read `immich-postgres-ca` unobserved. That is a narrow lateral-movement path
+    # between two databases that already sit behind the same trust boundary, and
+    # the alternative is a maintenance-window flood that drops real alerts on the
+    # floor. Reads of the `-app` secrets (the actual database passwords) are NOT
+    # exempted here.
+    - macro: cnpg_instance_tls_read
+      condition: >-
+        ka.user.name startswith "system:serviceaccount:"
+        and ka.user.name endswith "-postgres"
+        and (ka.target.name endswith "-postgres-ca"
+             or ka.target.name endswith "-postgres-server"
+             or ka.target.name endswith "-postgres-replication")
+
     - macro: known_benign_secret_read
-      condition: (cnpg_backup_credential_read or flux_secret_decryption_read)
+      condition: >-
+        (cnpg_backup_credential_read or flux_secret_decryption_read
+         or own_webhook_tls_read or cnpg_instance_tls_read)
 
     - rule: K8s Secret Get Successfully
       condition: and not known_benign_secret_read
@@ -118,3 +176,43 @@ spec:
       priority: WARNING
       override:
         priority: replace
+
+    # ── 4. Stop reporting TokenRequests as ServiceAccount creations ─────────
+    # This is an upstream rule bug, not a local policy choice, and it was by a
+    # wide margin the loudest thing this instance produced.
+    #
+    # Both serviceaccount rules are gated on the `serviceaccount` macro, which is
+    # just `ka.target.resource=serviceaccounts`, combined with `ka.verb=create`.
+    # Nothing looks at the subresource. But the TokenRequest API — the mechanism
+    # every pod in the cluster uses to obtain and periodically refresh its
+    # projected service-account token — is literally a `create` on
+    # `serviceaccounts/token`. So each token refresh is reported as somebody
+    # creating a service account.
+    #
+    # Measured over a 2.34h steady-state window on the API-server node:
+    #   4,721/day  `create serviceaccounts`, of which subresource=token:  100%
+    #                                        genuine SA creations:          0
+    #   of those, 276/day landed in kube-system, which is what fires
+    #   `Service Account Created in Kube Namespace` at WARNING — i.e. straight to
+    #   Discord, roughly every five minutes, forever.
+    #
+    # The giveaway in the output is that `user=` is always a kubelet
+    # (`system:node:<node>`) and the "created" service account is a long-standing
+    # one like `kube-vip` or `metrics-server`.
+    #
+    # Filtering on the subresource is deliberately preferred over the ruleset's
+    # own `user_known_sa_list` hook. That hook matches service account NAMES, so
+    # using it would mean maintaining a list of every service account in
+    # kube-system, it would re-break the moment a new one appears, and it would
+    # also suppress the genuine creation of those same accounts. Excluding the
+    # `token` subresource instead keeps real ServiceAccount creation alerting for
+    # every name, which is the behaviour the rule was written to have.
+    - rule: K8s Serviceaccount Created
+      condition: and not ka.target.subresource=token
+      override:
+        condition: append
+
+    - rule: Service Account Created in Kube Namespace
+      condition: and not ka.target.subresource=token
+      override:
+        condition: append
