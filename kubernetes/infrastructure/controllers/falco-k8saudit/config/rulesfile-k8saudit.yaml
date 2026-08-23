@@ -1,0 +1,32 @@
+---
+# The k8saudit ruleset: 48 rules covering control-plane API activity — exec/attach
+# into pods, privileged or hostPath pod creation, service-account and RBAC changes,
+# secret reads, ephemeral containers, cluster-admin bindings.
+#
+# Note the repository path. The syscall ruleset lives at
+# `falcosecurity/rules/falco-rules`, but this one is `plugins/ruleset/k8saudit` —
+# plugin rulesets are published under the plugins repo, and the artifact is named
+# `k8saudit-rules` in the falcoctl index while the OCI path says `ruleset/k8saudit`.
+# Guessing `rules/k8saudit-rules` by analogy with the syscall ruleset yields a
+# repository that does not exist.
+#
+# Pinned in lockstep with plugin-k8saudit.yaml: this artifact declares
+# `required_plugin_versions: [k8saudit 0.18.0]`.
+#
+# priority 40 matches the syscall instance's ruleset — same meaning, different
+# namespace, and there is nothing else in this namespace to order against yet.
+# Tuning exceptions later go in a SECOND Rulesfile at a HIGHER priority, which is
+# what lets the vendored ruleset stay pristine and Renovate-able.
+apiVersion: artifact.falcosecurity.dev/v1alpha1
+kind: Rulesfile
+metadata:
+  name: k8saudit-rules
+  namespace: falco-k8saudit
+spec:
+  ociArtifact:
+    image:
+      repository: falcosecurity/plugins/ruleset/k8saudit
+      tag: "0.18.0"
+    registry:
+      name: ghcr.io
+  priority: 40

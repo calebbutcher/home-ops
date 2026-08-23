@@ -96,6 +96,7 @@ Ansible; see **Networking** above.
 | system-upgrade-controller | Rolling k3s version upgrades (see [`docs/updates.md`](docs/updates.md)) |
 | tailscale-operator | Tailscale exit node + LAN subnet router |
 | Falco | Runtime security — syscall monitoring via eBPF, alerts to Discord (see [`docs/falco-deploy.md`](docs/falco-deploy.md)) |
+| Falco k8saudit | Kubernetes API audit monitoring — second Falco instance on the control planes (see [`docs/falco-k8saudit.md`](docs/falco-k8saudit.md)) |
 
 ## Applications
 

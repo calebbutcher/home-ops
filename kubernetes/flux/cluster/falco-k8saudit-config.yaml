@@ -1,0 +1,34 @@
+---
+# The k8saudit Falco instance's CRs, in their own Flux Kustomization for exactly
+# the same reason as falco-config.yaml: these kinds are CRDs installed by the
+# falco-operator HelmRelease, so keeping them in the `infrastructure` set would
+# fail its dry-run ("no matches for kind Falco") until the operator is up — and
+# the operator lives in that same set. Same pattern as tailscale-connector.yaml.
+#
+# Kept separate from `falco-config` rather than folded into it so the two Falco
+# instances fail independently. A bad k8saudit artifact should not be able to stall
+# reconciliation of the syscall instance that covers all nine nodes; the split is
+# what contained the blast radius when a bad Plugin field stalled falco-config
+# in PR #398.
+#
+# No `decryption:` block — the Discord webhook Secret lives one directory up, in
+# the operator kustomization applied by `infrastructure`, which already decrypts.
+#
+# ⚠️ This will not become healthy until ansible/k3s-audit.yml has been run on the
+# control planes. Without it there is no /var/log/k3s-audit to mount and the pods
+# stay in ContainerCreating. See docs/falco-k8saudit.md.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: falco-k8saudit-config
+  namespace: flux-system
+spec:
+  interval: 30m
+  retryInterval: 2m
+  path: ./kubernetes/infrastructure/controllers/falco-k8saudit/config
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    - name: infrastructure

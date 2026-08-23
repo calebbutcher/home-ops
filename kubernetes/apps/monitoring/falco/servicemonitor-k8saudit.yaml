@@ -1,0 +1,44 @@
+---
+# Scrapes the k8saudit Falco instance in the falco-k8saudit namespace.
+#
+# The selector label and the Service name are IDENTICAL to the syscall instance's
+# (both are `falco` with app.kubernetes.io/name=falco) — the operator derives them
+# from the Falco CR, and the CR is named `falco` in both namespaces so this one
+# mirrors a known-good deployment rather than inventing new naming. The two are
+# told apart by namespaceSelector alone.
+#
+# That makes the `job` relabeling below load-bearing rather than cosmetic. Without
+# it Prometheus would derive job="falco" from the Service name for BOTH instances,
+# silently merging nine syscall pods and three k8saudit pods into one job — which
+# would make the existing falco.rules alerts evaluate across both and make the
+# dashboards nonsense.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: falco-k8saudit
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - falco-k8saudit
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: falco
+  endpoints:
+    - port: web
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      relabelings:
+        # Applied to the target before scraping, so `job` is already correct on
+        # every series. FalcoK8sAuditOutputDrops and FalcoMetricsDown both match on
+        # job="falco-k8saudit".
+        - action: replace
+          targetLabel: job
+          replacement: falco-k8saudit
+      metricRelabelings:
+        # Same cardinality guard as the syscall instance: Falco emits a tag_* label
+        # per rule tag on rules_matches_total, which multiplies series count for no
+        # query benefit.
+        - action: labeldrop
+          regex: tag_.*

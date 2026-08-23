@@ -80,5 +80,7 @@ resources:
   - kube-prometheus-stack/prometheusrule-falco.yaml
   - falco/servicemonitor.yaml
   - falco/servicemonitor-falcosidekick.yaml
+  - falco/servicemonitor-k8saudit.yaml
+  - falco/servicemonitor-k8saudit-falcosidekick.yaml
   - falco/dashboard.yaml
   - falco/dashboard-falcosidekick.yaml

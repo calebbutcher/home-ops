@@ -1,0 +1,197 @@
+---
+# Enable (or disable) Kubernetes API audit logging on the k3s control plane.
+#
+# This is the node-level half of the Falco k8saudit deployment. The Falco side is
+# GitOps in kubernetes/infrastructure/controllers/falco-k8saudit/, but Falco can
+# only tail an audit log that the API server is actually writing — and nothing
+# writes one by default. Run this FIRST; see docs/falco-k8saudit.md.
+#
+#   ansible-playbook k3s-audit.yml                          # enable, rolling
+#   ansible-playbook k3s-audit.yml --check --diff           # preview only
+#   ansible-playbook k3s-audit.yml --limit 10.2.169.30      # one node
+#   ansible-playbook k3s-audit.yml -e k3s_audit_enabled=false   # ROLL BACK
+#
+# ⚠️ THIS RESTARTS THE API SERVER ON EACH CONTROL-PLANE NODE, ONE AT A TIME.
+# Expect the kube-vip VIP (10.2.169.10:6443) to refuse connections for ~20s per
+# node as VRRP fails the address over — that is normal and the gates ride it out.
+#
+# ⚠️ THE FAILURE MODE HERE IS A CONTROL PLANE THAT WILL NOT START.
+# kube-apiserver parses --audit-policy-file at boot and exits if it is missing or
+# malformed. Three things guard against that turning into an outage:
+#   1. the policy file is written and syntax-checked BEFORE any flag references it
+#   2. `serial: 1`, so a bad change can only ever affect one etcd member
+#   3. a post-restart gate on Ready AND EtcdIsVoter, with a rescue that STOPS the
+#      roll rather than proceeding to the next member
+#
+# Config is delivered as a DROP-IN under /etc/rancher/k3s/config.yaml.d/ rather
+# than by editing /etc/rancher/k3s/config.yaml. That base file holds the cluster
+# token and the etcd S3 credentials; rewriting it to add a key would put those at
+# risk of a templating mistake for no benefit. k3s merges config.yaml.d/*.yaml
+# over the base file, and `kube-apiserver-arg+` appends to (rather than replaces)
+# any value the base file might carry now or later.
+- name: Enable Kubernetes API audit logging for Falco k8saudit
+  hosts: master
+  serial: 1
+  become: true
+  gather_facts: false
+
+  vars:
+    k3s_audit_enabled: true
+    k3s_audit_log_dir: /var/log/k3s-audit
+    k3s_audit_policy_path: /var/lib/rancher/k3s/server/audit-policy.yaml
+    k3s_audit_dropin_path: /etc/rancher/k3s/config.yaml.d/10-audit.yaml
+    # Bounded at maxsize * (maxbackup + 1) = ~200 MB per control node.
+    # Verified 36+ GB free on all three at time of writing.
+    k3s_audit_log_maxsize: 50
+    k3s_audit_log_maxbackup: 3
+    k3s_audit_log_maxage: 7
+    k3s_audit_ready_timeout: 600
+
+  tasks:
+    - name: Resolve this host's Kubernetes node name
+      ansible.builtin.import_tasks: tasks/k8s_resolve_node.yml
+
+    - name: Report what is already configured
+      block:
+        - name: Read existing k3s config
+          ansible.builtin.slurp:
+            src: /etc/rancher/k3s/config.yaml
+          register: _k3s_cfg_raw
+          failed_when: false
+          no_log: true # contains the cluster token and etcd S3 credentials
+
+        - name: Warn if the base config already sets kube-apiserver-arg
+          ansible.builtin.debug:
+            msg: >-
+              /etc/rancher/k3s/config.yaml already defines kube-apiserver-arg.
+              The drop-in uses the `+` append form, so those values are preserved,
+              but check for a conflicting audit-* flag before continuing.
+          when:
+            - _k3s_cfg_raw.content is defined
+            - "'kube-apiserver-arg' in (_k3s_cfg_raw.content | b64decode)"
+
+    # ── Enable ────────────────────────────────────────────────────────────────
+    - name: Enable audit logging
+      when: k3s_audit_enabled | bool
+      block:
+        - name: Create the audit log directory
+          # 0700 root:root — the audit log records who touched what across the
+          # whole cluster and (at Metadata level) the names of every Secret. It
+          # should not be readable by other users on the node. Falco reads it via
+          # a read-only hostPath and runs as uid 0, so this does not impede it.
+          ansible.builtin.file:
+            path: "{{ k3s_audit_log_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Install the audit policy
+          # Written before the flag that references it. `validate` runs the file
+          # through a YAML parse first, so a malformed template fails HERE rather
+          # than at the next API server start.
+          ansible.builtin.template:
+            src: k3s-audit-policy.yaml.j2
+            dest: "{{ k3s_audit_policy_path }}"
+            owner: root
+            group: root
+            mode: "0600"
+            validate: "python3 -c 'import sys,yaml; yaml.safe_load(open(sys.argv[1]))' %s"
+          register: _audit_policy
+
+        - name: Ensure the k3s config drop-in directory exists
+          ansible.builtin.file:
+            path: /etc/rancher/k3s/config.yaml.d
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Install the audit config drop-in
+          ansible.builtin.copy:
+            dest: "{{ k3s_audit_dropin_path }}"
+            owner: root
+            group: root
+            mode: "0600"
+            content: |
+              ---
+              # Managed by ansible/k3s-audit.yml — do not edit by hand.
+              # Enables API audit logging for Falco's k8saudit plugin.
+              kube-apiserver-arg+:
+                - audit-policy-file={{ k3s_audit_policy_path }}
+                - audit-log-path={{ k3s_audit_log_dir }}/audit.log
+                - audit-log-maxsize={{ k3s_audit_log_maxsize }}
+                - audit-log-maxbackup={{ k3s_audit_log_maxbackup }}
+                - audit-log-maxage={{ k3s_audit_log_maxage }}
+          register: _audit_dropin
+
+    # ── Disable / roll back ───────────────────────────────────────────────────
+    - name: Remove audit configuration
+      when: not (k3s_audit_enabled | bool)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ k3s_audit_dropin_path }}"
+        - "{{ k3s_audit_policy_path }}"
+      register: _audit_removed
+
+    # ── Restart, then gate before touching the next etcd member ───────────────
+    - name: Apply the change
+      when: >-
+        (_audit_policy.changed | default(false))
+        or (_audit_dropin.changed | default(false))
+        or (_audit_removed.changed | default(false))
+      block:
+        - name: Restart k3s on {{ inventory_hostname }}
+          ansible.builtin.systemd:
+            name: k3s
+            state: restarted
+
+        - name: Wait for Ready and a healthy etcd voter on {{ k8s_node_name }}
+          # Same gate as tasks/k8s_master_reboot.yml. Restarting k3s restarts the
+          # embedded etcd member, so advancing to the next node before this one has
+          # rejoined as a voter would cost quorum on a 3-member cluster.
+          kubernetes.core.k8s_info:
+            kind: Node
+            name: "{{ k8s_node_name }}"
+          register: _cp_node
+          until: >-
+            _cp_node.resources is defined
+            and (_cp_node.resources
+                 | community.general.json_query("[0].status.conditions[?type=='Ready'].status | [0]")) == 'True'
+            and (_cp_node.resources
+                 | community.general.json_query("[0].status.conditions[?type=='EtcdIsVoter'].status | [0]")) == 'True'
+          retries: "{{ ((k3s_audit_ready_timeout | int) / 10) | round(0, 'ceil') | int }}"
+          delay: 10
+          delegate_to: localhost
+          become: false
+
+        - name: Confirm the API server is actually writing audit events
+          # The point of the whole play. A running API server that silently is not
+          # writing this file would leave Falco healthy and blind — the same
+          # failure mode FalcoIngestionStalled exists to catch on the syscall side.
+          ansible.builtin.stat:
+            path: "{{ k3s_audit_log_dir }}/audit.log"
+          register: _audit_log
+          until: _audit_log.stat.exists and _audit_log.stat.size > 0
+          retries: 12
+          delay: 5
+          when: k3s_audit_enabled | bool
+
+      rescue:
+        - name: Stop the roll and explain
+          ansible.builtin.fail:
+            msg: >-
+              Audit logging change FAILED on control-plane node {{ inventory_hostname }}
+              ({{ k8s_node_name | default('node name unresolved') }}). The roll has been
+              STOPPED before the next etcd member.
+
+              If the API server is down, the cause is almost certainly the audit policy
+              or the drop-in. Recover on the node itself with:
+                sudo rm -f {{ k3s_audit_dropin_path }} && sudo systemctl restart k3s
+              That reverts to the previous configuration without touching
+              /etc/rancher/k3s/config.yaml. Then check `journalctl -u k3s -n 100`.
+
+              Verify quorum with `kubectl get nodes` and
+              `kubectl get --raw='/livez?verbose'` before re-running.

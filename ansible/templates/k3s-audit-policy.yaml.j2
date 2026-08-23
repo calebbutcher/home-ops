@@ -1,0 +1,119 @@
+---
+# Kubernetes audit policy for the k3s API servers, consumed by Falco's k8saudit
+# plugin. Deployed to /var/lib/rancher/k3s/server/audit-policy.yaml by
+# ansible/k3s-audit.yml.
+#
+# ⚠️ A MALFORMED OR MISSING FILE HERE STOPS THE API SERVER FROM STARTING.
+# kube-apiserver validates --audit-policy-file at boot and exits if it cannot be
+# parsed. That is why the playbook writes this file BEFORE adding the flags, runs
+# `serial: 1`, and gates on EtcdIsVoter between nodes.
+#
+# ── Why this is scoped rather than the upstream policy ────────────────────────
+# The policy shipped in falcosecurity/plugins (plugins/k8saudit/configs/) ends in
+# a catch-all `level: Metadata`, which audits EVERY request — including the lease
+# renewals that kube-vip, CNPG, Longhorn, cert-manager and Flux generate several
+# times a second. On 4 GB control planes that is a large volume of disk writes and
+# of JSON for Falco to parse, for no detection benefit.
+#
+# So this policy was derived from what k8saudit-rules 0.18.0 ACTUALLY reads.
+# Across its 48 rules it only ever references the verbs create/update/patch/delete
+# (plus `get`, for secret reads specifically) and 13 resource types. Nothing in the
+# ruleset references `watch` or `list`, which is where the bulk of API traffic lives.
+#
+# Coverage cost, stated plainly: 4 of the 48 rules have no resource filter at all.
+# `port-forward` is recovered below via the pods subresources rule, and
+# `All K8s Audit Events` is a DEBUG passthrough that is no loss. The remaining two
+# — `Disallowed K8s User` and `Full K8s Administrative Access` — are identity rules
+# that match on any request, so the final Metadata rule below deliberately keeps
+# every MUTATING request to preserve them. Reads by an unexpected identity are the
+# one thing this policy will not see.
+#
+# Order matters: the FIRST matching rule wins, and a request matching no rule is
+# not audited at all.
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - RequestReceived
+rules:
+  # ── 1. Secrets: metadata ONLY, and this must stay the first rule ────────────
+  # At Request or RequestResponse level the audit log would contain the decoded
+  # body of every Secret written to the cluster — i.e. a plaintext copy of every
+  # credential, on control-plane disk, readable by anything mounting that path
+  # (including the Falco pod). Metadata still carries name/namespace/user/verb,
+  # which is all the `K8s Secret Created/Deleted/Get` rules need.
+  #
+  # `get` is included here and nowhere else: it is the only read verb any rule
+  # depends on, backing the detection of a successful secret read.
+  - level: Metadata
+    verbs: ["get", "create", "update", "patch", "delete"]
+    resources:
+      - group: ""
+        resources: ["secrets"]
+
+  # ── 2. Drop the firehose ────────────────────────────────────────────────────
+  # No rule in k8saudit-rules 0.18.0 references watch or list. Every controller's
+  # informers live here, so this single rule removes most of the volume.
+  - level: None
+    verbs: ["watch", "list"]
+
+  # Per-second control-plane churn with no security signal.
+  - level: None
+    resources:
+      - group: "coordination.k8s.io"
+        resources: ["leases"]
+      - group: ""
+        resources: ["events", "endpoints"]
+      - group: "discovery.k8s.io"
+        resources: ["endpointslices"]
+      - group: "metrics.k8s.io"
+      - group: "authentication.k8s.io"
+      - group: "authorization.k8s.io"
+
+  # Health, discovery and metrics endpoints. These are non-resource URLs, so this
+  # cannot accidentally match a real API request such as /api/v1/pods.
+  - level: None
+    nonResourceURLs:
+      - "/healthz*"
+      - "/livez*"
+      - "/readyz*"
+      - "/version"
+      - "/metrics"
+      - "/openapi*"
+      - "/apis*"
+      - "/api*"
+
+  # ── 3. What the ruleset actually inspects ───────────────────────────────────
+  # Pod subresources drive several rules: exec/attach (Exec/Attach to Container),
+  # portforward (port-forward), ephemeralcontainers (Ephemeral Container created).
+  # These are separate from "pods" in audit matching and must be named explicitly.
+  - level: RequestResponse
+    resources:
+      - group: ""
+        resources:
+          - "pods/exec"
+          - "pods/attach"
+          - "pods/portforward"
+          - "pods/ephemeralcontainers"
+
+  # RequestResponse because the rules read both the submitted object (ka.req.*,
+  # e.g. privileged flags and hostPath volumes on a pod spec) and the stored
+  # result (ka.resp.*, e.g. the assigned name).
+  - level: RequestResponse
+    verbs: ["create", "update", "patch", "delete"]
+    resources:
+      - group: ""
+        resources: ["pods", "services", "configmaps", "namespaces", "serviceaccounts", "nodes"]
+      - group: "apps"
+        resources: ["deployments", "daemonsets", "statefulsets", "replicasets"]
+      - group: "networking.k8s.io"
+        resources: ["ingresses"]
+      - group: "rbac.authorization.k8s.io"
+        resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+
+  # ── 4. Identity catch-all for writes ────────────────────────────────────────
+  # Keeps `Disallowed K8s User` and `Full K8s Administrative Access` working
+  # against resources not named above. Restricted to mutating verbs: writes are a
+  # small fraction of API traffic, so this is cheap, whereas dropping the verb
+  # filter here would reinstate the firehose this policy exists to avoid.
+  - level: Metadata
+    verbs: ["create", "update", "patch", "delete"]

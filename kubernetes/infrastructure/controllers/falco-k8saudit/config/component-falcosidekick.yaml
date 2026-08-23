@@ -1,0 +1,58 @@
+---
+# This namespace's own falcosidekick. A second one, deliberately.
+#
+# falcosidekick applies DISCORD_MINIMUMPRIORITY per instance, and Falco has a
+# single http_output URL, so one sidekick cannot hold two thresholds. That matters
+# here more than it sounds: k8saudit-rules 0.18.0 contains 21 WARNING, 20 INFO,
+# 4 NOTICE, 2 ERROR and 1 DEBUG rule — and zero CRITICAL. Pointing this instance
+# at the syscall sidekick (pinned at `critical` because the default syscall rules
+# are noisy) would have produced a k8saudit deployment that alerts on nothing at
+# all, while looking perfectly healthy.
+#
+# So: WARNING here, CRITICAL there. Both reach the same Discord channel.
+apiVersion: instance.falcosecurity.dev/v1alpha1
+kind: Component
+metadata:
+  name: falcosidekick
+  namespace: falco-k8saudit
+  labels:
+    app.kubernetes.io/name: falcosidekick
+spec:
+  component:
+    type: falcosidekick
+  # Two replicas per the workload HA baseline. This is a stateless forwarder on
+  # worker nodes (it carries no control-plane nodeSelector), so losing a node must
+  # not take the alert path down with it.
+  replicas: 2
+  podTemplateSpec:
+    spec:
+      containers:
+        - name: falcosidekick
+          env:
+            - name: DISCORD_WEBHOOKURL
+              valueFrom:
+                secretKeyRef:
+                  # Same webhook value as the `falco` namespace's copy, but a
+                  # distinct Secret — Secrets do not cross namespaces. Rotating the
+                  # webhook means rotating both files.
+                  name: falco-discord-webhook
+                  key: webhook-url
+            # The top 21 of the 48 rules. Starts louder than the syscall instance
+            # because control-plane API activity in a GitOps cluster is far more
+            # predictable than host syscalls: writes come from Flux and a handful of
+            # operators, so an unexpected one is genuinely worth a message. Raise to
+            # `error` if it proves otherwise.
+            - name: DISCORD_MINIMUMPRIORITY
+              value: warning
+            # Both instances post to the same Discord channel, so tag these at the
+            # source. Without it a "K8s Serviceaccount Created" and a "Terminal shell
+            # in container" arrive looking equally like "Falco said something" with
+            # nothing to say which detector fired.
+            - name: CUSTOMFIELDS
+              value: "source:k8saudit"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi

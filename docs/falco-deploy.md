@@ -246,7 +246,12 @@ channel becomes a channel nobody reads.
   budget — and its auth is a single shared `admin:admin` string, which would make
   it the one thing in the cluster not behind Authentik. Loki gives search and
   retention over the same events, on infrastructure that is already backed up.
-- **The `k8saudit` plugin.** Deferred deliberately; see below.
+- **The `k8saudit` plugin.** No longer deferred — it is deployed as a *separate*
+  Falco instance in the `falco-k8saudit` namespace, tailing the k3s API server
+  audit log on the control planes. It is not part of this instance because the
+  operator scopes rules and plugins by namespace, and because its ruleset contains
+  no CRITICAL rules and so needs its own falcosidekick threshold. See
+  [`docs/falco-k8saudit.md`](falco-k8saudit.md).
 - **`falco-incubating-rules` / `falco-sandbox-rules`.** A further ~68 rules, and
   where most of Falco's noisy reputation actually comes from. Start narrow.
 

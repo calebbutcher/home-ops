@@ -127,7 +127,7 @@ spec:
         # FalcoEventDrops and FalcoIngestionStalled silently unevaluable, and an
         # alert that cannot fire looks exactly like an alert that is not firing.
         - alert: FalcoMetricsDown
-          expr: up{job=~"falco|falcosidekick"} == 0
+          expr: up{job=~"falco|falcosidekick|falco-k8saudit|falcosidekick-k8saudit"} == 0
           for: 15m
           labels:
             severity: warning
@@ -136,3 +136,55 @@ spec:
             description: >-
               Prometheus cannot scrape {{ $labels.job }}. Falco may still be detecting,
               but every other alert in this group is blind while this is true.
+
+    # The k8saudit instance (namespace falco-k8saudit) — Kubernetes API audit
+    # events, separate from the syscall instance above.
+    #
+    # Same philosophy: a detection is Falco working and belongs in Discord; these
+    # alerts are for Falco having quietly stopped working.
+    #
+    # ⚠️ There is deliberately NO ingestion-stalled alert here yet, and that is a
+    # real gap rather than an oversight. The syscall equivalent keys on
+    # falcosecurity_scap_n_evts_total, which this instance does not emit: it runs
+    # engine.kind=nodriver, so there is no scap capture layer, and which counter a
+    # plugin-source instance exposes instead could not be confirmed without it
+    # running. Writing a plausible-looking expression against a metric that may not
+    # exist would be worse than none — it would never fire and would look like
+    # coverage. Add it once `kubectl get --raw
+    # /api/v1/namespaces/falco-k8saudit/services/falco:web/proxy/metrics` shows the
+    # real series. Until then, a Falco that goes blind here is caught only if the
+    # pod or the scrape target actually dies. See docs/falco-k8saudit.md.
+    - name: falco-k8saudit.rules
+      rules:
+        # The audit log is written per control-plane node, so anything short of
+        # 3/3 means one API server's activity is unobserved.
+        - alert: FalcoK8sAuditAgentDown
+          expr: >-
+            kube_daemonset_status_number_ready{namespace="falco-k8saudit", daemonset="falco"}
+            < kube_daemonset_status_desired_number_scheduled{namespace="falco-k8saudit", daemonset="falco"}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Falco k8saudit not running on every control plane"
+            description: >-
+              {{ $value }} fewer k8saudit pods are ready than scheduled. Each control
+              plane tails its own API server audit log, so API activity on the
+              affected node is not being inspected. A pod stuck in ContainerCreating
+              usually means ansible/k3s-audit.yml has not been run on that node —
+              /var/log/k3s-audit is mounted with hostPath type Directory.
+
+        # Falco drops output when its queue backs up. On this instance that most
+        # likely means the audit policy is producing more events than a 4 GB
+        # control plane can parse, i.e. the policy needs narrowing.
+        - alert: FalcoK8sAuditOutputDrops
+          expr: increase(falcosecurity_falco_outputs_queue_num_drops_total{job="falco-k8saudit"}[30m]) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Falco k8saudit is dropping outputs on {{ $labels.pod }}"
+            description: >-
+              Detections are being discarded before they reach falcosidekick. Check
+              CPU on the control planes and consider narrowing the audit policy in
+              ansible/templates/k3s-audit-policy.yaml.j2.
