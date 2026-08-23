@@ -48,8 +48,15 @@ spec:
             # source. Without it a "K8s Serviceaccount Created" and a "Terminal shell
             # in container" arrive looking equally like "Falco said something" with
             # nothing to say which detector fired.
+            #
+            # ⚠️ The key must NOT collide with a label falcosidekick already puts on
+            # its Prometheus metrics: hostname, rule, priority, priority_raw, source,
+            # k8s_ns_name, k8s_pod_name. Custom fields become variable label names, so
+            # a collision makes falcosidekick panic on startup with "duplicate label
+            # names in constant and variable labels". `source:` — the natural first
+            # choice — is exactly such a collision.
             - name: CUSTOMFIELDS
-              value: "source:k8saudit"
+              value: "detector:k8saudit"
           resources:
             requests:
               cpu: 10m

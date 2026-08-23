@@ -21,7 +21,7 @@ Unlike everything else in this repo, this is **not** purely GitOps. Nothing in t
 cluster writes an API audit log by default — k3s ships with auditing off — so
 there is a node-level change on the control planes that must land **first**.
 
-```
+```text
 1. ansible-playbook k3s-audit.yml     ← enables audit logging on the 3 control planes
 2. merge the PR                       ← Flux deploys Falco to consume it
 ```
@@ -150,6 +150,32 @@ cost of reinstating the firehose. Not worth it here.
   enabled rules, and `jevt.*` are the *json* plugin's fields (aliases for `json.*`),
   not k8saudit's. Without it Falco fails to load the ruleset at startup, on all
   three control planes at once.
+
+### Two crash-loops this hit on first deploy
+
+Both were self-inflicted and both are worth knowing, because neither error names its
+actual cause.
+
+**`Error: bad file: /etc/falco/config.d/60-…-inline.yaml`** — caused by adding
+`capabilities: drop: ["ALL"]` to the Falco container as an apparently free hardening
+win. The artifact-operator sidecar writes the generated config and rules files as
+`nonroot:nonroot` mode `0600`, while Falco runs as **uid 0**. Root reads another
+user's `0600` file only via `CAP_DAC_OVERRIDE`, which `drop: ALL` removes. The
+artifacts still report `PROGRAMMED` — the sidecar wrote them perfectly well — so this
+presents as Falco crash-looping on a file that visibly exists and is visibly correct.
+
+`privileged: false` is the override that matters and is safe; do not tighten further.
+
+**falcosidekick panics: `duplicate label names in constant and variable labels`** —
+caused by `CUSTOMFIELDS: "source:k8saudit"`. Custom fields become Prometheus *variable
+label names*, and falcosidekick already emits `source` as a built-in label on
+`falcosecurity_falcosidekick_falco_events_total`. The collision is fatal at startup.
+Avoid all of: `hostname`, `rule`, `priority`, `priority_raw`, `source`, `k8s_ns_name`,
+`k8s_pod_name`. This deployment uses `detector:k8saudit`.
+
+Neither is caught by any pre-merge check — both are runtime behaviours of the
+container, not schema or manifest problems. `kubectl apply --server-side --dry-run`
+validates them happily.
 
 ## Deploy
 

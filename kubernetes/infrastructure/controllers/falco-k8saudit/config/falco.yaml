@@ -65,8 +65,18 @@ spec:
             # suspect — flip it to true to confirm before looking anywhere else.
             privileged: false
             allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
+            # ⚠️ Do NOT add `capabilities: drop: ["ALL"]` here. It looks like the
+            # obvious next hardening step and it breaks Falco with the extremely
+            # unhelpful error `bad file: /etc/falco/config.d/60-...-inline.yaml`.
+            #
+            # The operator's artifact-operator sidecar writes the generated config
+            # and rules files as nonroot:nonroot mode 0600, while Falco itself runs
+            # as uid 0. Root can only read another user's 0600 file by virtue of
+            # CAP_DAC_OVERRIDE — which `drop: ALL` removes. The artifacts still
+            # report PROGRAMMED (the sidecar wrote them fine), so this presents as
+            # Falco crash-looping against a file that visibly exists.
+            #
+            # privileged:false is the override that actually matters and is kept.
           volumeMounts:
             - name: k3s-audit-log
               mountPath: /var/log/k3s-audit
