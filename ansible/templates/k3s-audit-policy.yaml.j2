@@ -82,7 +82,31 @@ rules:
       - "/apis*"
       - "/api*"
 
-  # ── 3. What the ruleset actually inspects ───────────────────────────────────
+  # ── 3. Grafana dashboards: metadata only ────────────────────────────────────
+  # Measured on the live cluster: ConfigMaps in `monitoring` were 10.3 MB of a
+  # 17.4 MB audit log — 59.3% of ALL audit volume from just 100 events — because
+  # vendored Grafana dashboards are hundreds of KB each and kustomize-controller
+  # rewrites them on every reconcile.
+  #
+  # They were also 100% of the events the k8saudit plugin could not read at all:
+  # every line over the plugin's 256 KB maxEventSize was one of these, producing
+  # `bufio.Scanner: token too long` and a dropped event. Excluding them takes the
+  # largest remaining audit line from 523 KB to 74 KB, comfortably inside the
+  # default, so nothing is silently discarded.
+  #
+  # The cost is precise and worth stating: `Create/Modify Configmap With Private
+  # Credentials` reads the ConfigMap body (ka.req.configmap.obj), so that rule no
+  # longer applies to the monitoring namespace. These are vendored dashboards and
+  # generated rulefiles — Grafana's actual credentials live in Secrets, which are
+  # unaffected. The rule still covers ConfigMaps in every other namespace.
+  - level: Metadata
+    verbs: ["create", "update", "patch", "delete"]
+    namespaces: ["monitoring"]
+    resources:
+      - group: ""
+        resources: ["configmaps"]
+
+  # ── 4. What the ruleset actually inspects ───────────────────────────────────
   # Pod subresources drive several rules: exec/attach (Exec/Attach to Container),
   # portforward (port-forward), ephemeralcontainers (Ephemeral Container created).
   # These are separate from "pods" in audit matching and must be named explicitly.
@@ -110,7 +134,7 @@ rules:
       - group: "rbac.authorization.k8s.io"
         resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
 
-  # ── 4. Identity catch-all for writes ────────────────────────────────────────
+  # ── 5. Identity catch-all for writes ────────────────────────────────────────
   # Keeps `Disallowed K8s User` and `Full K8s Administrative Access` working
   # against resources not named above. Restricted to mutating verbs: writes are a
   # small fraction of API traffic, so this is cheap, whereas dropping the verb
