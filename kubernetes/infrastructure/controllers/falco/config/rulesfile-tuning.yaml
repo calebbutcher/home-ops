@@ -1,0 +1,45 @@
+---
+# Local tuning for the syscall ruleset.
+#
+# Priority 50 — HIGHER than the vendored falco-rules (40), so this merges on top
+# of it. The vendored ruleset is never edited in place: it is version-pinned and
+# replaced wholesale on upgrade, so any change made there would be silently lost.
+#
+# Counterpart file for the other instance:
+# kubernetes/infrastructure/controllers/falco-k8saudit/config/rulesfile-tuning.yaml
+#
+# ── Why this exists ──────────────────────────────────────────────────────────
+# Nothing in here changes what reaches Discord. This instance's falcosidekick is
+# pinned at `critical`, and in 24h of observation it produced 33,733 events of
+# which ZERO were critical — so today it cannot alert on anything at all. That is
+# a separate decision (see the note at the bottom); this file is about the event
+# STREAM, which is shipped to Loki by Alloy and is currently 85% one benign rule.
+apiVersion: artifact.falcosecurity.dev/v1alpha1
+kind: Rulesfile
+metadata:
+  name: falco-tuning
+  namespace: falco
+spec:
+  priority: 50
+  inlineRules:
+    # ── 1. kube-vip's ARP traffic for the API server VIP ────────────────────
+    # `Packet socket created in container` fires on any AF_PACKET socket, because
+    # a packet socket is how ARP spoofing and CVE-2020-14386 privilege escalation
+    # work. kube-vip opens one constantly and legitimately: broadcasting
+    # gratuitous ARP for the control-plane VIP is its entire job.
+    #
+    # Measured at a dead-flat 1,194/hr — 28,656/day — and it is the single
+    # loudest rule in the cluster by two orders of magnitude, accounting for ~85%
+    # of all syscall events Falco produces. It appears on exactly one node at a
+    # time: whichever control plane currently holds the VIP lease. That makes it
+    # look alarming in a per-node view and is worth recognising for what it is.
+    #
+    # Note this leaves the rule fully armed everywhere else — the exclusion is on
+    # the process name, so any OTHER binary opening a packet socket in any
+    # container, including on the same node, still fires. That is the case the
+    # rule exists for. Upstream anticipated exactly this and ships an empty list
+    # for it, so this is filling in a provided hook rather than overriding a rule.
+    - list: user_known_packet_socket_binaries
+      items: [kube-vip]
+      override:
+        items: append

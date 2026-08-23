@@ -12,6 +12,7 @@ kind: Kustomization
 resources:
   - plugin-container.yaml
   - rulesfile-falco.yaml
+  - rulesfile-tuning.yaml
   - config.yaml
   - falco.yaml
   - component-falcosidekick.yaml
