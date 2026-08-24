@@ -84,3 +84,7 @@ resources:
   - falco/servicemonitor-k8saudit-falcosidekick.yaml
   - falco/dashboard.yaml
   - falco/dashboard-falcosidekick.yaml
+  - hydros/secret.sops.yaml
+  - hydros/helmrelease.yaml
+  - hydros/dashboard-tank.yaml
+  - hydros/dashboard-equipment.yaml
