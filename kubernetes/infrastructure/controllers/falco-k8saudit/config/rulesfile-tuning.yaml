@@ -19,17 +19,34 @@
 # that way. A genuine alert arriving during a noise burst is discarded along with
 # the noise, so keeping the volume down is a correctness requirement.
 #
-# Measured Discord volume before the section-4 fix was ~215 alerts/day, of which
-# roughly 97% were provably benign.
+# Measured Discord volume: ~215 alerts/day before section 4, ~66/day after it, and
+# ~0/day of routine platform activity after sections 1 and 3 below. What remains
+# should be human execs and genuine surprises.
 #
-# A caution for whoever tunes this next: secret reads here are BURSTY, not steady,
-# because they track Flux's 30m reconcile cycle. A short sample taken between
-# reconciles reads as near-silent, and one taken during a reconcile reads as a
-# flood. The first pass at this file was written from a 2.6-minute window and
-# concluded CloudNativePG was the whole story; a longer look showed Flux reading
-# all 52 SOPS-encrypted Secrets in the cluster was the larger source by far.
-# Measure across at least one full 30m interval, or use the cumulative
-# falcosecurity_falco_rules_matches_total counter rather than tailing logs.
+# ── How to measure this, because two ways of doing it are wrong ──────────────
+#
+# 1. Do NOT use rate()/increase() on falcosecurity_falco_rules_matches_total for
+#    THIS instance. The k8saudit webserver ingests audit records on several
+#    threads and each keeps its own match counter, but they all export under an
+#    identical label set — so successive scrapes of the same pod return different
+#    threads' counters and the series oscillates (observed flipping 32 → 5 → 32).
+#    Prometheus reads every step down as a counter reset and every step back up as
+#    fresh increments, which manufactured a steady ~1,000/hr out of a rule that
+#    had actually fired twice. That is a ~500x overstatement and it looks entirely
+#    plausible on a graph. The syscall instance has a single event source and its
+#    counters ARE monotonic, so this trap is specific to k8saudit.
+#
+#    Use Falco's own event output instead: the pod logs (json_output is on) or the
+#    same stream in Loki. That is what was actually emitted, which is also what
+#    was actually sent to Discord.
+#
+# 2. Secret reads here are BURSTY, not steady, because they track Flux's 30m
+#    reconcile cycle. A short sample taken between reconciles reads as near-silent,
+#    and one taken during a reconcile reads as a flood. The first pass at this file
+#    was written from a 2.6-minute window and concluded CloudNativePG was the whole
+#    story; a longer look showed Flux reading all 52 SOPS-encrypted Secrets in the
+#    cluster was the larger source by far. Sample at least a full 30m interval, and
+#    prefer several hours.
 apiVersion: artifact.falcosecurity.dev/v1alpha1
 kind: Rulesfile
 metadata:
@@ -104,33 +121,48 @@ spec:
         or (ka.user.name="system:serviceaccount:cert-manager:cert-manager-cainjector"
          and ka.target.name="cert-manager-webhook-ca")
 
-    # CNPG instances reading their own cluster's TLS material at startup.
+    # CNPG instances reading their own cluster's generated secrets.
     #
-    # Every CNPG cluster gets three generated secrets — `<cluster>-ca`,
-    # `<cluster>-server`, `<cluster>-replication` — and the instance pod reads all
-    # three when it boots. Silent in steady state; roughly a hundred alerts during
-    # a full node-update cycle, when every Postgres pod restarts.
+    # Every CNPG cluster gets a set of operator-generated secrets, and the instance
+    # pod reads them:
+    #   `<cluster>-ca` / `-server` / `-replication`  — TLS material, read at boot.
+    #       Silent in steady state; roughly a hundred alerts during a full
+    #       node-update cycle, when every Postgres pod restarts.
+    #   `<cluster>-app` / `-superuser`               — the database passwords, read
+    #       around the scheduled backup and on operator reconcile. Measured at 4/day
+    #       per cluster across 9 clusters = ~36 alerts/day, which after the section-4
+    #       fix was the entire remaining volume of this rule.
     #
-    # Weaker than the exemptions above, and worth being honest about: this matches
-    # on name SHAPE, not on an exact pair, because Falco cannot compare two fields
-    # to each other. So a compromised `authentik-postgres` service account could
-    # read `immich-postgres-ca` unobserved. That is a narrow lateral-movement path
-    # between two databases that already sit behind the same trust boundary, and
-    # the alternative is a maintenance-window flood that drops real alerts on the
-    # floor. Reads of the `-app` secrets (the actual database passwords) are NOT
-    # exempted here.
-    - macro: cnpg_instance_tls_read
+    # Weaker than the exemptions above, and worth being honest about, on two counts.
+    #
+    # First, it matches on name SHAPE, not on an exact pair, because Falco cannot
+    # compare two fields to each other — there is no way to say "the namespace in
+    # ka.user.name equals ka.target.namespace". So a compromised `authentik-postgres`
+    # service account could read `immich-postgres-app` unobserved. That is lateral
+    # movement between two databases that already sit behind the same trust boundary.
+    #
+    # Second, `-app` and `-superuser` really are the database passwords, and an
+    # earlier pass at this file deliberately left them alerting. The reason for
+    # including them now: the identity being exempted is the service account of the
+    # Postgres pod itself, which already holds that password in its own environment
+    # and on its own filesystem. An attacker who can present that token is already
+    # inside that pod, and reading the secret back over the API gains them nothing
+    # they did not have. What the rule is actually useful for — some OTHER identity
+    # reading a database password — stays fully armed.
+    - macro: cnpg_instance_own_secret_read
       condition: >-
         ka.user.name startswith "system:serviceaccount:"
         and ka.user.name endswith "-postgres"
         and (ka.target.name endswith "-postgres-ca"
              or ka.target.name endswith "-postgres-server"
-             or ka.target.name endswith "-postgres-replication")
+             or ka.target.name endswith "-postgres-replication"
+             or ka.target.name endswith "-postgres-app"
+             or ka.target.name endswith "-postgres-superuser")
 
     - macro: known_benign_secret_read
       condition: >-
         (cnpg_backup_credential_read or flux_secret_decryption_read
-         or own_webhook_tls_read or cnpg_instance_tls_read)
+         or own_webhook_tls_read or cnpg_instance_own_secret_read)
 
     - rule: K8s Secret Get Successfully
       condition: and not known_benign_secret_read
@@ -169,13 +201,34 @@ spec:
     #
     # This is a judgement call rather than a noise fix, and it is easy to revert if
     # it proves chatty: in a GitOps cluster an interactive exec is rare and is
-    # exactly the kind of manual action worth seeing. Note the rule already honours
-    # `user_known_exec_pod_activities`, so specific automation can be exempted
-    # later without touching the priority.
+    # exactly the kind of manual action worth seeing.
     - rule: Attach/Exec Pod
       priority: WARNING
       override:
         priority: replace
+
+    # The one piece of automation that execs on a schedule is the CloudNativePG
+    # operator: it runs `/controller/manager` inside each Postgres pod at that
+    # cluster's backup hour. Eight clusters, one exec each, every day.
+    #
+    # Scoped on the COMMAND, not just the identity, which is what makes this safe
+    # to exempt. `ka.uri.param[command]` is the binary the exec request asked to
+    # run, and the operator only ever asks for its own instance-manager binary. If
+    # something holding the `cloudnative-pg` service account token execs a shell
+    # into a database pod — the thing worth catching — the command is `sh` or
+    # `bash`, the exemption does not match, and the alert fires. Every observed
+    # exec in a 23h window was one of those two shapes and nothing in between.
+    #
+    # Filled in through the ruleset's own `user_known_exec_pod_activities` hook
+    # rather than an `override: condition` on the rule, and appended with `or` so
+    # the upstream default (`k8s_audit_never_true`) is preserved rather than
+    # replaced.
+    - macro: user_known_exec_pod_activities
+      condition: >-
+        or (ka.user.name="system:serviceaccount:cnpg-system:cloudnative-pg"
+            and ka.uri.param[command]="/controller/manager")
+      override:
+        condition: append
 
     # ── 4. Stop reporting TokenRequests as ServiceAccount creations ─────────
     # This is an upstream rule bug, not a local policy choice, and it was by a
