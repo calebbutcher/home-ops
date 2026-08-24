@@ -350,12 +350,55 @@ the entire story. A longer look showed the larger source by far was
 **`kustomize-controller` reading all 52 SOPS-encrypted Secrets in the cluster** —
 which is simply what it does: it cannot apply an encrypted Secret without reading it.
 
-Measure across at least one full 30m interval, or better, use the cumulative
-counter instead of tailing logs:
+Measure across at least one full 30m interval, and prefer several hours. Note that
+the audit log rotates roughly every 3.3h at this cluster's volume (~50 MB per file,
+~360 MB/day), so "look at the current `audit.log`" is a window of about three hours,
+not a day.
+
+### 🔴 Do not use `rate()`/`increase()` on this instance's rule-match counter
+
+The obvious way to measure — `increase(falcosecurity_falco_rules_matches_total[6h])`
+— is **wrong for `falco-k8saudit` specifically**, and wrong by roughly 500×.
+
+The k8saudit webserver ingests audit records on several threads, and each thread
+keeps its own match counter — but they all export under an identical label set. So
+successive scrapes of the *same pod* return different threads' counters and the
+series oscillates. Observed on `K8s Secret Get Successfully`, one minute apart:
+
+```text
+17:57=32  17:58=32  17:59=32  18:00=5  18:01=32  18:02=32  18:03=32  18:04=5 …
+```
+
+Prometheus reads every step down as a counter reset and every step back up as fresh
+increments. That turned a rule which had actually fired **twice** into a confident,
+dead-flat **~1,000/hr** on a graph. It is not obviously wrong when you look at it —
+which is what makes it dangerous.
+
+The syscall instance has a single event source and its counters *are* monotonic:
 
 ```bash
-kubectl get --raw "/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:http-web/proxy/api/v1/query?query=sum%20by%20(rule_name)%20(falcosecurity_falco_rules_matches_total%7Bjob%3D%22falco-k8saudit%22%7D)"
+# k8saudit — oscillates, unusable with rate()
+kubectl get --raw "/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query_range?query=falcosecurity_falco_rules_matches_total%7Bnamespace%3D%22falco-k8saudit%22%7D&start=$(($(date +%s)-1800))&end=$(date +%s)&step=60"
 ```
+
+Measure from **Falco's own event output** instead — the pod logs (`json_output` is
+on) or the same stream in Loki. That is what was actually emitted, which is also
+exactly what was offered to Discord:
+
+```bash
+for p in $(kubectl get pods -n falco-k8saudit -l app.kubernetes.io/name=falco -o name); do
+  kubectl logs -n falco-k8saudit ${p#pod/} -c falco
+done | grep '^{' | jq -r 'select(.rule) | [.priority, .rule, .output_fields."ka.user.name", .output_fields."ka.target.name"] | @tsv' \
+     | sort | uniq -c | sort -rn
+```
+
+Two further traps when reading those logs. Alerts at `Informational` (for example
+`K8s Serviceaccount Created`) appear there but are **below** this namespace's
+`warning` threshold and never reach Discord — filter by priority before drawing
+conclusions about channel volume. And your own `kubectl exec` sessions are audited,
+so an investigation into exec noise will find mostly itself; the command string of
+the exec is in the record too, which means grepping the audit log for `postgres-app`
+matches the `grep postgres-app` you just ran.
 
 Exempting the flux-system controllers is broader than it first looks, and is
 justified rather than assumed: the rule cannot distinguish legitimate Flux
@@ -379,6 +422,48 @@ hand as clean and both exempted by exact name:
 
 The rule still fires for any other ConfigMap, including a new one that really does
 carry a credential.
+
+### The last of the routine noise was CloudNativePG's backup hour
+
+With the TokenRequest bug fixed, Discord dropped to ~66 alerts/day — and measured
+from the event output over 17h, every single one of them was a CNPG cluster doing
+its scheduled backup. Each cluster produces two shapes at its backup hour:
+
+| Rule | Priority | Volume | What it is |
+| --- | --- | --- | --- |
+| `K8s Secret Get Successfully` | ERROR | ~36/day | the instance SA reading its own `<cluster>-app` / `-superuser` password |
+| `Attach/Exec Pod` | WARNING | ~8/day | the operator running `/controller/manager` inside the Postgres pod |
+
+The backups are staggered across the night — `02:00` tracearr, `03:00` authentik,
+`04:00` immich and n8n, `05:00` paperless, `06:00` gitea, `07:00` tandoor, `08:00`
+crowdsec — so the pattern reads as "one or two alerts an hour, all night, forever".
+
+**The exec exemption is scoped on the command, not the identity.** That is what
+makes it safe. `ka.uri.param[command]` is the binary the exec request asked to run,
+and the operator only ever asks for its own instance-manager binary:
+
+```text
+cloudnative-pg  →  command=/controller/manager     (8/day, exempted)
+system:admin    →  command=sh | tar | cat | ls     (still fires)
+```
+
+If something holding the `cloudnative-pg` token execs a *shell* into a database pod
+— the case actually worth catching — the command is `sh`, the exemption does not
+match, and the alert fires at WARNING. Verified by replay, below.
+
+**The secret exemption is weaker, and worth being explicit about.** It matches on
+name shape (`*-postgres-app`, `*-postgres-superuser`, plus the three TLS secrets)
+because Falco cannot compare two fields to each other — there is no way to express
+"the namespace in `ka.user.name` equals `ka.target.namespace`". So a compromised
+`authentik-postgres` service account could read `immich-postgres-app` unobserved.
+
+An earlier pass deliberately left `-app` alerting on the grounds that it is the
+actual database password. The reason it is exempted now: the identity being
+exempted is the service account **of the Postgres pod itself**, which already holds
+that password in its own environment and on its own filesystem. An attacker who can
+present that token is already inside that pod; reading the secret back over the API
+gains them nothing. What the rule is genuinely useful for — some *other* identity
+reading a database password — stays fully armed.
 
 ### Validating a rules change
 
@@ -423,10 +508,36 @@ kubectl -n falco-k8saudit exec $P -c falco -- sh -c \
 Build `replay-audit.log` from **real** events pulled out of `/var/log/k3s-audit/`,
 and include deliberate **controls** — events that must still fire — alongside the
 ones you expect to silence. Copies of a real event with the username or object name
-edited work well. The TokenRequest and webhook-TLS exceptions above were verified
-this way: 6 benign events silenced, while a genuine `serviceaccounts` create in
-kube-system, a read by an unrelated service account, and a CNPG instance reading
-its `-app` password secret all still fired.
+edited work well: the record *shape* is what matters, and it is the part that is
+easy to get wrong by hand.
+
+The CNPG exceptions were verified this way. Baseline fired all 8 records; with the
+tuning file, exactly the 5 controls survived:
+
+```text
+SILENCED  Attach/Exec Pod   cloudnative-pg  cmd=/controller/manager
+SILENCED  K8s Secret Get    tracearr-postgres → tracearr-postgres-app
+SILENCED  K8s Secret Get    immich-postgres   → immich-postgres-superuser
+FIRES     Attach/Exec Pod   cloudnative-pg  cmd=sh          ← same identity, shell
+FIRES     Attach/Exec Pod   system:admin    cmd=sh
+FIRES     K8s Secret Get    media:sonarr      → tracearr-postgres-app
+FIRES     K8s Secret Get    tracearr-postgres → authentik-bootstrap
+FIRES     Service Account Created in Kube Namespace  evil-sa
+```
+
+Three things that will waste time while assembling the corpus:
+
+- **`engine: {kind: nodriver}` is not optional.** Leave it out and Falco processes
+  the first record, then dies with `error opening device /host/dev/falco0` — which
+  reads like an environment problem rather than a config one, and leaves you with a
+  plausible-looking single-event result.
+- **The audit log rotates about every 3.3h**, so the record you want is often in an
+  `audit-<ts>.log` rather than `audit.log`. Backup-hour events (02:00–08:00) are
+  usually gone by the afternoon.
+- **Your own `kubectl exec` is audited, command line and all.** Grepping the audit
+  log for `postgres-app` matches the `grep postgres-app` you just ran, so a naive
+  extraction returns your own exec record three times. Filter on
+  `objectRef.resource`, not on a substring of the line.
 
 Note `timeout` exists in the Falco image but **not** on macOS — run it inside the
 pod, not around `kubectl`, or the error gets swallowed by whatever you pipe into.
