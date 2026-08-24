@@ -155,8 +155,15 @@ bump `tag:` in `helmrelease.yaml`. Renovate picks the image up through the
 `helm-values` manager — no `# renovate:` annotation needed, but the tag must
 stay a full semver rather than a `sha-` pin.
 
-New GHCR packages default to **private**, which surfaces as a 403
-`ImagePullBackOff`. Make the package public on first publish.
+Unlike coc-trade-bot, the source repo is public, so the GHCR package inherited
+public visibility and needs no imagePullSecret. Verified anonymously:
+
+```sh
+TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:calebbutcher/hydros-exporter:pull&service=ghcr.io" | jq -r .token)
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" \
+  -H "Accept: application/vnd.oci.image.index.v1+json" \
+  https://ghcr.io/v2/calebbutcher/hydros-exporter/manifests/0.1.0   # 200
+```
 
 ## Retention
 
