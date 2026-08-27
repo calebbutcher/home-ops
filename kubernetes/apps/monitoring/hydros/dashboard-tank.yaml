@@ -56,26 +56,26 @@ data:
             "skipUrlSync": false
           },
           {
-            "name": "tempunit",
+            "name": "tempscale",
             "label": "Temperature",
             "type": "custom",
-            "query": "°C : celsius, °F : fahrenheit",
+            "query": "°C : 1, °F : 1.8",
             "options": [
               {
                 "selected": false,
                 "text": "°C",
-                "value": "celsius"
+                "value": "1"
               },
               {
                 "selected": true,
                 "text": "°F",
-                "value": "fahrenheit"
+                "value": "1.8"
               }
             ],
             "current": {
               "selected": true,
               "text": "°F",
-              "value": "fahrenheit"
+              "value": "1.8"
             },
             "hide": 0,
             "includeAll": false,
@@ -102,7 +102,7 @@ data:
         {
           "id": 1,
           "type": "stat",
-          "title": "Temperature (${tempunit:text})",
+          "title": "Temperature (${tempscale:text})",
           "gridPos": {
             "h": 4,
             "w": 4,
@@ -144,7 +144,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "max by (name) (hydros_input_temperature_$tempunit)",
+              "expr": "(max by (name) (hydros_input_temperature_celsius) + 40) * $tempscale - 40",
               "legendFormat": "{{name}}"
             }
           ]
@@ -442,7 +442,7 @@ data:
         {
           "id": 7,
           "type": "timeseries",
-          "title": "Temperature (${tempunit:text})",
+          "title": "Temperature (${tempscale:text})",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -489,7 +489,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "max by (name) (hydros_input_temperature_$tempunit)",
+              "expr": "(max by (name) (hydros_input_temperature_celsius) + 40) * $tempscale - 40",
               "legendFormat": "{{name}}"
             }
           ],

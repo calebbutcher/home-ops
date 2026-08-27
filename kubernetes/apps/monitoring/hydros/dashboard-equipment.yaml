@@ -56,26 +56,26 @@ data:
             "skipUrlSync": false
           },
           {
-            "name": "tempunit",
+            "name": "tempscale",
             "label": "Temperature",
             "type": "custom",
-            "query": "°C : celsius, °F : fahrenheit",
+            "query": "°C : 1, °F : 1.8",
             "options": [
               {
                 "selected": false,
                 "text": "°C",
-                "value": "celsius"
+                "value": "1"
               },
               {
                 "selected": true,
                 "text": "°F",
-                "value": "fahrenheit"
+                "value": "1.8"
               }
             ],
             "current": {
               "selected": true,
               "text": "°F",
-              "value": "fahrenheit"
+              "value": "1.8"
             },
             "hide": 0,
             "includeAll": false,
@@ -1023,7 +1023,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "max by (device) (hydros_device_temperature_$tempunit)",
+              "expr": "(max by (device) (hydros_device_temperature_celsius) + 40) * $tempscale - 40",
               "instant": true,
               "range": false,
               "format": "table"
@@ -1121,7 +1121,7 @@ data:
         {
           "id": 10,
           "type": "timeseries",
-          "title": "Device temperature (${tempunit:text})",
+          "title": "Device temperature (${tempscale:text})",
           "gridPos": {
             "h": 8,
             "w": 10,
@@ -1168,7 +1168,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "max by (device) (hydros_device_temperature_$tempunit)",
+              "expr": "(max by (device) (hydros_device_temperature_celsius) + 40) * $tempscale - 40",
               "legendFormat": "{{device}}"
             }
           ]

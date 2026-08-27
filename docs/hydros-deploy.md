@@ -183,17 +183,34 @@ count(count by (pod) (hydros_input_temperature_celsius[24h]))   # want 1
 
 ### °C / °F
 
-The exporter publishes both `hydros_input_temperature_celsius` and
-`..._fahrenheit` (likewise `hydros_device_temperature_*`). A `tempunit` dashboard
-variable switches between them, defaulting to °F.
+Panels always read the **Celsius** series and convert in PromQL, driven by a
+`tempscale` variable that defaults to °F.
 
-The conversion lives in the exporter rather than in PromQL because the variable's
-value is the metric-name suffix, so the dropdown selects the series directly.
+Converting in the query is what keeps history: the exporter only started emitting
+`hydros_input_temperature_fahrenheit` in `v0.3.0`, so reading that metric directly
+made °F start at the moment that image rolled out while °C reached back to the
+original deploy. Celsius is the series with full history, so everything derives
+from it.
 
-⚠️ **Grafana does not interpolate `fieldConfig.unit`.** Setting it to `$tempunit`
+°C and °F cross at −40, which turns the conversion into a single scale about that
+pivot — so **one variable holding a bare number** drives it:
+
+```promql
+(max by (name) (hydros_input_temperature_celsius) + 40) * $tempscale - 40
+```
+
+`$tempscale` is `1` for °C and `1.8` for °F. Verified against Thanos as exactly
+equal to the exporter's own Fahrenheit series. Keeping the value numeric means no
+operators or spaces are interpolated into PromQL.
+
+That leaves `hydros_input_temperature_fahrenheit` and
+`hydros_device_temperature_fahrenheit` unused by any panel. They are harmless, but
+nothing depends on them any more.
+
+⚠️ **Grafana does not interpolate `fieldConfig.unit`.** Setting it to a variable
 does not fail loudly — the unknown unit string is appended verbatim, so tiles read
-`77.79 $tempunit`. Temperature panels therefore use `unit: "none"` and spell the
-unit in their title via `${tempunit:text}`, which resolves to `°C` / `°F` because
+`77.79 $tempscale`. Temperature panels therefore use `unit: "none"` and spell the
+unit in their title via `${tempscale:text}`, which resolves to `°C` / `°F` because
 panel titles *are* interpolated. The generator asserts no `unit` contains a `$`.
 
 The one place the unit cannot be shown is the **Temp** column of the Equipment
