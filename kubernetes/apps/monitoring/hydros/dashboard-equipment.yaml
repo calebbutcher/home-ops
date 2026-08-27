@@ -923,7 +923,7 @@ data:
                 "properties": [
                   {
                     "id": "unit",
-                    "value": "$tempunit"
+                    "value": "none"
                   },
                   {
                     "id": "decimals",
@@ -1116,12 +1116,12 @@ data:
               }
             }
           ],
-          "description": "One row per collective member, keyed by MAC."
+          "description": "One row per collective member, keyed by MAC. Temp follows the dashboard's °C/°F selector; table column headers are not interpolated, so it cannot carry the unit itself."
         },
         {
           "id": 10,
           "type": "timeseries",
-          "title": "Device temperature",
+          "title": "Device temperature (${tempunit:text})",
           "gridPos": {
             "h": 8,
             "w": 10,
@@ -1134,7 +1134,7 @@ data:
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "$tempunit",
+              "unit": "none",
               "decimals": 1,
               "color": {
                 "mode": "palette-classic"

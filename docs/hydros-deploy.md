@@ -188,15 +188,17 @@ The exporter publishes both `hydros_input_temperature_celsius` and
 variable switches between them, defaulting to °F.
 
 The conversion lives in the exporter rather than in PromQL because the variable's
-value has to do two jobs: it is the metric-name suffix *and* Grafana's unit id
-(`celsius` / `fahrenheit` are both). A PromQL-side `* 9 / 5 + 32` could not also
-serve as a unit.
+value is the metric-name suffix, so the dropdown selects the series directly.
 
-⚠️ If temperature values ever render as bare numbers with no degree suffix, this
-Grafana version does not interpolate variables into `fieldConfig.unit` — no
-in-repo dashboard relies on that. The values are still correct and the dropdown
-still reads °C/°F; add `($tempunit)` to the affected panel titles if you want the
-unit spelled out.
+⚠️ **Grafana does not interpolate `fieldConfig.unit`.** Setting it to `$tempunit`
+does not fail loudly — the unknown unit string is appended verbatim, so tiles read
+`77.79 $tempunit`. Temperature panels therefore use `unit: "none"` and spell the
+unit in their title via `${tempunit:text}`, which resolves to `°C` / `°F` because
+panel titles *are* interpolated. The generator asserts no `unit` contains a `$`.
+
+The one place the unit cannot be shown is the **Temp** column of the Equipment
+"Devices" table: table column headers come from a rename transformation and are
+not interpolated. It follows the same selector; the panel description says so.
 
 ### Power is small multiples
 

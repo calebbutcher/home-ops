@@ -102,7 +102,7 @@ data:
         {
           "id": 1,
           "type": "stat",
-          "title": "Temperature",
+          "title": "Temperature (${tempunit:text})",
           "gridPos": {
             "h": 4,
             "w": 4,
@@ -115,7 +115,7 @@ data:
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "$tempunit",
+              "unit": "none",
               "decimals": 2,
               "color": {
                 "mode": "fixed",
@@ -442,7 +442,7 @@ data:
         {
           "id": 7,
           "type": "timeseries",
-          "title": "Temperature",
+          "title": "Temperature (${tempunit:text})",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -455,7 +455,7 @@ data:
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "$tempunit",
+              "unit": "none",
               "decimals": 2,
               "color": {
                 "mode": "palette-classic"
