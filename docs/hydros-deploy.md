@@ -183,8 +183,18 @@ count(count by (pod) (hydros_input_temperature_celsius[24h]))   # want 1
 
 ### °C / °F
 
-Panels always read the **Celsius** series and convert in PromQL, driven by a
-`tempscale` variable that defaults to °F.
+Panels always read the **Celsius** series and convert in PromQL. The **Tank**
+dashboard is pinned to °F; the **Equipment** dashboard keeps a `tempscale`
+dropdown for its device temperatures.
+
+The Tank is pinned because threshold values are static numbers that cannot follow
+a unit variable — a band of 76–80 is meaningless in °C. Fixing the unit is what
+makes the bands below possible, and it lets the panels use Grafana's real
+`fahrenheit` unit for a proper `°F` suffix:
+
+```promql
+max by (name) (hydros_input_temperature_celsius) * 9 / 5 + 32
+```
 
 Converting in the query is what keeps history: the exporter only started emitting
 `hydros_input_temperature_fahrenheit` in `v0.3.0`, so reading that metric directly
@@ -192,11 +202,12 @@ made °F start at the moment that image rolled out while °C reached back to the
 original deploy. Celsius is the series with full history, so everything derives
 from it.
 
-°C and °F cross at −40, which turns the conversion into a single scale about that
-pivot — so **one variable holding a bare number** drives it:
+On the Equipment dashboard, where the toggle survives, °C and °F cross at −40,
+which turns the conversion into a single scale about that pivot — so **one
+variable holding a bare number** drives it:
 
 ```promql
-(max by (name) (hydros_input_temperature_celsius) + 40) * $tempscale - 40
+(max by (device) (hydros_device_temperature_celsius) + 40) * $tempscale - 40
 ```
 
 `$tempscale` is `1` for °C and `1.8` for °F. Verified against Thanos as exactly
@@ -209,13 +220,42 @@ nothing depends on them any more.
 
 ⚠️ **Grafana does not interpolate `fieldConfig.unit`.** Setting it to a variable
 does not fail loudly — the unknown unit string is appended verbatim, so tiles read
-`77.79 $tempscale`. Temperature panels therefore use `unit: "none"` and spell the
-unit in their title via `${tempscale:text}`, which resolves to `°C` / `°F` because
-panel titles *are* interpolated. The generator asserts no `unit` contains a `$`.
+`77.79 $tempscale`. The Equipment temperature panels therefore use `unit: "none"`
+and spell the unit in their title via `${tempscale:text}`, which resolves to
+`°C` / `°F` because panel titles *are* interpolated. The generator asserts no
+`unit` contains a `$`.
 
 The one place the unit cannot be shown is the **Temp** column of the Equipment
 "Devices" table: table column headers come from a rename transformation and are
 not interpolated. It follows the same selector; the panel description says so.
+
+### Threshold bands
+
+Temperature and pH carry a two-sided band. One `thresholds` object per reading
+does both jobs: it colours the stat tile's background (`colorMode: background`)
+and draws the dashed lines on the trend (`custom.thresholdsStyle.mode: dashed`,
+the same pattern as redis "Memory utilisation").
+
+Steps ascend and each colour applies from its value upward, so the sequence reads
+red / yellow / green / yellow / red:
+
+| Reading | red | yellow | **green** | yellow | red |
+|---|---|---|---|---|---|
+| Temperature (°F) | < 75 | 75–76 | **76–80** | 80–81 | > 81 |
+| pH | < 7.8 | — | **8.0–8.4** | 8.4–8.5 | > 8.5 |
+
+The pH band is the reef *target*, not this tank's baseline: measured pH runs
+7.5–7.9, so **the pH tile reads red or yellow until pH comes up.** That is
+deliberate. To track the tank's own normal instead, move the lower pair down to
+7.4 / 7.5.
+
+These came from husbandry norms, not observation — there were only ~17 h of
+history when they were set. The other three readings have no probe on this tank
+and keep their "thresholds deliberately unset" description.
+
+⚠️ Temperature holds ~77.8 °F with a standard deviation of 0.05 °F, so against a
+6 °F band the trend renders as a flat line. That is tight control, not a stuck
+reading. Zooming the y-axis means narrowing the band.
 
 ### Power is small multiples
 
