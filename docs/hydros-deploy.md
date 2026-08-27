@@ -161,6 +161,60 @@ After the first successful poll, check for anything that fell through:
 count by (name) (hydros_input_reading)
 ```
 
+## Dashboard notes
+
+### Every query is aggregated, and has to be
+
+`pod` and `instance` are part of series identity, so **each redeploy mints a whole
+new series set**. Two deploys produced two tiles per sensor in the Tank header —
+Thanos returned both the `0.1.0` and `0.2.0` pod's series for the same probe. So
+every panel query is wrapped: `max by (name)` for inputs, `max by (name, channel)`
+for outputs, `max by (device)` for members.
+
+The ServiceMonitor now pins `instance` and drops `pod`, which stops it recurring.
+That only affects new samples, so the aggregation is what actually fixes the
+display — including for history already in Thanos.
+
+To check for a recurrence:
+
+```promql
+count(count by (pod) (hydros_input_temperature_celsius[24h]))   # want 1
+```
+
+### °C / °F
+
+The exporter publishes both `hydros_input_temperature_celsius` and
+`..._fahrenheit` (likewise `hydros_device_temperature_*`). A `tempunit` dashboard
+variable switches between them, defaulting to °F.
+
+The conversion lives in the exporter rather than in PromQL because the variable's
+value has to do two jobs: it is the metric-name suffix *and* Grafana's unit id
+(`celsius` / `fahrenheit` are both). A PromQL-side `* 9 / 5 + 32` could not also
+serve as a unit.
+
+⚠️ If temperature values ever render as bare numbers with no degree suffix, this
+Grafana version does not interpolate variables into `fieldConfig.unit` — no
+in-repo dashboard relies on that. The values are still correct and the dropdown
+still reads °C/°F; add `($tempunit)` to the affected panel titles if you want the
+unit spelled out.
+
+### Power is small multiples
+
+One auto-scaled panel per output, repeated over an `output` variable built from
+`label_values(hydros_output_power_watts, name)`, plus a total-draw panel. The
+heaters cycle 0 W ↔ several hundred while pumps sit at 3–11 W, so a shared axis
+flattened everything else. New outputs appear on their own.
+
+⚠️ That variable's `query` must stay exactly `{query, refId}`. A `qryType` key
+makes Grafana ignore the `label_values()` string and render an empty dropdown —
+the trap already documented in `redis/dashboard.yaml`.
+
+### The dashboards are generated
+
+Both `dashboard-*.yaml` files are emitted by a script, not hand-edited. Author in
+the Grafana UI to iterate (Grafana runs `persistence: false`, so UI edits are lost
+on restart), then fold the change back into the generator and re-run it.
+
 ## Alerting
 
 None, deliberately. Thresholds set before a few weeks of real readings mostly

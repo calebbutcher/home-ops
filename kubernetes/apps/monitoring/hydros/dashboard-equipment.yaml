@@ -4,6 +4,9 @@
 #
 # Defaults to THANOS, not the local Prometheus -- prometheusSpec.retention is 2d
 # and the point of this dashboard is long-run reef trends.
+#
+# Generated, not hand-edited. Every query is aggregated (max by ...) because the
+# exporter's series carry pod/instance labels that change on each redeploy.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -49,6 +52,61 @@ data:
             "multi": false,
             "options": [],
             "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false
+          },
+          {
+            "name": "tempunit",
+            "label": "Temperature",
+            "type": "custom",
+            "query": "°C : celsius, °F : fahrenheit",
+            "options": [
+              {
+                "selected": false,
+                "text": "°C",
+                "value": "celsius"
+              },
+              {
+                "selected": true,
+                "text": "°F",
+                "value": "fahrenheit"
+              }
+            ],
+            "current": {
+              "selected": true,
+              "text": "°F",
+              "value": "fahrenheit"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "skipUrlSync": false
+          },
+          {
+            "name": "output",
+            "label": "Output",
+            "type": "query",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "definition": "label_values(hydros_output_power_watts, name)",
+            "query": {
+              "query": "label_values(hydros_output_power_watts, name)",
+              "refId": "StandardVariableQuery"
+            },
+            "current": {
+              "selected": true,
+              "text": "All",
+              "value": "$__all"
+            },
+            "options": [],
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "refresh": 2,
+            "sort": 1,
+            "hide": 0,
             "regex": "",
             "skipUrlSync": false
           }
@@ -260,7 +318,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_output_level_ratio",
+              "expr": "max by (name) (hydros_output_level_ratio)",
               "instant": true,
               "range": false,
               "format": "table"
@@ -271,7 +329,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_output_on",
+              "expr": "max by (name) (hydros_output_on)",
               "instant": true,
               "range": false,
               "format": "table"
@@ -282,7 +340,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_output_override_active",
+              "expr": "max by (name) (hydros_output_override_active)",
               "instant": true,
               "range": false,
               "format": "table"
@@ -293,7 +351,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_output_waiting",
+              "expr": "max by (name) (hydros_output_waiting)",
               "instant": true,
               "range": false,
               "format": "table"
@@ -304,7 +362,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_output_alert_active",
+              "expr": "max by (name) (hydros_output_alert_active)",
               "instant": true,
               "range": false,
               "format": "table"
@@ -327,64 +385,10 @@ data:
                   "Time 2": true,
                   "Time 3": true,
                   "Time 4": true,
-                  "Time 5": true,
-                  "__name__": true,
-                  "__name__ 1": true,
-                  "__name__ 2": true,
-                  "__name__ 3": true,
-                  "__name__ 4": true,
-                  "__name__ 5": true,
-                  "job": true,
-                  "job 1": true,
-                  "job 2": true,
-                  "job 3": true,
-                  "job 4": true,
-                  "job 5": true,
-                  "instance": true,
-                  "instance 1": true,
-                  "instance 2": true,
-                  "instance 3": true,
-                  "instance 4": true,
-                  "instance 5": true,
-                  "namespace": true,
-                  "namespace 1": true,
-                  "namespace 2": true,
-                  "namespace 3": true,
-                  "namespace 4": true,
-                  "namespace 5": true,
-                  "service": true,
-                  "service 1": true,
-                  "service 2": true,
-                  "service 3": true,
-                  "service 4": true,
-                  "service 5": true,
-                  "pod": true,
-                  "pod 1": true,
-                  "pod 2": true,
-                  "pod 3": true,
-                  "pod 4": true,
-                  "pod 5": true,
-                  "container": true,
-                  "container 1": true,
-                  "container 2": true,
-                  "container 3": true,
-                  "container 4": true,
-                  "container 5": true,
-                  "endpoint": true,
-                  "endpoint 1": true,
-                  "endpoint 2": true,
-                  "endpoint 3": true,
-                  "endpoint 4": true,
-                  "endpoint 5": true,
-                  "channel 1": true,
-                  "channel 2": true,
-                  "channel 3": true,
-                  "channel 4": true,
-                  "channel 5": true
+                  "Time 5": true
                 },
                 "renameByName": {
                   "name": "Output",
-                  "channel": "Channel",
                   "Value #A": "Level",
                   "Value #B": "On",
                   "Value #C": "Override",
@@ -394,7 +398,7 @@ data:
               }
             }
           ],
-          "description": "Live snapshot. Level is a fraction of full scale and reads negative on reversible flow pumps."
+          "description": "Live snapshot. Level is a fraction of full scale and reads negative on reversible flow pumps. Aggregated by output name only, since joinByField takes a single field -- a multi-channel output would collapse its channels here, but keeps them in the Output level panel below."
         },
         {
           "id": 2,
@@ -447,7 +451,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_output_info",
+              "expr": "max by (name, channel, key, type) (hydros_output_info)",
               "instant": true,
               "range": false,
               "format": "table"
@@ -459,14 +463,7 @@ data:
               "options": {
                 "excludeByName": {
                   "Time": true,
-                  "__name__": true,
-                  "job": true,
-                  "instance": true,
-                  "namespace": true,
-                  "service": true,
-                  "pod": true,
-                  "container": true,
-                  "endpoint": true,
+                  "Time 1": true,
                   "Value": true
                 },
                 "renameByName": {
@@ -497,10 +494,10 @@ data:
         {
           "id": 3,
           "type": "timeseries",
-          "title": "Output power",
+          "title": "Total draw",
           "gridPos": {
-            "h": 7,
-            "w": 8,
+            "h": 6,
+            "w": 24,
             "x": 0,
             "y": 11
           },
@@ -530,7 +527,7 @@ data:
             "legend": {
               "displayMode": "list",
               "placement": "bottom",
-              "showLegend": true
+              "showLegend": false
             },
             "tooltip": {
               "mode": "multi",
@@ -544,20 +541,94 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_output_power_watts > 0",
-              "legendFormat": "{{name}}"
+              "expr": "sum(max by (name) (hydros_output_power_watts))",
+              "legendFormat": "total"
             }
-          ]
+          ],
+          "description": "Whole-collective power draw."
         },
         {
           "id": 4,
+          "type": "timeseries",
+          "title": "$output",
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 17
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "watt",
+              "decimals": 1,
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": false
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max by (name) (hydros_output_power_watts{name=~\"$output\"})",
+              "legendFormat": "{{name}}"
+            }
+          ],
+          "repeat": "output",
+          "repeatDirection": "h",
+          "maxPerRow": 4,
+          "description": "One panel per output, each scaled to its own range so a heater cycling at several hundred watts does not flatten a 4 W pump."
+        },
+        {
+          "id": 202,
+          "type": "row",
+          "title": "Motion and levels",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 22
+          },
+          "collapsed": false,
+          "panels": [],
+          "datasource": null
+        },
+        {
+          "id": 5,
           "type": "timeseries",
           "title": "Pump speed",
           "gridPos": {
             "h": 7,
             "w": 8,
-            "x": 8,
-            "y": 11
+            "x": 0,
+            "y": 23
           },
           "datasource": {
             "type": "prometheus",
@@ -599,20 +670,20 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_output_rpm > 0",
+              "expr": "max by (name) (hydros_output_rpm) > 0",
               "legendFormat": "{{name}}"
             }
           ]
         },
         {
-          "id": 5,
+          "id": 6,
           "type": "timeseries",
           "title": "Supply voltage",
           "gridPos": {
             "h": 7,
             "w": 8,
-            "x": 16,
-            "y": 11
+            "x": 8,
+            "y": 23
           },
           "datasource": {
             "type": "prometheus",
@@ -654,21 +725,21 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_output_voltage_volts",
+              "expr": "max by (name) (hydros_output_voltage_volts)",
               "legendFormat": "{{name}}"
             }
           ],
           "description": "Scaled by 100 from the API's voltageI, which its own example confirms is hundredths despite the spec saying millivolts."
         },
         {
-          "id": 6,
+          "id": 7,
           "type": "timeseries",
           "title": "Output level",
           "gridPos": {
             "h": 7,
-            "w": 12,
-            "x": 0,
-            "y": 18
+            "w": 8,
+            "x": 16,
+            "y": 23
           },
           "datasource": {
             "type": "prometheus",
@@ -710,20 +781,20 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_output_level_ratio",
+              "expr": "max by (name, channel) (hydros_output_level_ratio)",
               "legendFormat": "{{name}} {{channel}}"
             }
           ]
         },
         {
-          "id": 7,
+          "id": 8,
           "type": "state-timeline",
           "title": "Overrides active",
           "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 12,
-            "y": 18
+            "h": 6,
+            "w": 24,
+            "x": 0,
+            "y": 30
           },
           "datasource": {
             "type": "prometheus",
@@ -787,35 +858,35 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_output_override_active",
+              "expr": "max by (name, channel) (hydros_output_override_active)",
               "legendFormat": "{{name}} {{channel}}"
             }
           ],
           "description": "An output held off its schedule. Long-running overrides are usually forgotten ones."
         },
         {
-          "id": 202,
+          "id": 203,
           "type": "row",
           "title": "Collective health",
           "gridPos": {
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 25
+            "y": 36
           },
           "collapsed": false,
           "panels": [],
           "datasource": null
         },
         {
-          "id": 8,
+          "id": 9,
           "type": "table",
           "title": "Devices",
           "gridPos": {
             "h": 8,
             "w": 14,
             "x": 0,
-            "y": 26
+            "y": 37
           },
           "datasource": {
             "type": "prometheus",
@@ -852,7 +923,7 @@ data:
                 "properties": [
                   {
                     "id": "unit",
-                    "value": "celsius"
+                    "value": "$tempunit"
                   },
                   {
                     "id": "decimals",
@@ -934,12 +1005,6 @@ data:
                   {
                     "id": "decimals",
                     "value": 0
-                  },
-                  {
-                    "id": "custom.cellOptions",
-                    "value": {
-                      "type": "auto"
-                    }
                   }
                 ]
               }
@@ -958,7 +1023,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_device_temperature_celsius",
+              "expr": "max by (device) (hydros_device_temperature_$tempunit)",
               "instant": true,
               "range": false,
               "format": "table"
@@ -969,7 +1034,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_device_bus_voltage_volts",
+              "expr": "max by (device) (hydros_device_bus_voltage_volts)",
               "instant": true,
               "range": false,
               "format": "table"
@@ -980,7 +1045,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_device_wifi_state",
+              "expr": "max by (device) (hydros_device_wifi_state)",
               "instant": true,
               "range": false,
               "format": "table"
@@ -991,7 +1056,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_device_sdcard_status",
+              "expr": "max by (device) (hydros_device_sdcard_status)",
               "instant": true,
               "range": false,
               "format": "table"
@@ -1002,7 +1067,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_device_firmware_running",
+              "expr": "max by (device) (hydros_device_firmware_running)",
               "instant": true,
               "range": false,
               "format": "table"
@@ -1013,7 +1078,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_device_uptime_seconds",
+              "expr": "max by (device) (hydros_device_uptime_seconds)",
               "instant": true,
               "range": false,
               "format": "table"
@@ -1031,69 +1096,13 @@ data:
               "id": "organize",
               "options": {
                 "excludeByName": {
+                  "Time": true,
                   "Time 1": true,
                   "Time 2": true,
                   "Time 3": true,
                   "Time 4": true,
                   "Time 5": true,
-                  "Time 6": true,
-                  "Time": true,
-                  "__name__ 1": true,
-                  "__name__ 2": true,
-                  "__name__ 3": true,
-                  "__name__ 4": true,
-                  "__name__ 5": true,
-                  "__name__ 6": true,
-                  "__name__": true,
-                  "job": true,
-                  "job 1": true,
-                  "job 2": true,
-                  "job 3": true,
-                  "job 4": true,
-                  "job 5": true,
-                  "job 6": true,
-                  "instance": true,
-                  "instance 1": true,
-                  "instance 2": true,
-                  "instance 3": true,
-                  "instance 4": true,
-                  "instance 5": true,
-                  "instance 6": true,
-                  "namespace": true,
-                  "namespace 1": true,
-                  "namespace 2": true,
-                  "namespace 3": true,
-                  "namespace 4": true,
-                  "namespace 5": true,
-                  "namespace 6": true,
-                  "service": true,
-                  "service 1": true,
-                  "service 2": true,
-                  "service 3": true,
-                  "service 4": true,
-                  "service 5": true,
-                  "service 6": true,
-                  "pod": true,
-                  "pod 1": true,
-                  "pod 2": true,
-                  "pod 3": true,
-                  "pod 4": true,
-                  "pod 5": true,
-                  "pod 6": true,
-                  "container": true,
-                  "container 1": true,
-                  "container 2": true,
-                  "container 3": true,
-                  "container 4": true,
-                  "container 5": true,
-                  "container 6": true,
-                  "endpoint": true,
-                  "endpoint 1": true,
-                  "endpoint 2": true,
-                  "endpoint 3": true,
-                  "endpoint 4": true,
-                  "endpoint 5": true,
-                  "endpoint 6": true
+                  "Time 6": true
                 },
                 "renameByName": {
                   "device": "Device",
@@ -1110,14 +1119,14 @@ data:
           "description": "One row per collective member, keyed by MAC."
         },
         {
-          "id": 9,
+          "id": 10,
           "type": "timeseries",
           "title": "Device temperature",
           "gridPos": {
             "h": 8,
             "w": 10,
             "x": 14,
-            "y": 26
+            "y": 37
           },
           "datasource": {
             "type": "prometheus",
@@ -1125,7 +1134,7 @@ data:
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "celsius",
+              "unit": "$tempunit",
               "decimals": 1,
               "color": {
                 "mode": "palette-classic"
@@ -1159,34 +1168,34 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_device_temperature_celsius",
+              "expr": "max by (device) (hydros_device_temperature_$tempunit)",
               "legendFormat": "{{device}}"
             }
           ]
         },
         {
-          "id": 203,
+          "id": 204,
           "type": "row",
           "title": "Exporter",
           "gridPos": {
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 34
+            "y": 45
           },
           "collapsed": false,
           "panels": [],
           "datasource": null
         },
         {
-          "id": 10,
+          "id": 11,
           "type": "stat",
           "title": "State age",
           "gridPos": {
             "h": 4,
             "w": 6,
             "x": 0,
-            "y": 35
+            "y": 46
           },
           "datasource": {
             "type": "prometheus",
@@ -1239,19 +1248,19 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_state_age_seconds"
+              "expr": "min(hydros_state_age_seconds)"
             }
           ]
         },
         {
-          "id": 11,
+          "id": 12,
           "type": "stat",
           "title": "Session expires in",
           "gridPos": {
             "h": 4,
             "w": 6,
             "x": 6,
-            "y": 35
+            "y": 46
           },
           "datasource": {
             "type": "prometheus",
@@ -1300,19 +1309,19 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_session_expires_timestamp_seconds - time()"
+              "expr": "max(hydros_session_expires_timestamp_seconds) - time()"
             }
           ]
         },
         {
-          "id": 12,
+          "id": 13,
           "type": "timeseries",
           "title": "Poll outcomes",
           "gridPos": {
             "h": 4,
             "w": 12,
             "x": 12,
-            "y": 35
+            "y": 46
           },
           "datasource": {
             "type": "prometheus",
