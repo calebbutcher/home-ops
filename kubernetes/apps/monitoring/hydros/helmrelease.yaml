@@ -1,0 +1,96 @@
+---
+# hydros-exporter — polls the CoralVue HYDROS cloud API and exposes reef tank
+# telemetry (temperature, pH, ORP, salinity, alkalinity), output/equipment state
+# and per-device health for the whole collective.
+#
+# Built from github.com/calebbutcher/hydros-exporter.
+#
+# Single target, so the scrape job is a ServiceMonitor here rather than an
+# additionalScrapeConfigs entry like pve-exporter needs.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: hydros-exporter
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "5.1.0"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      hydros-exporter:
+        replicas: 1
+        # HYDROS caps polling sessions at 5/hour PER DEVICE, shared across every
+        # key for that device. A second pod mints its own session, so both
+        # scaling up and a rolling update would burn the budget and eventually
+        # 429. Recreate keeps exactly one poller alive at a time.
+        strategy: Recreate
+        pod:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+        containers:
+          app:
+            image:
+              repository: ghcr.io/calebbutcher/hydros-exporter
+              tag: "0.1.0"
+            env:
+              TZ: "UTC"
+              # The API's own floor; the ServiceMonitor scrapes at 1m so every
+              # scrape sees a reading no more than one poll old.
+              HYDROS_POLL_INTERVAL: "30"
+            envFrom:
+              - secretRef:
+                  name: hydros-exporter-secret
+            probes:
+              liveness: &probe
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /metrics
+                    port: 8080
+                  initialDelaySeconds: 10
+                  periodSeconds: 30
+                  failureThreshold: 3
+              readiness: *probe
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                cpu: 25m
+                memory: 64Mi
+              limits:
+                memory: 128Mi
+    service:
+      app:
+        controller: hydros-exporter
+        ports:
+          http:
+            port: 8080
+    serviceMonitor:
+      app:
+        serviceName: hydros-exporter
+        endpoints:
+          - port: http
+            scheme: http
+            path: /metrics
+            interval: 1m
+            scrapeTimeout: 10s
