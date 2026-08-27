@@ -96,12 +96,10 @@ Then in Grafana (both dashboards default to the **Thanos** datasource, not the
 - `hydros_state_age_seconds < 60`
 - Prometheus → Targets shows the `hydros-exporter` job UP on both replicas
 
-## ⚠️ Calibrate the derived units against the app
+## Derived units — verified
 
-The spec documents `voltageI` as millivolts and `powerI` as milliwatts. Its own
-worked example contradicts both — a heater at `voltageI: 12062` is 120.62 V US
-mains, and a pump's `voltageI`/`current`/`powerI` only reconcile if power is
-tenths of a watt. The exporter therefore divides:
+The spec documents `voltageI` as millivolts and `powerI` as milliwatts. Both are
+wrong. The exporter divides:
 
 | Field | Divisor | Metric |
 |---|---|---|
@@ -111,15 +109,42 @@ tenths of a watt. The exporter therefore divides:
 | `powerI` | 10 | `hydros_output_power_watts` |
 | `valueState` | 10000 | `hydros_output_level_ratio` |
 
-Cross-check two or three readings against the HYDROS app before trusting the
-wattage. Mains-powered gear should read ~120 V and DC gear ~24 V.
+Confirmed on live hardware 2026-08-27: outputs read 114.5–114.7 V (US mains) and
+the accessory bus 23.9 V (24 V nominal), and every powered output reconciles
+against P = V × I:
+
+| Output | V | A | W reported | V × A |
+|---|---|---|---|---|
+| Left Return | 114.53 | 0.094 | 10.7 | 10.77 |
+| Refigium Light | 114.53 | 0.095 | 10.8 | 10.88 |
+| Right Return | 114.72 | 0.090 | 10.3 | 10.32 |
+| AI Orbit2 | 114.73 | 0.045 | 5.1 | 5.16 |
+| Plank Pump | 114.72 | 0.033 | 3.7 | 3.79 |
+
+### `millis` is not a Unix timestamp either
+
+The spec calls it "Unix timestamp in milliseconds". A live Quatro-398 reports it
+counting from a fixed **2020-01-01** base — effectively an uptime counter. Any
+boot time anchored on it dates to 2020, which is what `v0.1.0` did.
+
+`v0.2.0` drops the anchor entirely and publishes
+`hydros_device_uptime_seconds`, derived from the naive `time` − `bootTime`
+difference (both are real wall clock, and share a timezone so the trailing
+abbreviation never needs parsing). `hydros_collective_report_timestamp_seconds`
+and `hydros_device_boot_timestamp_seconds` no longer exist; use
+`hydros_state_age_seconds` for freshness.
 
 ## Sensor naming
 
 Sensor names are user-assigned, so the exporter classifies them by name token
-(`temp`, `ph`, `orp`, `salin`, `alk`, `level`/`ato`) into unit-suffixed metrics.
+into unit-suffixed metrics: `temp`, `ph`, `orp`, `salin`, `alk`, and the binary
+float/optical switches `level`, `ato`, `overflow`, `leak`, `float`. Matching is
+on whole tokens, so "pH" does not match "Phosphate".
+
 Anything unmatched still exports as `hydros_input_reading{name,field}` — nothing
-is dropped, it just lands untyped.
+is dropped, it just lands untyped. On this tank that initially caught
+"Skimmer Overflow"; `overflow` was added as a token in `v0.2.0` rather than
+carrying an env override for it.
 
 To type a sensor the heuristic misses, set `HYDROS_INPUT_UNITS` in the
 HelmRelease:
