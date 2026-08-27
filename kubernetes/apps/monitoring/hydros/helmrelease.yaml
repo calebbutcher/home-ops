@@ -47,7 +47,7 @@ spec:
           app:
             image:
               repository: ghcr.io/calebbutcher/hydros-exporter
-              tag: "0.1.0"
+              tag: "0.2.0"
             env:
               TZ: "UTC"
               # The API's own floor; the ServiceMonitor scrapes at 1m so every

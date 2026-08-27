@@ -1013,7 +1013,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "time() - hydros_device_boot_timestamp_seconds",
+              "expr": "hydros_device_uptime_seconds",
               "instant": true,
               "range": false,
               "format": "table"
