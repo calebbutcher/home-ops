@@ -47,7 +47,7 @@ spec:
           app:
             image:
               repository: ghcr.io/calebbutcher/hydros-exporter
-              tag: "0.2.0"
+              tag: "0.3.0"
             env:
               TZ: "UTC"
               # The API's own floor; the ServiceMonitor scrapes at 1m so every
@@ -94,3 +94,14 @@ spec:
             path: /metrics
             interval: 1m
             scrapeTimeout: 10s
+            # Pod name and pod IP are part of series identity, so every redeploy
+            # would otherwise mint a whole new series set — two of everything
+            # after one image bump. Safe to pin because replicas: 1 with
+            # strategy: Recreate means two pods never scrape concurrently.
+            relabelings:
+              - action: replace
+                targetLabel: instance
+                replacement: hydros-exporter
+            metricRelabelings:
+              - action: labeldrop
+                regex: pod

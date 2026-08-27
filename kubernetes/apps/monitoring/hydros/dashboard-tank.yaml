@@ -4,6 +4,9 @@
 #
 # Defaults to THANOS, not the local Prometheus -- prometheusSpec.retention is 2d
 # and the point of this dashboard is long-run reef trends.
+#
+# Generated, not hand-edited. Every query is aggregated (max by ...) because the
+# exporter's series carry pod/instance labels that change on each redeploy.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -51,6 +54,33 @@ data:
             "refresh": 1,
             "regex": "",
             "skipUrlSync": false
+          },
+          {
+            "name": "tempunit",
+            "label": "Temperature",
+            "type": "custom",
+            "query": "°C : celsius, °F : fahrenheit",
+            "options": [
+              {
+                "selected": false,
+                "text": "°C",
+                "value": "celsius"
+              },
+              {
+                "selected": true,
+                "text": "°F",
+                "value": "fahrenheit"
+              }
+            ],
+            "current": {
+              "selected": true,
+              "text": "°F",
+              "value": "fahrenheit"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "skipUrlSync": false
           }
         ]
       },
@@ -85,7 +115,7 @@ data:
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "celsius",
+              "unit": "$tempunit",
               "decimals": 2,
               "color": {
                 "mode": "fixed",
@@ -114,7 +144,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_input_temperature_celsius",
+              "expr": "max by (name) (hydros_input_temperature_$tempunit)",
               "legendFormat": "{{name}}"
             }
           ]
@@ -164,7 +194,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_input_ph",
+              "expr": "max by (name) (hydros_input_ph)",
               "legendFormat": "{{name}}"
             }
           ]
@@ -214,7 +244,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_input_salinity_ppt",
+              "expr": "max by (name) (hydros_input_salinity_ppt)",
               "legendFormat": "{{name}}"
             }
           ]
@@ -264,7 +294,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_input_orp_millivolts",
+              "expr": "max by (name) (hydros_input_orp_millivolts)",
               "legendFormat": "{{name}}"
             }
           ]
@@ -314,7 +344,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_input_alkalinity_dkh",
+              "expr": "max by (name) (hydros_input_alkalinity_dkh)",
               "legendFormat": "{{name}}"
             }
           ]
@@ -391,7 +421,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_up"
+              "expr": "max(hydros_up)"
             }
           ]
         },
@@ -425,7 +455,7 @@ data:
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "celsius",
+              "unit": "$tempunit",
               "decimals": 2,
               "color": {
                 "mode": "palette-classic"
@@ -459,7 +489,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_input_temperature_celsius",
+              "expr": "max by (name) (hydros_input_temperature_$tempunit)",
               "legendFormat": "{{name}}"
             }
           ],
@@ -515,7 +545,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_input_ph",
+              "expr": "max by (name) (hydros_input_ph)",
               "legendFormat": "{{name}}"
             }
           ],
@@ -571,7 +601,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_input_salinity_ppt",
+              "expr": "max by (name) (hydros_input_salinity_ppt)",
               "legendFormat": "{{name}}"
             }
           ],
@@ -627,7 +657,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_input_orp_millivolts",
+              "expr": "max by (name) (hydros_input_orp_millivolts)",
               "legendFormat": "{{name}}"
             }
           ],
@@ -683,7 +713,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_input_alkalinity_dkh",
+              "expr": "max by (name) (hydros_input_alkalinity_dkh)",
               "legendFormat": "{{name}}"
             }
           ],
@@ -739,7 +769,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_input_raw",
+              "expr": "max by (name) (hydros_input_raw)",
               "legendFormat": "{{name}}"
             }
           ],
@@ -831,11 +861,11 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_input_alert_active",
+              "expr": "max by (name) (hydros_input_alert_active)",
               "legendFormat": "{{name}}"
             }
           ],
-          "description": "The controller's own alert flag per sensor. Alert text is not a label (it is unbounded); check the HYDROS app or the exporter log for the message."
+          "description": "The controller's own alert flag per sensor. Alert text is not a label (it is unbounded); check the HYDROS app or the exporter log."
         },
         {
           "id": 14,
@@ -893,7 +923,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "hydros_collective_mode_info == 1",
+              "expr": "max by (mode) (hydros_collective_mode_info) == 1",
               "legendFormat": "{{mode}}"
             }
           ]
