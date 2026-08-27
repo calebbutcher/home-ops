@@ -54,33 +54,6 @@ data:
             "refresh": 1,
             "regex": "",
             "skipUrlSync": false
-          },
-          {
-            "name": "tempscale",
-            "label": "Temperature",
-            "type": "custom",
-            "query": "°C : 1, °F : 1.8",
-            "options": [
-              {
-                "selected": false,
-                "text": "°C",
-                "value": "1"
-              },
-              {
-                "selected": true,
-                "text": "°F",
-                "value": "1.8"
-              }
-            ],
-            "current": {
-              "selected": true,
-              "text": "°F",
-              "value": "1.8"
-            },
-            "hide": 0,
-            "includeAll": false,
-            "multi": false,
-            "skipUrlSync": false
           }
         ]
       },
@@ -102,7 +75,7 @@ data:
         {
           "id": 1,
           "type": "stat",
-          "title": "Temperature (${tempscale:text})",
+          "title": "Temperature",
           "gridPos": {
             "h": 4,
             "w": 4,
@@ -115,11 +88,35 @@ data:
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "none",
+              "unit": "fahrenheit",
               "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 75
+                  },
+                  {
+                    "color": "green",
+                    "value": 76
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 80
+                  },
+                  {
+                    "color": "red",
+                    "value": 81
+                  }
+                ]
+              },
               "color": {
-                "mode": "fixed",
-                "fixedColor": "text"
+                "mode": "thresholds"
               }
             },
             "overrides": []
@@ -132,9 +129,9 @@ data:
               "fields": "",
               "values": false
             },
-            "colorMode": "value",
+            "colorMode": "background",
             "graphMode": "area",
-            "textMode": "value_and_name",
+            "textMode": "auto",
             "justifyMode": "auto"
           },
           "targets": [
@@ -144,7 +141,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "(max by (name) (hydros_input_temperature_celsius) + 40) * $tempscale - 40",
+              "expr": "max by (name) (hydros_input_temperature_celsius) * 9 / 5 + 32",
               "legendFormat": "{{name}}"
             }
           ]
@@ -167,9 +164,33 @@ data:
             "defaults": {
               "unit": "none",
               "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 7.8
+                  },
+                  {
+                    "color": "green",
+                    "value": 8.0
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 8.4
+                  },
+                  {
+                    "color": "red",
+                    "value": 8.5
+                  }
+                ]
+              },
               "color": {
-                "mode": "fixed",
-                "fixedColor": "text"
+                "mode": "thresholds"
               }
             },
             "overrides": []
@@ -182,9 +203,9 @@ data:
               "fields": "",
               "values": false
             },
-            "colorMode": "value",
+            "colorMode": "background",
             "graphMode": "area",
-            "textMode": "value_and_name",
+            "textMode": "auto",
             "justifyMode": "auto"
           },
           "targets": [
@@ -234,7 +255,7 @@ data:
             },
             "colorMode": "value",
             "graphMode": "area",
-            "textMode": "value_and_name",
+            "textMode": "auto",
             "justifyMode": "auto"
           },
           "targets": [
@@ -284,7 +305,7 @@ data:
             },
             "colorMode": "value",
             "graphMode": "area",
-            "textMode": "value_and_name",
+            "textMode": "auto",
             "justifyMode": "auto"
           },
           "targets": [
@@ -334,7 +355,7 @@ data:
             },
             "colorMode": "value",
             "graphMode": "area",
-            "textMode": "value_and_name",
+            "textMode": "auto",
             "justifyMode": "auto"
           },
           "targets": [
@@ -442,7 +463,7 @@ data:
         {
           "id": 7,
           "type": "timeseries",
-          "title": "Temperature (${tempscale:text})",
+          "title": "Temperature",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -455,7 +476,7 @@ data:
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "none",
+              "unit": "fahrenheit",
               "decimals": 2,
               "color": {
                 "mode": "palette-classic"
@@ -466,7 +487,35 @@ data:
                 "lineWidth": 2,
                 "fillOpacity": 8,
                 "showPoints": "never",
-                "spanNulls": false
+                "spanNulls": false,
+                "thresholdsStyle": {
+                  "mode": "dashed"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 75
+                  },
+                  {
+                    "color": "green",
+                    "value": 76
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 80
+                  },
+                  {
+                    "color": "red",
+                    "value": 81
+                  }
+                ]
               }
             },
             "overrides": []
@@ -489,11 +538,11 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "(max by (name) (hydros_input_temperature_celsius) + 40) * $tempscale - 40",
+              "expr": "max by (name) (hydros_input_temperature_celsius) * 9 / 5 + 32",
               "legendFormat": "{{name}}"
             }
           ],
-          "description": "Thresholds are deliberately unset until a few weeks of real readings establish this tank's normal range."
+          "description": "Standard reef range: 76-80 °F, warning either side, red below 75 or above 81. This tank holds ~77.8 °F, so the trace looks flat against a band this wide -- that is the control being tight, not a stuck reading."
         },
         {
           "id": 8,
@@ -522,7 +571,35 @@ data:
                 "lineWidth": 2,
                 "fillOpacity": 8,
                 "showPoints": "never",
-                "spanNulls": false
+                "spanNulls": false,
+                "thresholdsStyle": {
+                  "mode": "dashed"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 7.8
+                  },
+                  {
+                    "color": "green",
+                    "value": 8.0
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 8.4
+                  },
+                  {
+                    "color": "red",
+                    "value": 8.5
+                  }
+                ]
               }
             },
             "overrides": []
@@ -549,7 +626,7 @@ data:
               "legendFormat": "{{name}}"
             }
           ],
-          "description": "Thresholds are deliberately unset until a few weeks of real readings establish this tank's normal range."
+          "description": "Reef target: 8.0-8.4 green. This tank currently reads 7.5-7.9, so the tile stays red until pH comes up -- the band is set to the target rather than to today's baseline."
         },
         {
           "id": 9,
