@@ -89,6 +89,34 @@ kubectl -n monitoring port-forward svc/hydros-exporter 8080:8080
 curl -s localhost:8080/metrics | grep -E '^hydros_(up|state_age|input_)'
 ```
 
+### Seeing what is actually being pulled
+
+The exporter serves three routes; `/` lists them.
+
+| Route | |
+|---|---|
+| `/metrics` | Prometheus exposition — what gets scraped |
+| `/state` | The **raw cached state document**, exactly as the API returned it |
+
+`/state` is the one that answers "is the API even sending this?", because it
+shows fields no metric is derived from — the blind spot `/metrics` cannot reveal.
+It reads the cache the poll loop already fills, so it costs no API call and
+cannot touch the 5-sessions/hour budget. It returns `503` when no state is
+cached, rather than serving a stale document.
+
+```sh
+curl -s localhost:8080/state | jq 'keys'                    # top-level fields
+curl -s localhost:8080/state | jq '.state.Input | keys'     # every input reported
+curl -s localhost:8080/state | jq '.age_seconds'
+```
+
+Only the state document is exposed. The *device* document carries the owner's
+email address, which is deliberately kept out of both metrics and this endpoint.
+
+In Grafana, the **All readings** table at the bottom of the Tank dashboard is the
+no-terminal equivalent: it lists every `hydros_input_*` series currently being
+exported, including anything unclassified, and grows on its own.
+
 Then in Grafana (both dashboards default to the **Thanos** datasource, not the
 2-day local Prometheus):
 
