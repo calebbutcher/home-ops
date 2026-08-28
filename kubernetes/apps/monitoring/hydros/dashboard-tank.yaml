@@ -855,7 +855,7 @@ data:
         {
           "id": 102,
           "type": "row",
-          "title": "State",
+          "title": "All readings",
           "gridPos": {
             "h": 1,
             "w": 24,
@@ -868,6 +868,96 @@ data:
         },
         {
           "id": 13,
+          "type": "table",
+          "title": "Every input the exporter sees",
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 28
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "filterable": false
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "footer": {
+              "show": false
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max by (__name__, name, field) ({__name__=~\"hydros_input_.*\", __name__!~\".*_fahrenheit\"})",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "Time 1": true
+                },
+                "renameByName": {
+                  "__name__": "Metric",
+                  "name": "Reading",
+                  "field": "Field",
+                  "Value": "Value"
+                }
+              }
+            }
+          ],
+          "description": "Live list of every reading pulled from the collective. Anything the exporter cannot classify still appears, as hydros_input_reading with its source field. For the raw document behind this, including fields no metric is derived from, curl the exporter's /state endpoint."
+        },
+        {
+          "id": 102,
+          "type": "row",
+          "title": "State",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 27
+          },
+          "collapsed": false,
+          "panels": [],
+          "datasource": null
+        },
+        {
+          "id": 14,
           "type": "state-timeline",
           "title": "Sensor alerts reported by HYDROS",
           "gridPos": {
@@ -945,7 +1035,7 @@ data:
           "description": "The controller's own alert flag per sensor. Alert text is not a label (it is unbounded); check the HYDROS app or the exporter log."
         },
         {
-          "id": 14,
+          "id": 15,
           "type": "state-timeline",
           "title": "Operating mode",
           "gridPos": {
