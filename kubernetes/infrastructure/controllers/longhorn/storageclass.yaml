@@ -24,17 +24,35 @@ parameters:
   staleReplicaTimeout: "30"
   dataLocality: best-effort
   fsType: ext4
-  # Opt these volumes OUT of the `default` recurring-job group and into trim instead.
-  # Every Longhorn volume joins `default` automatically unless it names a job here,
-  # which meant daily-backup was snapshotting the very data this class exists to
-  # treat as disposable. That is not just wasted backup: snapshots pin every block
-  # they reference, and Longhorn reclaims nothing without TRIM, so `actualSize` on a
-  # churny volume climbs to the *declared* size regardless of live usage. The Thanos
-  # compactor hit 93.6GB actual against 49.5G of real files on 2026-08-29 and filled
-  # worker-03 to 0 bytes, degrading three unrelated volumes.
-  #
-  # Longhorn stamps these labels at provision time, so this governs NEW volumes only —
-  # existing ones must be relabelled by hand. Order matters when doing that: add the
-  # scratch-trim label FIRST, because the controller re-adds `default` within seconds
-  # to any volume left with no recurring-job label at all.
+---
+# Same single-replica shape as longhorn-single, but for volumes that are pure
+# scratch — rebuilt from object storage on every start, never a copy of record.
+#
+# The difference is recurringJobSelector. Naming a job here keeps the volume OUT of
+# the `default` group, which every Longhorn volume joins automatically, so scratch
+# is no longer backed up nightly. That matters for more than wasted backup space:
+# snapshots pin every block they reference, and Longhorn reclaims nothing without
+# TRIM, so a high-churn volume's actualSize climbs to its *declared* size no matter
+# how little is live. The Thanos compactor reached 93.6GB actual against 49.5G of
+# real files and filled a node's disk to 0 bytes.
+#
+# Deliberately NOT folded into longhorn-single: that class also carries 24 CNPG
+# Postgres PVCs, which do want the nightly backup.
+#
+# Labels are stamped at provision time, so this only governs new volumes. To move an
+# existing one, add the scratch-trim label FIRST — the controller re-adds `default`
+# within seconds to any volume left with no recurring-job label at all.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-scratch
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "1"
+  staleReplicaTimeout: "30"
+  dataLocality: best-effort
+  fsType: ext4
   recurringJobSelector: '[{"name":"scratch-trim","isGroup":false}]'
