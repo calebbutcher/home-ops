@@ -14,10 +14,16 @@ reef-log publishes under the names the HYDROS exporter *would* use for the same
 reading:
 
 ```
-hydros_input_phosphate_ppm{name="Phosphate", compound="PO4", source="manual"}
-hydros_input_nitrate_ppm{name="Nitrate",     compound="NO3", source="manual"}
+hydros_input_phosphate_ppm{name="Phosphate",   basis="PO4", source="manual"}
+hydros_input_nitrate_ppm{name="Nitrate",       basis="NO3", source="manual"}
+hydros_input_alkalinity_dkh{name="Alkalinity", basis="dKH", source="manual"}
+hydros_input_specific_gravity{name="Salinity", basis="SG",  source="manual"}
+hydros_input_salinity_ppt{name="Salinity", basis="SG-derived", source="manual"}
 hydros_input_measured_timestamp_seconds{name="Phosphate", source="manual"}
 ```
+
+`hydros_input_alkalinity_dkh` is the name the exporter already reserves for a
+HYDROS alkalinity tester, so adding an Alky later joins this same series.
 
 That is deliberate, and it is the whole design. We control the metric name —
 `classify_input()` / `UNIT_METRICS` in the exporter decide it, not CoralVue — so
@@ -46,12 +52,33 @@ The dashboard does not use that form today; it queries
 metrics: adding a label changes series identity and would fork temperature and pH
 into new series, the same failure as the pod churn fixed in #414.
 
-### The convention is stored, not assumed
+### Salinity is the one that cannot share a name
+
+A HYDROS salinity probe reports **ppt** (~35); a refractometer reads **specific
+gravity** (~1.026). Publishing SG under `hydros_input_salinity_ppt` would merge
+1.026 with 35 and produce a nonsense series — the one place the merge design
+actively breaks if the names are chosen carelessly.
+
+So SG is stored and published as measured, and ppt is *derived* alongside it:
+the raw measurement is never lost, and a future probe still has a ppt series to
+land in. The dashboard shows SG, since that is what gets measured and acted on.
+
+The conversion is linear through two published reference points for SG at 25 °C
+referred to water at 25 °C — 1.0226 → 30 ppt and 1.0264 → 35 ppt — and checks
+out against a third (1.0210 → 27.9 vs a published 28). Good to about 0.2 ppt
+across the reef range. **It is wrong if the refractometer is calibrated at some
+other temperature**, which is why the SG value is the one stored.
+
+### The basis is stored, not assumed
 
 Phosphate can be reported as PO₄ or as P (3.07× apart), nitrate as NO₃ or as N
-(4.43×). Every row records which, because a number with no stated convention
-cannot be reconciled later at any price — whereas a wrongly-named metric can be
-fixed in one query.
+(4.43×), alkalinity as dKH, meq/L or ppm CaCO₃. Every row records which, because
+a number with no stated basis cannot be reconciled later at any price — whereas
+a wrongly-named metric can be fixed in one query.
+
+The label is `basis`, not `compound`: dKH and SG are not compounds. It was
+renamed in `v0.2.0`, while the database still held zero readings and the rename
+was therefore free.
 
 **If the API side is added later:** give it `ppm` in `UNIT_METRICS` plus a name
 token so it emits `hydros_input_phosphate_ppm`, *not* the generic

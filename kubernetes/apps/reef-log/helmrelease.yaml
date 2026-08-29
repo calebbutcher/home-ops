@@ -48,7 +48,7 @@ spec:
           app:
             image:
               repository: ghcr.io/calebbutcher/reef-log
-              tag: "0.1.0"
+              tag: "0.2.0"
             env:
               # The form posts naive local time, so this decides how a
               # "measured at" entry is read. Not UTC, unlike the exporter.
