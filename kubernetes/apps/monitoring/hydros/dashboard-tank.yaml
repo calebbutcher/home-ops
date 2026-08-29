@@ -853,7 +853,7 @@ data:
                 "showPoints": "always",
                 "spanNulls": true,
                 "pointSize": 7,
-                "axisSoftMin": 1.022,
+                "axisSoftMin": 1.02,
                 "axisSoftMax": 1.03,
                 "thresholdsStyle": {
                   "mode": "dashed"
@@ -866,6 +866,10 @@ data:
                     "color": "red",
                     "value": null
                   },
+                  {
+                    "color": "red",
+                    "value": 1.022
+                  }
                   {
                     "color": "yellow",
                     "value": 1.023
