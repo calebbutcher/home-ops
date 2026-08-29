@@ -236,11 +236,35 @@ data:
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "suffix:ppt",
-              "decimals": 2,
+              "unit": "none",
+              "decimals": 4,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1.023
+                  },
+                  {
+                    "color": "green",
+                    "value": 1.024
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1.027
+                  },
+                  {
+                    "color": "red",
+                    "value": 1.028
+                  }
+                ]
+              },
               "color": {
-                "mode": "fixed",
-                "fixedColor": "text"
+                "mode": "thresholds"
               }
             },
             "overrides": []
@@ -253,7 +277,7 @@ data:
               "fields": "",
               "values": false
             },
-            "colorMode": "value",
+            "colorMode": "background",
             "graphMode": "area",
             "textMode": "auto",
             "justifyMode": "auto"
@@ -265,7 +289,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "max by (name) (hydros_input_salinity_ppt)",
+              "expr": "max by (name) (hydros_input_specific_gravity)",
               "legendFormat": "{{name}}"
             }
           ]
@@ -338,9 +362,33 @@ data:
             "defaults": {
               "unit": "suffix:dKH",
               "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 7
+                  },
+                  {
+                    "color": "green",
+                    "value": 8
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 11
+                  },
+                  {
+                    "color": "red",
+                    "value": 12
+                  }
+                ]
+              },
               "color": {
-                "mode": "fixed",
-                "fixedColor": "text"
+                "mode": "thresholds"
               }
             },
             "overrides": []
@@ -353,7 +401,7 @@ data:
               "fields": "",
               "values": false
             },
-            "colorMode": "value",
+            "colorMode": "background",
             "graphMode": "area",
             "textMode": "auto",
             "justifyMode": "auto"
@@ -792,18 +840,47 @@ data:
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "suffix:ppt",
-              "decimals": 2,
+              "unit": "none",
+              "decimals": 4,
               "color": {
                 "mode": "palette-classic"
               },
               "custom": {
                 "drawStyle": "line",
-                "lineInterpolation": "smooth",
+                "lineInterpolation": "stepAfter",
                 "lineWidth": 2,
                 "fillOpacity": 8,
-                "showPoints": "never",
-                "spanNulls": false
+                "showPoints": "always",
+                "spanNulls": true,
+                "pointSize": 7,
+                "thresholdsStyle": {
+                  "mode": "dashed"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1.023
+                  },
+                  {
+                    "color": "green",
+                    "value": 1.024
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1.027
+                  },
+                  {
+                    "color": "red",
+                    "value": 1.028
+                  }
+                ]
               }
             },
             "overrides": []
@@ -826,11 +903,11 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "max by (name) (hydros_input_salinity_ppt)",
+              "expr": "max by (name) (hydros_input_specific_gravity)",
               "legendFormat": "{{name}}"
             }
           ],
-          "description": "Thresholds are deliberately unset until a few weeks of real readings establish this tank's normal range."
+          "description": "Specific gravity as read on a refractometer, green 1.024-1.027. reef-log also publishes a derived hydros_input_salinity_ppt so a future HYDROS salinity probe -- which reports ppt, not SG -- lands in a series this one can be compared against rather than merged into. See the All readings table for it."
         },
         {
           "id": 12,
@@ -911,11 +988,40 @@ data:
               },
               "custom": {
                 "drawStyle": "line",
-                "lineInterpolation": "smooth",
+                "lineInterpolation": "stepAfter",
                 "lineWidth": 2,
                 "fillOpacity": 8,
-                "showPoints": "never",
-                "spanNulls": false
+                "showPoints": "always",
+                "spanNulls": true,
+                "pointSize": 7,
+                "thresholdsStyle": {
+                  "mode": "dashed"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 7
+                  },
+                  {
+                    "color": "green",
+                    "value": 8
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 11
+                  },
+                  {
+                    "color": "red",
+                    "value": 12
+                  }
+                ]
               }
             },
             "overrides": []
@@ -942,7 +1048,7 @@ data:
               "legendFormat": "{{name}}"
             }
           ],
-          "description": "Thresholds are deliberately unset until a few weeks of real readings establish this tank's normal range."
+          "description": "Green 8-11 dKH. Hand-entered via reef-log today, under the metric name the exporter reserves for a HYDROS alkalinity tester -- add one and its readings join this same series."
         },
         {
           "id": 14,
