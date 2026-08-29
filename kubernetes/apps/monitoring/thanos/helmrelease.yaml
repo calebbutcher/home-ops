@@ -198,15 +198,32 @@ spec:
       # anywhere else in this chart: on local-path a dead node left compaction
       # completely stopped (no second replica to carry it) until that node returned.
       #
-      # Keep 20Gi even though steady-state usage is under 1Mi. The number is not
-      # sized for what compaction leaves behind, it is sized for what compaction
-      # needs *while running* — the largest group of blocks it has to hold on disk at
-      # once. Longhorn is thin-provisioned, so the unused portion costs scheduling
-      # budget rather than real disk.
+      # Sized for what compaction needs *while running*, not what it leaves behind
+      # (steady-state usage is under 1Mi). 20Gi was wrong and halted the compactor on
+      # 2026-08-27 with "preallocate: no space left on device".
+      #
+      # The top raw compaction tier here is 14d, built from seven 2d blocks, and
+      # `thanos compact` has no flag to tune those ranges. So the peak is every source
+      # block on disk at once plus the output block being written beside them:
+      #   32.8Gi  7x 2d source blocks (largest group, 2026-08-13 -> 08-27)
+      # + ~26Gi   the 14d block they merge into (prior 14d outputs ran 21-25Gi)
+      # = ~59Gi   peak, against a 20Gi volume
+      #
+      # This was always true; it only started failing here. Until the move to
+      # longhorn-single (see above) this PVC was local-path, which enforces no quota,
+      # so the 20Gi was a number nothing checked and compaction quietly overran it —
+      # the 07-30 -> 08-13 block is 25.59Gi of output built from ~33Gi of sources on
+      # that volume. Longhorn made the declared size real for the first time and the
+      # next 14d window hit the wall.
+      #
+      # 100Gi leaves ~70% headroom, which the growth rate justifies: series count in
+      # the current window rose 589k -> 759k. Longhorn schedules against the declared
+      # size, so this costs scheduling budget rather than real disk — but note that it
+      # is a one-way door, as Longhorn volumes cannot be shrunk.
       persistence:
         enabled: true
         storageClass: longhorn-single
-        size: 20Gi
+        size: 100Gi
       # Downsample/retention policy in the object store (empty = keep forever).
       retention:
         resolutionRaw: 30d
