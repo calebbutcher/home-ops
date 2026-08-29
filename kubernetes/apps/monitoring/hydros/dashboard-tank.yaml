@@ -853,6 +853,8 @@ data:
                 "showPoints": "always",
                 "spanNulls": true,
                 "pointSize": 7,
+                "axisSoftMin": 1.022,
+                "axisSoftMax": 1.03,
                 "thresholdsStyle": {
                   "mode": "dashed"
                 }
