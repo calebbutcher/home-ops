@@ -875,6 +875,10 @@ data:
                     "value": 1.024
                   },
                   {
+                    "color": "green",
+                    "value": 1.026
+                  },
+                  {
                     "color": "yellow",
                     "value": 1.027
                   },
