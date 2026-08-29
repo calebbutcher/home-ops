@@ -15,3 +15,32 @@ spec:
     - default
   retain: 7
   concurrency: 2
+---
+# Space reclamation for volumes whose contents are disposable and high-churn — see
+# the `recurringJobSelector` on the longhorn-single StorageClass for who gets this.
+#
+# Two things make this necessary. Longhorn never punches out blocks freed by file
+# deletion unless something issues TRIM, so a volume that repeatedly writes and
+# deletes tens of GB grows until `actualSize` reaches the *declared* size no matter
+# how little is live. And joining `default` above made it worse rather than safer:
+# a backup takes a snapshot, snapshots pin every block they reference, and
+# `remove-snapshots-during-filesystem-trim` is false — so retaining 7 of them meant
+# nothing was ever reclaimable.
+#
+# 2026-08-29 the Thanos compactor volume held 49.5G of files against a 93.6GB
+# actualSize and took worker-03's disk to 0 bytes, degrading three unrelated
+# volumes. Volumes selecting this job are deliberately NOT in `default`: nightly
+# backups of a scratch dir cost real space to protect data we can rebuild.
+#
+# Off the hour so it never lands on top of the 04:00 backup sweep.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: scratch-trim
+  namespace: longhorn-system
+spec:
+  cron: "23 * * * *"
+  task: filesystem-trim
+  groups: []
+  retain: 0
+  concurrency: 1
