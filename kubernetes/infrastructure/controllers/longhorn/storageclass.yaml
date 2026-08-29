@@ -5,6 +5,12 @@
 # top of the host Ceph pool. dataLocality best-effort keeps that one replica on the
 # pod's node for local-disk performance; it rebuilds elsewhere if the pod moves.
 # The 2-replica default class `longhorn` is created by the HelmRelease.
+#
+# NOTE: a StorageClass's `parameters` are immutable, so editing anything below does
+# NOT reconcile — Flux will fail the apply until the class is deleted and recreated.
+# Deleting it is safe and non-disruptive: existing PVs keep their own copy of these
+# settings and only new provisioning consults the class. This is not the default
+# class, so nothing silently falls back to it during the gap.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -18,3 +24,17 @@ parameters:
   staleReplicaTimeout: "30"
   dataLocality: best-effort
   fsType: ext4
+  # Opt these volumes OUT of the `default` recurring-job group and into trim instead.
+  # Every Longhorn volume joins `default` automatically unless it names a job here,
+  # which meant daily-backup was snapshotting the very data this class exists to
+  # treat as disposable. That is not just wasted backup: snapshots pin every block
+  # they reference, and Longhorn reclaims nothing without TRIM, so `actualSize` on a
+  # churny volume climbs to the *declared* size regardless of live usage. The Thanos
+  # compactor hit 93.6GB actual against 49.5G of real files on 2026-08-29 and filled
+  # worker-03 to 0 bytes, degrading three unrelated volumes.
+  #
+  # Longhorn stamps these labels at provision time, so this governs NEW volumes only —
+  # existing ones must be relabelled by hand. Order matters when doing that: add the
+  # scratch-trim label FIRST, because the controller re-adds `default` within seconds
+  # to any volume left with no recurring-job label at all.
+  recurringJobSelector: '[{"name":"scratch-trim","isGroup":false}]'
