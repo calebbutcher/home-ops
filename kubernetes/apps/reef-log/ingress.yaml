@@ -1,0 +1,36 @@
+---
+# Internal-only and fully behind Authentik. The app has no login of its own —
+# forwardAuth is the entire auth boundary, which is why it fronts / rather than
+# splitting an open API path.
+#
+# This does NOT gate Prometheus: the ServiceMonitor scrapes the ClusterIP
+# Service directly and never traverses Traefik.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: reef-log
+  namespace: reef-log
+  annotations:
+    # CNAME to the single self-healing ingress record rather than a second A
+    # record, so a Traefik IP change moves one record.
+    external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-internal-only@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - reef-log.int.nerdbox.dev
+      secretName: reef-log-tls
+  rules:
+    - host: reef-log.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: reef-log
+                port:
+                  number: 8080

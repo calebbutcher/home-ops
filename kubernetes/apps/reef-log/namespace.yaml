@@ -1,0 +1,12 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: reef-log
+  labels:
+    # Baseline is satisfied by construction here: one unprivileged Python
+    # process, one PVC, no host access. Deliberately its own namespace rather
+    # than monitoring, which is pinned to privileged for Alloy's dbus and
+    # AppArmor needs — a user-facing write path has no business inheriting that.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
