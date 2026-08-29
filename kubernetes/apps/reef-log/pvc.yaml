@@ -1,0 +1,22 @@
+---
+# Holds the SQLite database of hand-entered tank readings.
+#
+# No ReplicationSource, same call as coc-trade-bot: Longhorn's `daily-backup`
+# RecurringJob covers the `default` group that every volume joins. It matters
+# even less here — every reading reaches Thanos on the next scrape and lives
+# there for two years, so losing this file would cost the entry log, not the
+# history the dashboards draw from.
+#
+# RWO and SQLite's single-writer rule ⇒ the controller uses strategy: Recreate.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: reef-log-data
+  namespace: reef-log
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 1Gi

@@ -1,0 +1,110 @@
+---
+# reef-log — a form for tank parameters that are measured with a test kit rather
+# than a probe, so no controller API ever reports them.
+#
+# Publishes under the same metric names the HYDROS exporter would use for the
+# same reading, tagged source="manual", so the two merge on `max by (name)` if
+# CoralVue ever exposes them. See docs/reef-log-deploy.md.
+#
+# Built from github.com/calebbutcher/reef-log.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: reef-log
+  namespace: reef-log
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "5.1.0"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    defaultPodOptions:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        # The Longhorn volume is root-owned on first attach; without this the
+        # uid-1000 process cannot create the database.
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+    controllers:
+      reef-log:
+        replicas: 1
+        # RWO volume + SQLite's single writer: two pods must never overlap.
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/calebbutcher/reef-log
+              tag: "0.1.0"
+            env:
+              # The form posts naive local time, so this decides how a
+              # "measured at" entry is read. Not UTC, unlike the exporter.
+              TZ: "America/New_York"
+              REEFLOG_DB: /data/reef-log.db
+            probes:
+              liveness: &probe
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 8080
+                  initialDelaySeconds: 5
+                  periodSeconds: 30
+                  failureThreshold: 3
+              readiness: *probe
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 128Mi
+    service:
+      app:
+        controller: reef-log
+        ports:
+          http:
+            port: 8080
+    persistence:
+      data:
+        existingClaim: reef-log-data
+        globalMounts:
+          - path: /data
+    serviceMonitor:
+      app:
+        serviceName: reef-log
+        endpoints:
+          - port: http
+            scheme: http
+            path: /metrics
+            interval: 1m
+            scrapeTimeout: 10s
+            # Same reasoning as hydros-exporter: pod name and IP are part of
+            # series identity, so without this every redeploy mints a fresh
+            # series set and the dashboard shows two of each reading. Safe
+            # because replicas: 1 + Recreate means two pods never scrape at once.
+            relabelings:
+              - action: replace
+                targetLabel: instance
+                replacement: reef-log
+            metricRelabelings:
+              - action: labeldrop
+                regex: pod

@@ -174,6 +174,31 @@ is dropped, it just lands untyped. On this tank that initially caught
 "Skimmer Overflow"; `overflow` was added as a token in `v0.2.0` rather than
 carrying an env override for it.
 
+### Phosphate and nitrate are not available from the API
+
+Settled 2026-08-28 — do not re-investigate. They are configured as static inputs
+on the controller and set by hand, but no endpoint returns them:
+
+- There are only **7 endpoints**. `/api/v1/device` returns four fields;
+  `/overrides*` are outputs-only ("only stored overrides appear here").
+- The word "input" appears **twice in the entire 1542-line spec**, both
+  describing the one `Input` object.
+- The live state document's `Input` holds exactly the 4 physical
+  probes/switches, and `hydros_input_reading` — which exports every numeric
+  field of any unrecognised input — has **zero samples**.
+- `TpDevice` and `WiFiOutlet`, the only other plausible containers, are `{}`.
+
+They are recorded through [reef-log](reef-log-deploy.md) instead, publishing
+`hydros_input_phosphate_ppm` / `hydros_input_nitrate_ppm` with `source="manual"`
+so the series merge if the API ever gains them. **If you add the API side, emit
+those same names** rather than letting the values fall through to
+`hydros_input_reading`.
+
+💡 The live document also carries top-level keys the collector ignores —
+`TpDevice`, `WiFiOutlet`, `linkStatus`, `build`, `canBusError`, `canBusTraffic`.
+Both device containers are empty today, so a third-party device or WiFi outlet
+added later would be **silently invisible** until the collector reads them.
+
 To type a sensor the heuristic misses, set `HYDROS_INPUT_UNITS` in the
 HelmRelease:
 
