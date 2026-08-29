@@ -40,7 +40,7 @@ spec:
               # tools, minus the marketing site, pricing pages and GitHub-stars
               # widget that the plain `bentopdf` image carries.
               repository: ghcr.io/alam00000/bentopdf-simple
-              tag: "2.8.7"
+              tag: "2.8.8"
             probes:
               # Plain GET / against the nginx docroot. Cheap, and unlike the
               # chart's default TCP probe it fails if nginx is listening but no
