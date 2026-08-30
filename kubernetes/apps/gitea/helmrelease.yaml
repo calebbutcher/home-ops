@@ -34,7 +34,7 @@ spec:
           app:
             image:
               repository: docker.io/gitea/gitea
-              tag: "1.27.2"
+              tag: "1.27.3"
             env:
               TZ: UTC
               # gitea runs as this uid/gid; must match the VolSync moverSecurityContext.
