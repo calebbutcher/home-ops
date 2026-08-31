@@ -55,12 +55,40 @@ spec:
           app:
             image:
               repository: lscr.io/linuxserver/bambustudio
-              # LSIO tag convention, as used by the media apps: upstream version
-              # + the LinuxServer build number. Bambu's own versions are
-              # zero-padded and four-part, which is not semver — renovate.json
-              # carries an explicit `versioning:` regex for this package so the
-              # ordering is defined rather than guessed.
-              tag: v02.08.02.61-ls167
+              # ⚠️ HELD at the last Ubuntu Noble (24.04) build, 2026-04-25.
+              # DO NOT bump without re-testing — every newer tag is broken here,
+              # and the failure looks like a working deployment.
+              #
+              # Upstream's 2026-04-29 "rebase to resolute" moved the image to
+              # Ubuntu 26.04, whose gdk-pixbuf 2.44 routes ALL image loading
+              # through glycin, and glycin runs its loaders inside bubblewrap
+              # (`bwrap --unshare-all`). bwrap's first act is
+              # `mount(NULL, "/", MS_REC|MS_SLAVE)`, which the containerd
+              # default AppArmor profile denies. GTK then cannot load
+              # Adwaita's image-missing.svg, hits a g_assert, and aborts.
+              #
+              # Net effect on v02.08.02.61-ls167: the Selkies desktop streams
+              # perfectly — websocket up, H264 capture running, labwc and
+              # Xwayland alive — but Bambu Studio itself never starts, so the
+              # browser shows a BLACK SCREEN and the pod stays 1/1 Running with
+              # zero restarts. Nothing in `kubectl get` looks wrong.
+              #
+              # Measured on the cluster, not inferred:
+              #   - seccomp is already Unconfined (Seccomp: 0), so that is not it
+              #   - userns creation works (`unshare -Ur` succeeds)
+              #   - the mount is what fails, and only under AppArmor
+              #   - securityContext.appArmorProfile.type: Unconfined gets past
+              #     the mount but the loader STILL exits 1 — so going to PSA
+              #     privileged to allow it would buy exactly nothing. This was
+              #     tested end-to-end before being ruled out.
+              # There is no non-bwrap SVG path in the image: gdk-pixbuf 2.44
+              # ships no loader modules on disk at all, and hiding either the
+              # glycin config or the bwrap binary just changes the error.
+              #
+              # Re-test after upstream picks up a glycin/gdk-pixbuf fix; the
+              # check is one line — `ps aux | grep bin/bambu-studio` in the pod.
+              # Renovate is disabled for this package meanwhile (renovate.json).
+              tag: v02.06.00.51-ls143
             env:
               # LinuxServer convention: the uid/gid the app is dropped to, and
               # what fsGroup above matches so /config is writable.
