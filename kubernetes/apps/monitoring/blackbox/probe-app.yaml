@@ -43,6 +43,9 @@ spec:
       static:
         - http://audiobookshelf.audiobookshelf:13378
         - http://authentik-server.authentik:80
+        # Answers 401 unauthenticated (CUSTOM_USER/PASSWORD basic auth), which
+        # http_app accepts — the point is that the Selkies process is answering.
+        - http://bambustudio.bambustudio:3000
         - http://bazarr.media:6767
         - http://bentopdf.tools:80
         - http://gitea-app.gitea:3000

@@ -1,0 +1,27 @@
+---
+# /config is the container user's entire home directory: Bambu Studio settings,
+# printer and filament profiles, the Bambu account session, and any project or
+# sliced-output files left in the desktop. None of it is reproducible from git,
+# so it gets VolSync on top of the Longhorn daily-backup RecurringJob every
+# volume joins (see replicationsource.yaml).
+#
+# 10Gi is a real 10Gi. Longhorn schedules against the DECLARED size, not the
+# used size (issue #349, the cluster is already ~250% over-provisioned), so this
+# consumes 10Gi of scheduling budget on two replicas the moment it is created.
+# Sized for a working project library rather than a scratch dir; if that turns
+# out to be generous, shrinking means a new PVC and a restic restore, so err
+# once rather than twice.
+#
+# RWO plus a single desktop session ⇒ the controller uses strategy: Recreate.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bambustudio-config
+  namespace: bambustudio
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 10Gi

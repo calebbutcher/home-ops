@@ -1,0 +1,51 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bambustudio
+  namespace: bambustudio
+  annotations:
+    # CNAME to the single self-healing ingress record (see the Traefik Service)
+    # rather than a second A record, so a Traefik IP change moves one record.
+    external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # Authentik in front, and the app's own basic auth behind it (see the
+    # envFrom note in helmrelease.yaml). Two layers rather than the usual one
+    # because the streamed desktop includes a terminal with passwordless sudo —
+    # this is the most powerful thing on any ingress in the cluster.
+    #
+    # internal-only is what makes ".int" an enforced boundary rather than a
+    # naming convention: Traefik routes on the Host header, so without it this
+    # hostname answers a request sent straight to the WAN IP.
+    #
+    # No CrowdSec bouncer/AppSec: those are reserved for the ingresses actually
+    # exposed to the internet (immich, seerr, home-assistant). Nothing outside
+    # the RFC1918 ranges can reach this router at all.
+    #
+    # The shared security-headers middleware sets only nosniff, X-Frame-Options
+    # and HSTS — no CSP and no COOP/COEP — so it cannot interfere with the
+    # Selkies canvas the way a stricter header set could (cf. bentopdf, where
+    # COOP/COEP is load-bearing).
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-internal-only@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - bambustudio.int.nerdbox.dev
+      secretName: bambustudio-tls
+  rules:
+    - host: bambustudio.int.nerdbox.dev
+      http:
+        paths:
+          # The desktop stream is a websocket on this same host and path prefix.
+          # Traefik proxies the Upgrade handshake natively — no annotation
+          # needed — and forwardAuth runs on the upgrade request like any other,
+          # with the session cookie already present.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bambustudio
+                port:
+                  number: 3000

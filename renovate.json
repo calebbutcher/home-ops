@@ -128,6 +128,16 @@
     },
     {
       "description": [
+        "linuxserver/bambustudio tags are v<upstream>-ls<build>, e.g. v02.08.02.61-ls167, where the upstream part is Bambu's own zero-padded four-component version.",
+        "Leading zeros are not semver and the default docker versioning has no defined ordering for them, so the parse is pinned explicitly here rather than left to chance — the same reason k3s below carries a regex versioning. Without it a bump from 02.08 to 02.10 is not reliably seen as newer.",
+        "The other lscr.io images in this repo (sonarr, radarr, prowlarr, bazarr) need no such rule: their upstream versions are ordinary unpadded semver."
+      ],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["lscr.io/linuxserver/bambustudio"],
+      "versioning": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)-ls(?<revision>\\d+)$"
+    },
+    {
+      "description": [
         "MariaDB. The operator does not set MARIADB_AUTO_UPGRADE, so the on-disk system tables are NOT migrated automatically, and MariaDB cannot be downgraded in place.",
         "Patch releases within a minor are routine; anything larger is a database migration."
       ],
