@@ -1,0 +1,167 @@
+---
+# Bambu Studio — the Bambu Lab slicer, run as a container and streamed to the
+# browser, so the profiles, printer definitions and project files live on the
+# cluster instead of on one workstation.
+#
+# WHAT THIS IMAGE ACTUALLY IS
+# linuxserver/bambustudio is a Selkies image (rebased off KasmVNC on 2025-07-12):
+# a full GTK desktop app running against a Wayland compositor inside the
+# container, with the framebuffer streamed to the browser over a websocket. That
+# makes it the first desktop container in this cluster, and it is why three
+# things below look nothing like the other apps — a 1Gi /dev/shm, TCP probes
+# instead of HTTP, and a memory limit sized for a slicer rather than a web app.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: bambustudio
+  namespace: bambustudio
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "5.1.0"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    defaultPodOptions:
+      securityContext:
+        # fsGroup ONLY — deliberately no runAsUser/runAsNonRoot. LinuxServer
+        # images boot s6-overlay as root, chown /config, then drop to PUID/PGID
+        # themselves; forcing a non-root uid breaks the init before the app ever
+        # starts. Same call as speedtest, and the reason the namespace is PSA
+        # 'baseline' rather than 'restricted'.
+        #
+        # OnRootMismatch skips the recursive chown once ownership is correct —
+        # worth having here, where /config can grow to a real project library.
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+    controllers:
+      bambustudio:
+        # One RWO volume holding one desktop session's home directory. Recreate
+        # tears the old pod down fully before the new one starts; RollingUpdate
+        # would briefly run two Bambu Studio instances over the same config.
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: lscr.io/linuxserver/bambustudio
+              # LSIO tag convention, as used by the media apps: upstream version
+              # + the LinuxServer build number. Bambu's own versions are
+              # zero-padded and four-part, which is not semver — renovate.json
+              # carries an explicit `versioning:` regex for this package so the
+              # ordering is defined rather than guessed.
+              tag: v02.08.02.61-ls167
+            env:
+              # LinuxServer convention: the uid/gid the app is dropped to, and
+              # what fsGroup above matches so /config is writable.
+              PUID: "1000"
+              PGID: "1000"
+              TZ: America/New_York
+              DARK_MODE: "true"
+              #
+              # Deliberately unset: DRINODE / DRI_NODE / AUTO_GPU. There is no
+              # /dev/dri on these Proxmox VMs, so rendering is software
+              # (llvmpipe). Setting them without the device would only produce a
+              # confusing startup failure.
+              #
+              # Also unset: PIXELFLUX_WAYLAND. It defaults to true and the image
+              # falls back to X11 on its own if the CPU lacks AVX2, which is the
+              # behaviour we want either way. Set it to "false" to force X11 if
+              # the Wayland path ever misbehaves.
+            envFrom:
+              # CUSTOM_USER + PASSWORD — the image's own HTTP basic auth. This
+              # is a SECOND boundary behind the Authentik forwardAuth on the
+              # ingress, not a substitute for it: the image ships a web terminal
+              # with passwordless sudo, and forwardAuth is a Traefik-edge
+              # control that does nothing about a request originating inside the
+              # cluster. Basic auth covers that gap.
+              - secretRef:
+                  name: bambustudio-secret
+            probes:
+              # tcpSocket, NOT httpGet — and this is load-bearing. With
+              # CUSTOM_USER/PASSWORD set, Selkies answers an unauthenticated
+              # GET / with 401, and the kubelet treats any status >= 400 as a
+              # probe failure. An httpGet probe here would CrashLoopBackOff a
+              # completely healthy pod, and the logs would show a working app.
+              #
+              # A TCP connect is a weaker signal, but the real health check for
+              # a desktop stream is "does the canvas render", which no probe can
+              # express. The blackbox Probe in monitoring/blackbox/probe-app.yaml
+              # does the HTTP half (its http_app module accepts 401).
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: 3000
+                  periodSeconds: 10
+                  # 5 minutes. First boot chowns /config and initialises the
+                  # user's home directory from scratch before the compositor
+                  # comes up.
+                  failureThreshold: 30
+              liveness: &probe
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: 3000
+                  periodSeconds: 30
+                  failureThreshold: 5
+              readiness: *probe
+            # No container-level securityContext, unlike reef-log. s6-overlay
+            # needs a writable rootfs (readOnlyRootFilesystem is out), and
+            # allowPrivilegeEscalation: false would set no_new_privs, which
+            # disables the image's sudo. That is arguably a feature here — but
+            # it is a change to make and verify on its own, after the desktop is
+            # confirmed working, not on the deploy that has to prove the image
+            # runs at all. See docs/bambustudio-deploy.md.
+            resources:
+              requests:
+                cpu: 500m
+                memory: 2Gi
+              limits:
+                # Slicing a large model is the spiky part, and the 1Gi tmpfs at
+                # /dev/shm below counts against this same cgroup — so this is
+                # ~5Gi of application headroom, not 6.
+                memory: 6Gi
+    service:
+      app:               # identifier `app` ⇒ Service takes the release name
+        controller: bambustudio
+        ports:
+          http:
+            # 3000, not 3001. Upstream documents 3000 as "HTTP, must be proxied"
+            # and 3001 as the same UI behind a self-signed cert. Traefik
+            # terminates TLS at the edge, so the browser still gets the secure
+            # context Selkies needs for WebCodecs and clipboard access; routing
+            # to 3001 would only add a self-signed backend cert for Traefik to
+            # ignore.
+            port: 3000
+    persistence:
+      # The container user's home directory — settings, printer/filament
+      # profiles, projects, sliced output. Backed up by VolSync.
+      config:
+        existingClaim: bambustudio-config
+        globalMounts:
+          - path: /config
+      # Upstream requires --shm-size=1gb for the desktop images; the 64Mi
+      # default would starve the compositor and the browser-facing encoder.
+      #
+      # ⚠️ medium: Memory means this is a tmpfs charged to the pod's memory
+      # cgroup, so it is subtracted from the 6Gi limit above rather than coming
+      # out of node page cache. Raising one without the other is a mistake.
+      shm:
+        type: emptyDir
+        medium: Memory
+        sizeLimit: 1Gi
+        globalMounts:
+          - path: /dev/shm
