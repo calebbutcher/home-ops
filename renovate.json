@@ -128,13 +128,15 @@
     },
     {
       "description": [
-        "linuxserver/bambustudio tags are v<upstream>-ls<build>, e.g. v02.08.02.61-ls167, where the upstream part is Bambu's own zero-padded four-component version.",
-        "Leading zeros are not semver and the default docker versioning has no defined ordering for them, so the parse is pinned explicitly here rather than left to chance — the same reason k3s below carries a regex versioning. Without it a bump from 02.08 to 02.10 is not reliably seen as newer.",
-        "The other lscr.io images in this repo (sonarr, radarr, prowlarr, bazarr) need no such rule: their upstream versions are ordinary unpadded semver."
+        "linuxserver/bambustudio is PINNED and Renovate is disabled for it. Every build after upstream's 2026-04-29 'rebase to resolute' is broken under containerd: Ubuntu 26.04's gdk-pixbuf 2.44 loads all images through glycin, glycin runs its loaders in `bwrap --unshare-all`, and bwrap's initial mount is denied by the containerd default AppArmor profile. GTK then fails to load an Adwaita SVG and aborts.",
+        "This is disabled rather than left to a review-each-PR rule because the failure is SILENT: the Selkies desktop still streams and the pod stays 1/1 Running with no restarts — only the browser shows a black screen, because Bambu Studio itself never starts. A merged bump would look completely healthy in every dashboard and alert we have.",
+        "Granting AppArmor Unconfined does NOT fix it (tested end-to-end — the loader still exits 1), so there is no securityContext escape hatch worth taking.",
+        "Re-enable once upstream ships a glycin/gdk-pixbuf fix. Verify by running the candidate tag and checking `ps aux | grep bin/bambu-studio` inside the pod. Keep the versioning regex below when re-enabling: Bambu's versions are zero-padded four-part, which default docker versioning cannot order."
       ],
       "matchDatasources": ["docker"],
       "matchPackageNames": ["lscr.io/linuxserver/bambustudio"],
-      "versioning": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)-ls(?<revision>\\d+)$"
+      "versioning": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)-ls(?<revision>\\d+)$",
+      "enabled": false
     },
     {
       "description": [

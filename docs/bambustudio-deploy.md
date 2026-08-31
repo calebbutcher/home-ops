@@ -162,19 +162,26 @@ kubectl -n bambustudio logs deploy/bambustudio     # s6 init, then Selkies liste
 
 End to end:
 
-1. `https://bambustudio.int.nerdbox.dev` → Authentik login → basic-auth prompt → the Bambu
+1. **Confirm the application is actually running** — do this first, before opening a
+   browser, and after every image change:
+   ```bash
+   kubectl -n bambustudio exec deploy/bambustudio -- ps aux | grep "[b]in/bambu-studio"
+   ```
+   Empty output means the black-screen failure below, *not* a slow start. A healthy pod
+   with a streaming desktop proves nothing on its own.
+3. `https://bambustudio.int.nerdbox.dev` → Authentik login → basic-auth prompt → the Bambu
    Studio desktop renders. Confirm mouse, keyboard and the canvas stream respond — this is
    the part no manifest check can prove.
-2. Add the printer by IP (see Caveats), or sign in to Bambu Cloud.
-3. Slice a test model; confirm the output is under `/config` and survives
+4. Add the printer by IP (see Caveats), or sign in to Bambu Cloud.
+5. Slice a test model; confirm the output is under `/config` and survives
    `kubectl -n bambustudio rollout restart deploy/bambustudio`.
-4. Force the first backup rather than waiting for 08:05:
+6. Force the first backup rather than waiting for 08:05:
    ```bash
    kubectl -n bambustudio patch replicationsource bambustudio-config --type merge \
      -p '{"spec":{"trigger":{"manual":"first"}}}'
    kubectl -n bambustudio get replicationsource bambustudio-config -o yaml | yq '.status'
    ```
-5. Confirm the blackbox probe is green in Grafana:
+7. Confirm the blackbox probe is green in Grafana:
    `probe_success{instance="http://bambustudio.bambustudio:3000"}`.
 
 ## Caveats
@@ -200,6 +207,76 @@ End to end:
   1Gi tmpfs comes out of the pod's 6Gi cgroup rather than node page cache. Raising one
   without the other is a mistake.
 - **Tag format.** Upstream tags are `v<zero-padded 4-part version>-ls<build>`, e.g.
-  `v02.08.02.61-ls167`. Leading zeros are not semver, so `renovate.json` carries an
-  explicit `versioning:` regex for this package — without it, a bump from `02.08` to
-  `02.10` is not reliably seen as newer. The other `lscr.io` images here need no such rule.
+  `v02.06.00.51-ls143`. Leading zeros are not semver, so `renovate.json` carries an
+  explicit `versioning:` regex for this package. The other `lscr.io` images here need no
+  such rule.
+
+## ⚠️ The image version is pinned — do not bump it
+
+**Held at `v02.06.00.51-ls143` (2026-04-25), the last Ubuntu Noble build.** Renovate is
+disabled for this package in `renovate.json`. Every newer tag is broken under containerd.
+
+### Symptom
+
+The browser shows a **black screen** after both logins. Everything else looks perfect:
+
+- pod `1/1 Running`, zero restarts, probes green
+- the Selkies stack is fully healthy — websocket connected, `SUCCESS: Capture started`,
+  H264 CPU encoding, audio flowing
+- `labwc` and `Xwayland` are running
+- the blackbox probe is green and no alert fires
+
+The desktop is streaming correctly; it is just **empty**. `ps aux` in the pod shows no
+`bin/bambu-studio` process at all — the application crashes during GTK init and the
+compositor happily streams the resulting blank desktop.
+
+### Cause
+
+Upstream's 2026-04-29 *"rebase to resolute"* moved the image to Ubuntu 26.04. There,
+gdk-pixbuf 2.44 routes **all** image loading through [glycin](https://gitlab.gnome.org/GNOME/glycin),
+and glycin runs its loaders inside bubblewrap (`bwrap --unshare-all`). bwrap's first act is
+`mount(NULL, "/", MS_REC|MS_SLAVE)`, which the containerd default AppArmor profile denies:
+
+```
+bwrap: Failed to make / slave: Permission denied
+```
+
+GTK then cannot load `Adwaita/scalable/status/image-missing.svg`, hits a `g_assert`, and
+aborts:
+
+```
+Gtk:ERROR:../../../gtk/gtkiconhelper.c:495:ensure_surface_for_gicon:
+  assertion failed (error == NULL): Failed to load .../image-missing.svg:
+  Loader process exited early with status '1'
+Aborted (core dumped)
+```
+
+### What was ruled out, and how
+
+Measured on the cluster rather than inferred — worth recording so nobody re-runs it:
+
+| Hypothesis | Result |
+|---|---|
+| seccomp blocking `unshare` | **No** — `Seccomp: 0` in `/proc/self/status`, already unconfined. |
+| user namespaces unavailable | **No** — `unshare -Ur echo ok` succeeds in the pod. |
+| AppArmor blocking the mount | **Yes** — this is the proximate failure. |
+| `securityContext.appArmorProfile.type: Unconfined` fixes it | **No.** Tested end-to-end in a throwaway PSA-`privileged` namespace: it gets *past* the mount, but the loader still exits 1. **Dropping this namespace to PSA `privileged` would buy nothing** — do not do it. |
+| A non-bwrap SVG path exists | **No.** gdk-pixbuf 2.44 ships no loader modules on disk (`/usr/lib/*/gdk-pixbuf-2.0/*/loaders/` does not exist). Hiding the glycin SVG config gives `Unsupported image format`; hiding the `bwrap` binary gives `Could not spawn`. Both still abort. |
+
+The last Noble build was verified working under **identical** PSA `baseline` settings with
+no AppArmor change: `bin/bambu-studio` running at ~650 MB RSS.
+
+### When to revisit
+
+Re-test when upstream picks up a glycin/gdk-pixbuf fix. The check is one line:
+
+```bash
+kubectl -n bambustudio exec deploy/bambustudio -- ps aux | grep "[b]in/bambu-studio"
+```
+
+Output means it works; empty means the black screen is back. Re-enable the Renovate rule
+in `renovate.json` at the same time, keeping the `versioning:` regex.
+
+Because the failure is silent — nothing in Prometheus, Alertmanager or the blackbox probe
+can see it — **the running-process check is the only verification that counts** after any
+image change here.
