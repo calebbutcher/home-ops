@@ -26,3 +26,12 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 3
+  values:
+    # Chart default is 360h (15d), the only cert in the cluster with a renewal
+    # margin under 30d. Our CertificateExpiringSoon alert fires at 21d remaining
+    # (calibrated for Let's Encrypt: 90d cert renewing ~30d out), so the barman
+    # pair tripped it for ~6d every 90d while renewal was not even due yet.
+    # 720h matches crowdsec and Let's Encrypt, and gives the mTLS pair that gates
+    # every Postgres backup a 30d cushion instead of 15d if renewal ever fails.
+    certificate:
+      renewBefore: 720h
