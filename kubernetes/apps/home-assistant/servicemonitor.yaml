@@ -23,6 +23,7 @@
 #     filter:
 #       include_entities:
 #         - climate.thermostat_1_nativezone_thermostat_1_nativezone
+#         - sensor.hvac_system_status_code
 #         - binary_sensor.thermostat_1_blower_active
 #         - number.thermostat_1_fan_speed
 #         - sensor.thermostat_1_current_compressor_speed
@@ -64,10 +65,39 @@
 # outdoor-temperature sensors. Renaming that one too is cosmetic — it changes
 # friendly_name and nothing else.
 #
-# Two Nexia sensors deliberately absent because they cannot export: the string
-# sensors `sensor.thermostat_1_system_status` ("Cooling") and
-# `..._zone_status` ("Idle") fail state_as_number() and emit no metric at all.
-# climate_action carries the same information numerically.
+# Two Nexia sensors are absent because they CANNOT export: the string sensors
+# `sensor.thermostat_1_system_status` ("Cooling") and `..._zone_status` ("Idle")
+# fail state_as_number() and emit no metric at all.
+#
+# system_status is worth having anyway — it distinguishes "Waiting..." (the
+# compressor lockout between cycles) from a genuinely idle system, which
+# climate_action reports identically, and on a dual-stage furnace it is the only
+# place staging could surface. So a template sensor mirrors it as a number:
+#
+#   template:
+#     - sensor:
+#         - name: "HVAC System Status Code"
+#           unique_id: hvac_system_status_code
+#           state: >-
+#             {% set s = states('sensor.thermostat_1_system_status') %}
+#             {{ {'System Idle': 0, 'Waiting...': 1, 'Cooling': 2}.get(s, -1) }}
+#           availability: >-
+#             {{ states('sensor.thermostat_1_system_status')
+#                not in ['unknown', 'unavailable'] }}
+#
+# It exports as homeassistant_sensor_state (unitless bucket, no device_class).
+# The -1 default is the load-bearing part and is NOT a placeholder to tidy up:
+# the furnace had not run when this was written, so its status vocabulary was
+# unknown, and mapping guesses would have recorded fiction. -1 means "Nexia said
+# something new" — HVACStatusUnmapped fires, you read the live string, add it to
+# the map, and staging is captured from that day on. The `availability:` guard
+# matters: without it every HA restart would blip -1 while the source is
+# `unavailable` and cry wolf.
+#
+# Nothing exports compressor speed usefully. The AC compressor is single-stage
+# and the furnace is gas, so current/requested_compressor_speed read a constant
+# 0.0 even while actively cooling. They stay in the list — two series, free, and
+# the raw truth is then on record — but nothing charts or records them.
 # ---------------------------------------------------------------------------
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
