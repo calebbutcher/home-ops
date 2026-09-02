@@ -1,0 +1,145 @@
+---
+# HVAC recording rules + alerts, fed by the home-assistant ServiceMonitor
+# (kubernetes/apps/home-assistant/servicemonitor.yaml).
+#
+# Why recording rules at all, when Thanos downsampling already keeps 2 years?
+# Because the raw signal is a 0/1 gauge sampled every 60s, and every "how much
+# did it run" question is an avg_over_time() across weeks or months of that.
+# Recording the hourly average once, at ingest, means the dashboard reads a
+# handful of points instead of tens of thousands, and it survives downsampling
+# cleanly (a mean-of-means over equal-length windows is still the mean).
+#
+# No `release:` label needed — ruleSelectorNilUsesHelmValues: false — and the
+# `severity` labels route via the catch-all Discord AlertmanagerConfig.
+#
+# All temperatures arrive in Celsius: the HA integration converts °F sources on
+# export (units map both C and F onto the _celsius metric), so the °F our
+# thermostat actually reports is already gone by the time we see it. Dashboards
+# convert back; the rules deliberately don't, so stored data stays in one unit.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: home-assistant-hvac
+  namespace: monitoring
+spec:
+  groups:
+    - name: home-assistant-hvac.rules
+      interval: 1m
+      rules:
+        # Fraction of the trailing hour each HVAC action was active, 0..1, per
+        # climate entity and action (heating/cooling/idle/fan/drying/off).
+        # Multiply by 60 for minutes; avg over a day for daily runtime.
+        #
+        # Every rule aggregates down to `entity` (plus `action`) and drops
+        # everything else. Two separate reasons, both about identity holding
+        # still for two years:
+        #
+        #   * pod/instance/endpoint churn on each HA redeploy (hostNetwork,
+        #     Recreate strategy).
+        #   * friendly_name is a DISPLAY name, not an identity — renaming the
+        #     device in the HA UI rewrites it on every one of its entities,
+        #     which would silently start a brand-new recorded series and leave
+        #     the old one dangling. entity_id survives a device rename; the
+        #     friendly_name does not. (Confirmed the hard way: renaming this
+        #     thermostat's device moved every friendly_name and touched no
+        #     entity_id.) Alert annotations still read friendly_name off the raw
+        #     metrics, so the human-readable name is not lost — it just does not
+        #     get to define a two-year time series.
+        #
+        # max, not avg, because the duplicates are the same reading seen twice,
+        # not two readings.
+        - record: hvac:climate_action:ratio1h
+          expr: >-
+            max by (entity, action) (
+              avg_over_time(homeassistant_climate_action[1h])
+            )
+
+        # Blower runtime — moves independently of the compressor (circulate mode,
+        # fan-only, and the tail of every cycle), so it is not derivable from
+        # climate_action.
+        - record: hvac:blower_active:ratio1h
+          expr: >-
+            max by (entity) (
+              avg_over_time(
+                homeassistant_binary_sensor_state{entity="binary_sensor.thermostat_1_blower_active"}[1h]
+              )
+            )
+
+        # Variable-speed modulation, hourly mean of 0..100%. A system that runs
+        # long at 40% is doing the right thing; the runtime ratio alone reads
+        # that as "ran constantly", which is why this is recorded next to it.
+        - record: hvac:compressor_speed_percent:avg1h
+          expr: >-
+            max by (entity) (
+              avg_over_time(
+                homeassistant_sensor_unit_percent{entity="sensor.thermostat_1_current_compressor_speed"}[1h]
+              )
+            )
+
+    - name: home-assistant-hvac.alerts
+      rules:
+        # The scrape itself. Covers a bad/expired long-lived token (401), the
+        # prometheus: block being dropped from configuration.yaml on an edit, and
+        # HA simply being down. 15m so an HA restart doesn't page.
+        - alert: HomeAssistantMetricsDown
+          expr: up{job="home-assistant"} == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Home Assistant /api/prometheus unreachable"
+            description: >-
+              Prometheus cannot scrape Home Assistant. HVAC history stops
+              accumulating while this is firing. Most likely causes: the
+              long-lived access token in home-assistant-prometheus-token is
+              expired or wrong (401), the `prometheus:` block was lost from
+              configuration.yaml, or HA is down.
+
+        # An entity going unavailable is silent otherwise: the integration stops
+        # emitting its climate_*/sensor_* series entirely, so the dashboard just
+        # shows a flat line rather than a gap. entity_available is still exported
+        # while unavailable, which is what makes this detectable at all.
+        #
+        # Only one entity can match: the HA-side filter exports the Nexia zone
+        # alone. The offline nest and lg_thinq climate entities are deliberately
+        # not exported, so this cannot fire on equipment nobody is fixing.
+        - alert: HVACEntityUnavailable
+          expr: homeassistant_entity_available{domain="climate"} == 0
+          for: 6h
+          labels:
+            severity: warning
+          annotations:
+            summary: "HVAC entity {{ $labels.entity }} unavailable in Home Assistant"
+            description: >-
+              {{ $labels.friendly_name }} ({{ $labels.entity }}) has been
+              unavailable for 6h, so it is exporting no HVAC metrics — HVAC
+              history has a hole in it for as long as this is firing. Check the
+              Nexia cloud integration in Home Assistant.
+
+        # Metrics present but frozen. HA keeps serving the last known value of a
+        # stale entity indefinitely, so `up == 1` and the series keeps a constant
+        # value — indistinguishable from a genuinely idle system on a graph.
+        #
+        # The `unless` is not optional. An entity that goes `unavailable` also
+        # stops updating last_updated, and the integration deliberately KEEPS
+        # entity_available and last_updated_time_seconds for ignored states while
+        # dropping every other series — so without this guard, one dead cloud
+        # integration fires both this and HVACEntityUnavailable for the same
+        # cause.
+        - alert: HVACMetricsStale
+          expr: >-
+            (
+              time() - max by (entity, friendly_name) (
+                homeassistant_last_updated_time_seconds{domain="climate"}
+              ) > 21600
+            )
+            unless on (entity) homeassistant_entity_available{domain="climate"} == 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "HVAC entity {{ $labels.entity }} has not updated in 6h"
+            description: >-
+              {{ $labels.friendly_name }} is still being scraped but its state
+              has not changed in over 6 hours. The exported values are frozen,
+              not idle — treat any runtime figures over this window as suspect.

@@ -88,3 +88,5 @@ resources:
   - hydros/helmrelease.yaml
   - hydros/dashboard-tank.yaml
   - hydros/dashboard-equipment.yaml
+  - kube-prometheus-stack/prometheusrule-hvac.yaml
+  - home-assistant/dashboard-hvac.yaml
