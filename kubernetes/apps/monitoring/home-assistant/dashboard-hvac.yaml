@@ -14,6 +14,12 @@
 #
 # Temperatures are converted °C -> °F in every query: the HA integration exports
 # Celsius regardless of what the thermostat reports.
+#
+# Nothing here charts compressor speed. The AC compressor is single-stage and
+# the furnace is gas, so Nexia reports a constant 0 — a panel of it would be a
+# flat line masquerading as a measurement. The Nexia status string covers the
+# same ground with real data, via the template sensor described in
+# servicemonitor.yaml.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -109,7 +115,8 @@ data:
                     "value": null
                   }
                 ]
-              }
+              },
+              "mappings": []
             },
             "overrides": []
           },
@@ -168,7 +175,8 @@ data:
                     "value": null
                   }
                 ]
-              }
+              },
+              "mappings": []
             },
             "overrides": []
           },
@@ -227,7 +235,8 @@ data:
                     "value": null
                   }
                 ]
-              }
+              },
+              "mappings": []
             },
             "overrides": []
           },
@@ -286,7 +295,8 @@ data:
                     "value": null
                   }
                 ]
-              }
+              },
+              "mappings": []
             },
             "overrides": []
           },
@@ -318,7 +328,7 @@ data:
         {
           "id": 6,
           "type": "stat",
-          "title": "Compressor",
+          "title": "Status",
           "gridPos": {
             "h": 4,
             "w": 4,
@@ -331,21 +341,52 @@ data:
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "percent",
+              "unit": "none",
               "decimals": 0,
               "color": {
-                "mode": "fixed",
+                "mode": "thresholds",
                 "fixedColor": "text"
               },
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "text",
+                    "color": "red",
                     "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 0
                   }
                 ]
-              }
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "-1": {
+                      "text": "UNMAPPED",
+                      "color": "red",
+                      "index": 0
+                    },
+                    "0": {
+                      "text": "System Idle",
+                      "color": "green",
+                      "index": 1
+                    },
+                    "1": {
+                      "text": "Waiting\u2026",
+                      "color": "yellow",
+                      "index": 2
+                    },
+                    "2": {
+                      "text": "Cooling",
+                      "color": "blue",
+                      "index": 3
+                    }
+                  }
+                }
+              ]
             },
             "overrides": []
           },
@@ -359,7 +400,7 @@ data:
             },
             "colorMode": "value",
             "graphMode": "area",
-            "textMode": "auto",
+            "textMode": "value",
             "justifyMode": "auto"
           },
           "targets": [
@@ -369,10 +410,11 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "max (homeassistant_sensor_unit_percent{entity=\"sensor.thermostat_1_current_compressor_speed\"})",
-              "legendFormat": "compressor"
+              "expr": "max (homeassistant_sensor_state{entity=\"sensor.hvac_system_status_code\"})",
+              "legendFormat": "status"
             }
-          ]
+          ],
+          "description": "Nexia's own status. Distinguishes \"Waiting\u2026\" (compressor lockout between cycles) from a genuinely idle system \u2014 climate_action reports both as idle. UNMAPPED means Nexia said something new."
         },
         {
           "id": 7,
@@ -404,7 +446,8 @@ data:
                     "value": null
                   }
                 ]
-              }
+              },
+              "mappings": []
             },
             "overrides": []
           },
@@ -580,10 +623,11 @@ data:
         },
         {
           "id": 11,
-          "type": "timeseries",
-          "title": "Compressor modulation",
+          "type": "state-timeline",
+          "title": "Mode",
+          "description": "What the thermostat is SET to, as opposed to what it is doing. Without this, a quiet week reads the same whether the system was idle or switched off \u2014 and that distinction is what makes runtime comparable across seasons and across years.",
           "gridPos": {
-            "h": 8,
+            "h": 4,
             "w": 12,
             "x": 12,
             "y": 12
@@ -594,40 +638,42 @@ data:
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "percent",
-              "decimals": 0,
               "custom": {
-                "drawStyle": "line",
-                "lineInterpolation": "smooth",
-                "lineWidth": 2,
-                "fillOpacity": 15,
-                "showPoints": "never",
-                "spanNulls": true,
-                "axisPlacement": "auto",
-                "gradientMode": "opacity",
-                "stacking": {
-                  "mode": "none",
-                  "group": "A"
-                }
+                "lineWidth": 0,
+                "fillOpacity": 80,
+                "spanNulls": false
               },
               "color": {
                 "mode": "palette-classic"
               },
-              "min": 0,
-              "max": 100
+              "unit": "none",
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
             },
             "overrides": []
           },
           "options": {
+            "mergeValues": true,
+            "showValue": "never",
+            "alignValue": "center",
+            "rowHeight": 0.9,
+            "perPage": 20,
             "legend": {
               "displayMode": "list",
               "placement": "bottom",
-              "showLegend": true,
-              "calcs": []
+              "showLegend": true
             },
             "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
+              "mode": "single",
+              "sort": "none"
             }
           },
           "targets": [
@@ -637,23 +683,106 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "max (homeassistant_sensor_unit_percent{entity=\"sensor.thermostat_1_current_compressor_speed\"})",
-              "legendFormat": "current"
+              "expr": "max by (mode) (homeassistant_climate_mode{entity=\"climate.thermostat_1_nativezone_thermostat_1_nativezone\"} == 1)",
+              "legendFormat": "{{mode}}"
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "type": "state-timeline",
+          "title": "System status",
+          "description": "Nexia's own status string, mapped to a number by a template sensor in configuration.yaml (HA cannot export string states). UNMAPPED in red means Nexia reported something new \u2014 read the live value off sensor.thermostat_1_system_status and add it to the mapping. That is how dual-stage furnace states get captured the first winter they appear.",
+          "gridPos": {
+            "h": 4,
+            "w": 12,
+            "x": 12,
+            "y": 16
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "lineWidth": 0,
+                "fillOpacity": 80,
+                "spanNulls": false
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "none",
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "-1": {
+                      "text": "UNMAPPED",
+                      "color": "red",
+                      "index": 0
+                    },
+                    "0": {
+                      "text": "System Idle",
+                      "color": "green",
+                      "index": 1
+                    },
+                    "1": {
+                      "text": "Waiting\u2026",
+                      "color": "yellow",
+                      "index": 2
+                    },
+                    "2": {
+                      "text": "Cooling",
+                      "color": "blue",
+                      "index": 3
+                    }
+                  }
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
             },
+            "overrides": []
+          },
+          "options": {
+            "mergeValues": true,
+            "showValue": "never",
+            "alignValue": "center",
+            "rowHeight": 0.9,
+            "perPage": 20,
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
             {
-              "refId": "B",
+              "refId": "A",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "max (homeassistant_sensor_unit_percent{entity=\"sensor.thermostat_1_requested_compressor_speed\"})",
-              "legendFormat": "requested"
+              "expr": "max (homeassistant_sensor_state{entity=\"sensor.hvac_system_status_code\"})",
+              "legendFormat": "status"
             }
-          ],
-          "description": "Variable-speed output. Long runs at low modulation are the system working correctly \u2014 runtime alone would read that as 'ran constantly'. Requested persistently above current means it is unable to keep up."
+          ]
         },
         {
-          "id": 12,
+          "id": 13,
           "type": "stat",
           "title": "Total runtime over the selected range",
           "gridPos": {
@@ -682,7 +811,8 @@ data:
                     "value": null
                   }
                 ]
-              }
+              },
+              "mappings": []
             },
             "overrides": []
           },
@@ -712,7 +842,7 @@ data:
           ]
         },
         {
-          "id": 13,
+          "id": 14,
           "type": "timeseries",
           "title": "Blower \u2014 minutes per hour",
           "gridPos": {
@@ -777,7 +907,7 @@ data:
           "description": "Tracked separately because the blower runs without the compressor: circulate mode, fan-only, and the tail of every cycle."
         },
         {
-          "id": 14,
+          "id": 15,
           "type": "row",
           "title": "Comfort",
           "gridPos": {
@@ -791,7 +921,7 @@ data:
           "datasource": null
         },
         {
-          "id": 15,
+          "id": 16,
           "type": "timeseries",
           "title": "Temperature",
           "gridPos": {
@@ -872,7 +1002,7 @@ data:
           "description": "Home Assistant exports every temperature in Celsius regardless of the thermostat's own units, so these are converted back to \u00b0F here."
         },
         {
-          "id": 16,
+          "id": 17,
           "type": "timeseries",
           "title": "Humidity",
           "gridPos": {
@@ -952,7 +1082,7 @@ data:
           ]
         },
         {
-          "id": 17,
+          "id": 18,
           "type": "timeseries",
           "title": "Cooling runtime vs outdoor temperature",
           "gridPos": {

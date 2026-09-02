@@ -68,13 +68,13 @@ spec:
         # Variable-speed modulation, hourly mean of 0..100%. A system that runs
         # long at 40% is doing the right thing; the runtime ratio alone reads
         # that as "ran constantly", which is why this is recorded next to it.
-        - record: hvac:compressor_speed_percent:avg1h
-          expr: >-
-            max by (entity) (
-              avg_over_time(
-                homeassistant_sensor_unit_percent{entity="sensor.thermostat_1_current_compressor_speed"}[1h]
-              )
-            )
+        # There is deliberately NO compressor-speed rule. The AC compressor is
+        # single-stage and the furnace is gas, so Nexia has no modulation to
+        # report: current/requested_compressor_speed read a constant 0.0 across
+        # the entire recorder window, including while actively cooling. The two
+        # entities are still scraped (two series, free) so the raw truth is on
+        # record, but recording a constant into two years of storage would only
+        # dress it up as a measurement.
 
     - name: home-assistant-hvac.alerts
       rules:
@@ -115,6 +115,32 @@ spec:
               unavailable for 6h, so it is exporting no HVAC metrics — HVAC
               history has a hole in it for as long as this is firing. Check the
               Nexia cloud integration in Home Assistant.
+
+        # The Nexia system-status string carries detail climate_action does not —
+        # notably furnace staging on a dual-stage furnace, and the "Waiting..."
+        # compressor lockout. It is a string, so it cannot export; a template
+        # sensor in configuration.yaml maps it to a number, with -1 meaning "a
+        # string we have not mapped yet".
+        #
+        # This alert is that -1 becoming visible. The furnace has not run since
+        # setup, so its vocabulary is genuinely unknown and was not guessed at.
+        # `for: 5m` keeps transients quiet; a shorter blip is not lost either
+        # way, because the -1 is already a recorded sample and survives
+        # downsampling as a min.
+        - alert: HVACStatusUnmapped
+          expr: homeassistant_sensor_state{entity="sensor.hvac_system_status_code"} == -1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Nexia reported an HVAC system status we do not map"
+            description: >-
+              sensor.thermostat_1_system_status is reporting a string the
+              template sensor does not recognise, so it records as -1. Read the
+              live value in Home Assistant and add it to the mapping in
+              configuration.yaml. Almost certainly a heating state appearing for
+              the first time this season — capture it and furnace staging starts
+              being measured.
 
         # Metrics present but frozen. HA keeps serving the last known value of a
         # stale entity indefinitely, so `up == 1` and the series keeps a constant
