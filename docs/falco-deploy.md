@@ -178,6 +178,14 @@ quiet Discord threshold safe.
 
 ### Rotating or muting Discord
 
+> **Status: the Discord path is MUTED as of 2026-09-01.** Both `Component`
+> manifests have their `DISCORD_WEBHOOKURL` / `DISCORD_MINIMUMPRIORITY` env
+> commented out — the feed was too noisy to be read, even with the syscall side
+> pinned at `critical`. Detection is unaffected: rules still evaluate, events
+> still reach Loki and Prometheus, and the `prometheusrule-falco.yaml` health
+> alerts (a different path — Alertmanager, not falcosidekick) are still live.
+> Re-enable by uncommenting, after tuning the noisy rules out.
+
 falcosidekick enables its Discord output only when the webhook is non-empty.
 Blanking the value is therefore a clean kill switch for the Discord path alone:
 Falco keeps detecting, keeps writing JSON to stdout (and so to Loki), and keeps
