@@ -40,34 +40,34 @@ spec:
           # Merged additively over the operator's defaults: containers merge by
           # `name` and env has patchMergeKey `name` under server-side apply, so
           # the operator's image, ports and probes all survive this patch.
-          env:
-            # Non-empty enables the Discord output; empty disables it cleanly.
-            # The Secret ships empty (see discord-webhook.sops.yaml) so that a
-            # deploy before the webhook exists is a no-op rather than a retry
-            # loop against a fake URL.
-            - name: DISCORD_WEBHOOKURL
-              valueFrom:
-                secretKeyRef:
-                  name: falco-discord-webhook
-                  key: webhook-url
-            # Start LOUD-PROOF, not loud. Of the 25 stable rules, exactly 3 are
-            # CRITICAL, so this is a very narrow, very high-signal Discord feed on
-            # day one — among them "Drop and execute new binary in container",
-            # which is close to the definition of post-exploitation.
-            #
-            # This is not the end state. The full 25-rule stream is in Loki from
-            # the first minute via stdout, and in Prometheus as
-            # falcosecurity_falco_rules_matches_total{rule_name}. Watch which
-            # rules actually fire here for a week or two, add a tuning Rulesfile
-            # for the confirmed-benign ones (the usual suspects in a cluster this
-            # operator-dense are "Contact K8S API Server From Container" and
-            # "Terminal shell in container"), and only then drop this to warning
-            # or notice.
-            #
-            # Doing it the other way round — open the firehose, then tune — is how
-            # a security channel becomes a channel nobody reads.
-            - name: DISCORD_MINIMUMPRIORITY
-              value: critical
+          # ── Discord output MUTED (2026-09-01) ─────────────────────────
+          # Even pinned at `critical`, the syscall feed was noisy enough that the
+          # channel stopped being read — which is worse than no channel. Muted
+          # here rather than by blanking the webhook Secret so the URL survives
+          # and re-enabling is uncommenting this block.
+          #
+          # Nothing is lost while this is off: Falco still evaluates every rule,
+          # every detection still goes to stdout → Loki and to Prometheus as
+          # falcosecurity_falco_rules_matches_total{rule_name}. Only the push to
+          # Discord stops. The health alerts in prometheusrule-falco.yaml (Falco
+          # itself dying, dropping events or going blind) are Alertmanager, not
+          # falcosidekick, and are deliberately left on.
+          #
+          # Before re-enabling: use the Loki/Prometheus history to find the rules
+          # that actually fired, exempt the confirmed-benign ones in
+          # rulesfile-tuning.yaml, and only then turn the feed back on.
+          #
+          # env:
+          #   # Non-empty enables the Discord output; empty disables it cleanly.
+          #   - name: DISCORD_WEBHOOKURL
+          #     valueFrom:
+          #       secretKeyRef:
+          #         name: falco-discord-webhook
+          #         key: webhook-url
+          #   # Of the 25 stable rules, exactly 3 are CRITICAL — this was already
+          #   # the narrowest useful threshold, and still too loud.
+          #   - name: DISCORD_MINIMUMPRIORITY
+          #     value: critical
           resources:
             requests:
               cpu: 10m

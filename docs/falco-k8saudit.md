@@ -15,6 +15,16 @@ process with no idea who asked for it. Neither is a substitute for the other.
 > because people deploy `k8saudit` expecting enrichment and get a control-plane
 > audit trail instead. Enrichment was already working before this existed.
 
+> **Status: the Discord path is MUTED as of 2026-09-01.** Everything below about
+> priorities, thresholds and rule tuning still describes the config, but
+> `DISCORD_WEBHOOKURL` / `DISCORD_MINIMUMPRIORITY` are commented out in
+> `config/component-falcosidekick.yaml` on both instances — after four rounds of
+> exemptions the feed was still too loud to read. Audit events keep flowing to
+> stdout → Loki and to Prometheus, so the tuning work below can continue against
+> real history; only the push to Discord stops. It was not raised to `error`
+> instead because that leaves 2 of 48 rules live, which is a channel that looks
+> configured and alerts on nothing.
+
 ## Two halves, and the order matters
 
 Unlike everything else in this repo, this is **not** purely GitOps. Nothing in the
