@@ -4,7 +4,9 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - restic-secret.sops.yaml
+  - prometheus-token.sops.yaml
   - pvc.yaml
   - helmrelease.yaml
   - ingress.yaml
   - replicationsource.yaml
+  - servicemonitor.yaml

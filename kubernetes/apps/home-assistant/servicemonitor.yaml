@@ -1,0 +1,96 @@
+---
+# Scrape Home Assistant's built-in `prometheus` integration so HVAC history
+# survives longer than HA's recorder does. The recorder keeps ~2 weeks; Thanos
+# keeps 30d raw / 180d @5m / 730d @1h, which turns "did the AC run more this
+# July than last July" into an answerable question.
+#
+# The scrape hits the ClusterIP Service directly, so it bypasses the ingress
+# entirely — no Traefik, no CrowdSec, no forwardAuth. HA runs hostNetwork, so
+# the Service endpoint is the node IP; that's fine, the selector still resolves.
+#
+# `/api/prometheus` is served with `requires_auth: true` (see the HA-side config
+# block below). That is NOT optional here — HA is internet-facing, and turning
+# auth off would publish every exported entity's state to anyone who finds the
+# path. Hence the bearer token rather than a bare scrape.
+#
+# ---------------------------------------------------------------------------
+# HA-side configuration (lives in the config PVC, NOT in git — kept here so the
+# scrape and the thing it scrapes are documented together):
+#
+#   prometheus:
+#     namespace: homeassistant
+#     requires_auth: true
+#     filter:
+#       include_entities:
+#         - climate.thermostat_1_nativezone_thermostat_1_nativezone
+#         - binary_sensor.thermostat_1_blower_active
+#         - number.thermostat_1_fan_speed
+#         - sensor.thermostat_1_current_compressor_speed
+#         - sensor.thermostat_1_requested_compressor_speed
+#         - sensor.thermostat_1_outdoor_temperature
+#         - sensor.thermostat_1_humidity
+#         - sensor.thermostat_1_heating_humidify_setpoint
+#         - sensor.thermostat_1_cooling_dehumidify_setpoint
+#         - sensor.thermostat_1_nativezone_thermostat_1_nativezone_temperature
+#
+# An `include_entities`-only filter is allow-list semantics: nothing else in the
+# house is exported. Deliberate — the default exports every entity HA holds,
+# including device_tracker/person state, which is both high-cardinality and not
+# something to keep for two years just to answer a furnace question.
+#
+# The list is the Nexia zone "Hallway NativeZone" and its sensors, and nothing
+# else. HA also holds climate.hallway (nest) and climate.air_conditioner
+# (lg_thinq); both are offline hardware, not broken integrations, and neither is
+# the system this exists to measure. Leaving them out keeps
+# HVACEntityUnavailable meaningful — with them included it would fire
+# permanently on equipment nobody intends to fix, and an alert that is always
+# firing is an alert nobody reads.
+#
+# The entity_id is the identity everything here keys on — the filter above, the
+# hvac:* recording rules, and every dashboard query. It is stable across a
+# device rename in the HA UI: the zone device is now displayed as "Hallway
+# Thermostat", and not one entity_id moved. Renaming the *entity* would move it,
+# and would split the history at the rename, so that is the change to avoid once
+# collection starts.
+#
+# What a device rename DOES move is the friendly_name label, on every entity of
+# that device at once. Nothing here keys on it: dashboard queries aggregate it
+# away with max(), the recording rules drop it deliberately, and only alert
+# annotations read it — where a current display name is exactly what you want.
+#
+# Note the entities below span TWO Nexia devices: the zone device ("Hallway
+# Thermostat") owns the climate entity and its temperature, while a second
+# device still displayed as "Hallway" owns the compressor, blower, humidity and
+# outdoor-temperature sensors. Renaming that one too is cosmetic — it changes
+# friendly_name and nothing else.
+#
+# Two Nexia sensors deliberately absent because they cannot export: the string
+# sensors `sensor.thermostat_1_system_status` ("Cooling") and
+# `..._zone_status` ("Idle") fail state_as_number() and emit no metric at all.
+# climate_action carries the same information numerically.
+# ---------------------------------------------------------------------------
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: home-assistant
+  namespace: home-assistant
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: home-assistant
+      app.kubernetes.io/instance: home-assistant
+      app.kubernetes.io/service: home-assistant
+  endpoints:
+    - port: http
+      path: /api/prometheus
+      # HVAC state moves on a minutes timescale and the whole job is ~40 series,
+      # so 1m is both plenty and cheap. HA renders the page from an in-memory
+      # registry (no device round-trip), but it does it on the event loop, so
+      # don't tighten this without a reason.
+      interval: 1m
+      scrapeTimeout: 30s
+      authorization:
+        type: Bearer
+        credentials:
+          name: home-assistant-prometheus-token
+          key: token
