@@ -15,7 +15,7 @@ spec:
       # touch this config (external S3, monolithic, dashboards/rules disabled, no
       # enterprise/canary/minio); helm-template renders the same monolithic
       # StatefulSet + our runtime config unchanged bar benign new defaults.
-      version: "18.11.7"
+      version: "18.12.1"
       sourceRef:
         kind: HelmRepository
         name: grafana-community
