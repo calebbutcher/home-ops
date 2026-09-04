@@ -33,7 +33,7 @@ spec:
           app:
             image:
               repository: ghcr.io/dgtlmoon/changedetection.io
-              tag: "0.55.8"
+              tag: "0.60.3"
             env:
               TZ: UTC
               # Used to build correct absolute links in Discord/Apprise notifications.
