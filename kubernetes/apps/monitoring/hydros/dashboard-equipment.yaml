@@ -5,8 +5,10 @@
 # Defaults to THANOS, not the local Prometheus -- prometheusSpec.retention is 2d
 # and the point of this dashboard is long-run reef trends.
 #
-# Generated, not hand-edited. Every query is aggregated (max by ...) because the
-# exporter's series carry pod/instance labels that change on each redeploy.
+# Panel ids and gridPos are hand-managed and Grafana fails silently on both, so
+# edit this JSON with a script that checks them -- see docs/reef-log-deploy.md.
+# Every query is aggregated (max by ...) because the exporter's series carry
+# pod/instance labels that change on each redeploy.
 apiVersion: v1
 kind: ConfigMap
 metadata:

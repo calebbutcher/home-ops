@@ -5,8 +5,10 @@
 # Defaults to THANOS, not the local Prometheus -- prometheusSpec.retention is 2d
 # and the point of this dashboard is long-run reef trends.
 #
-# Generated, not hand-edited. Every query is aggregated (max by ...) because the
-# exporter's series carry pod/instance labels that change on each redeploy.
+# Panel ids and gridPos are hand-managed and Grafana fails silently on both, so
+# edit this JSON with a script that checks them -- see docs/reef-log-deploy.md.
+# Every query is aggregated (max by ...) because the exporter's series carry
+# pod/instance labels that change on each redeploy.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -427,13 +429,87 @@ data:
           ]
         },
         {
+          "id": 20,
+          "type": "stat",
+          "title": "Calcium",
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 5
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "suffix:ppm",
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 380
+                  },
+                  {
+                    "color": "green",
+                    "value": 400
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 450
+                  },
+                  {
+                    "color": "red",
+                    "value": 480
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "area",
+            "textMode": "auto",
+            "justifyMode": "auto"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max by (name) (hydros_input_calcium_ppm)",
+              "legendFormat": "{{name}}"
+            }
+          ]
+        },
+        {
           "id": 6,
           "type": "stat",
           "title": "Phosphate",
           "gridPos": {
             "h": 4,
             "w": 6,
-            "x": 6,
+            "x": 12,
             "y": 5
           },
           "datasource": {
@@ -507,7 +583,7 @@ data:
           "gridPos": {
             "h": 4,
             "w": 6,
-            "x": 12,
+            "x": 18,
             "y": 5
           },
           "datasource": {
@@ -579,10 +655,10 @@ data:
           "type": "stat",
           "title": "Exporter",
           "gridPos": {
-            "h": 4,
-            "w": 6,
-            "x": 18,
-            "y": 5
+            "h": 3,
+            "w": 24,
+            "x": 0,
+            "y": 9
           },
           "datasource": {
             "type": "prometheus",
@@ -658,7 +734,7 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 9
+            "y": 12
           },
           "collapsed": false,
           "panels": [],
@@ -672,7 +748,7 @@ data:
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 10
+            "y": 13
           },
           "datasource": {
             "type": "prometheus",
@@ -756,7 +832,7 @@ data:
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 10
+            "y": 13
           },
           "datasource": {
             "type": "prometheus",
@@ -840,7 +916,7 @@ data:
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 17
+            "y": 20
           },
           "datasource": {
             "type": "prometheus",
@@ -935,7 +1011,7 @@ data:
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 17
+            "y": 20
           },
           "datasource": {
             "type": "prometheus",
@@ -991,7 +1067,7 @@ data:
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 24
+            "y": 27
           },
           "datasource": {
             "type": "prometheus",
@@ -1069,14 +1145,99 @@ data:
           "description": "Green 8-11 dKH. Hand-entered via reef-log today, under the metric name the exporter reserves for a HYDROS alkalinity tester -- add one and its readings join this same series."
         },
         {
+          "id": 21,
+          "type": "timeseries",
+          "title": "Calcium",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 27
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "suffix:ppm",
+              "decimals": 0,
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "stepAfter",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "always",
+                "spanNulls": true,
+                "pointSize": 7,
+                "thresholdsStyle": {
+                  "mode": "dashed"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 380
+                  },
+                  {
+                    "color": "green",
+                    "value": 400
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 450
+                  },
+                  {
+                    "color": "red",
+                    "value": 480
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max by (name) (hydros_input_calcium_ppm)",
+              "legendFormat": "{{name}}"
+            }
+          ],
+          "description": "Green 400-450 ppm, paired with the 8-11 dKH alkalinity band beside it -- corals consume the two together, so calcium falling alongside alkalinity is uptake, while either one moving alone points at dosing or a bad test. Hand-entered from a test kit via reef-log, so the line steps at the moment each result was recorded. The query is source-agnostic, so if a tester ever reports this reading the two merge into one series with no dashboard change."
+        },
+        {
           "id": 14,
           "type": "timeseries",
           "title": "Phosphate",
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 12,
-            "y": 24
+            "x": 0,
+            "y": 34
           },
           "datasource": {
             "type": "prometheus",
@@ -1160,8 +1321,8 @@ data:
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 0,
-            "y": 31
+            "x": 12,
+            "y": 34
           },
           "datasource": {
             "type": "prometheus",
@@ -1244,9 +1405,9 @@ data:
           "title": "Probe drift (uncalibrated raw)",
           "gridPos": {
             "h": 7,
-            "w": 12,
-            "x": 12,
-            "y": 31
+            "w": 24,
+            "x": 0,
+            "y": 41
           },
           "datasource": {
             "type": "prometheus",
@@ -1302,7 +1463,7 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 38
+            "y": 48
           },
           "collapsed": false,
           "panels": [],
@@ -1316,7 +1477,7 @@ data:
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 39
+            "y": 49
           },
           "datasource": {
             "type": "prometheus",
@@ -1394,7 +1555,7 @@ data:
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 39
+            "y": 49
           },
           "datasource": {
             "type": "prometheus",
@@ -1455,7 +1616,7 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 45
+            "y": 55
           },
           "collapsed": false,
           "panels": [],
@@ -1469,7 +1630,7 @@ data:
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 46
+            "y": 56
           },
           "datasource": {
             "type": "prometheus",
