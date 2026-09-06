@@ -463,7 +463,7 @@ data:
                   },
                   {
                     "color": "yellow",
-                    "value": 450
+                    "value": 451
                   },
                   {
                     "color": "red",
@@ -1194,7 +1194,7 @@ data:
                   },
                   {
                     "color": "yellow",
-                    "value": 450
+                    "value": 451
                   },
                   {
                     "color": "red",
@@ -1227,7 +1227,7 @@ data:
               "legendFormat": "{{name}}"
             }
           ],
-          "description": "Green 400-450 ppm, paired with the 8-11 dKH alkalinity band beside it -- corals consume the two together, so calcium falling alongside alkalinity is uptake, while either one moving alone points at dosing or a bad test. Hand-entered from a test kit via reef-log, so the line steps at the moment each result was recorded. The query is source-agnostic, so if a tester ever reports this reading the two merge into one series with no dashboard change."
+          "description": "Green 400-450 ppm inclusive -- 450 is high but acceptable, so yellow starts at 451 (Grafana threshold steps are inclusive lower bounds, which would otherwise paint an exactly-450 reading yellow). Paired with the 8-11 dKH alkalinity band beside it -- corals consume the two together, so calcium falling alongside alkalinity is uptake, while either one moving alone points at dosing or a bad test. Hand-entered from a test kit via reef-log, so the line steps at the moment each result was recorded. The query is source-agnostic, so if a tester ever reports this reading the two merge into one series with no dashboard change."
         },
         {
           "id": 14,
