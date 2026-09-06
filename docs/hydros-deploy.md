@@ -275,8 +275,9 @@ nothing depends on them any more.
 does not fail loudly — the unknown unit string is appended verbatim, so tiles read
 `77.79 $tempscale`. The Equipment temperature panels therefore use `unit: "none"`
 and spell the unit in their title via `${tempscale:text}`, which resolves to
-`°C` / `°F` because panel titles *are* interpolated. The generator asserts no
-`unit` contains a `$`.
+`°C` / `°F` because panel titles *are* interpolated. Assert no `unit` contains a
+`$` after any edit; the check is in
+[reef-log-deploy.md](reef-log-deploy.md#adding-a-parameter).
 
 The one place the unit cannot be shown is the **Temp** column of the Equipment
 "Devices" table: table column headers come from a rename transformation and are
@@ -321,11 +322,21 @@ flattened everything else. New outputs appear on their own.
 makes Grafana ignore the `label_values()` string and render an empty dropdown —
 the trap already documented in `redis/dashboard.yaml`.
 
-### The dashboards are generated
+### Editing the dashboards
 
-Both `dashboard-*.yaml` files are emitted by a script, not hand-edited. Author in
-the Grafana UI to iterate (Grafana runs `persistence: false`, so UI edits are lost
-on restart), then fold the change back into the generator and re-run it.
+Both `dashboard-*.yaml` files hold the panel JSON inline, and it is edited in
+place — an earlier generator script was never committed, so the YAML is the
+source of truth. Author in the Grafana UI to iterate (Grafana runs
+`persistence: false`, so UI edits are lost on restart), then fold the change back
+into the ConfigMap.
+
+Prefer a small Python script over a hand edit: `json.dumps(doc, indent=2)`
+round-trips both files byte-for-byte at the current 2-space indent, so a scripted
+change diffs to only the lines it touched. Panel ids and `gridPos` are hand-
+managed and Grafana fails *silently* on both — a reused id drops a panel, and
+overlapping rectangles get reflowed so the page still looks right. The check for
+both, plus the `unit` interpolation trap above, is in
+[reef-log-deploy.md](reef-log-deploy.md#adding-a-parameter).
 
 ## Alerting
 

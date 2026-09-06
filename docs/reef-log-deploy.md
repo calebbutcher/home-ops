@@ -1,10 +1,11 @@
 # reef-log: hand-entered tank readings
 
-Phosphate and nitrate are measured with a test kit, not a probe. They are
-entered in the HYDROS app as static inputs, and **the public API never returns
-them** — see [hydros-deploy.md](hydros-deploy.md) for the audit that established
-this. reef-log is the non-API path: a small form that records a reading and
-publishes it to Prometheus.
+Phosphate, nitrate, alkalinity, calcium and salinity are measured with a test
+kit or a refractometer, not a probe. They are entered in the HYDROS app as static
+inputs, and **the public API never returns them** — see
+[hydros-deploy.md](hydros-deploy.md) for the audit that established this.
+reef-log is the non-API path: a small form that records a reading and publishes
+it to Prometheus.
 
 Source: [github.com/calebbutcher/reef-log](https://github.com/calebbutcher/reef-log).
 
@@ -17,13 +18,16 @@ reading:
 hydros_input_phosphate_ppm{name="Phosphate",   basis="PO4", source="manual"}
 hydros_input_nitrate_ppm{name="Nitrate",       basis="NO3", source="manual"}
 hydros_input_alkalinity_dkh{name="Alkalinity", basis="dKH", source="manual"}
+hydros_input_calcium_ppm{name="Calcium",       basis="Ca",  source="manual"}
 hydros_input_specific_gravity{name="Salinity", basis="SG",  source="manual"}
 hydros_input_salinity_ppt{name="Salinity", basis="SG-derived", source="manual"}
 hydros_input_measured_timestamp_seconds{name="Phosphate", source="manual"}
 ```
 
 `hydros_input_alkalinity_dkh` is the name the exporter already reserves for a
-HYDROS alkalinity tester, so adding an Alky later joins this same series.
+HYDROS alkalinity tester, so adding an Alky later joins this same series. The
+other four names are ours to choose — nothing in the HYDROS range measures
+phosphate, nitrate, calcium or salinity on this tank today.
 
 That is deliberate, and it is the whole design. We control the metric name —
 `classify_input()` / `UNIT_METRICS` in the exporter decide it, not CoralVue — so
@@ -80,10 +84,17 @@ The label is `basis`, not `compound`: dKH and SG are not compounds. It was
 renamed in `v0.2.0`, while the database still held zero readings and the rename
 was therefore free.
 
-**If the API side is added later:** give it `ppm` in `UNIT_METRICS` plus a name
-token so it emits `hydros_input_phosphate_ppm`, *not* the generic
-`hydros_input_reading` fallback. The "All readings" table on the Tank dashboard
-is the early warning that the controller has started reporting it.
+**If the API side is added later:** give it an entry in `UNIT_METRICS` plus a
+name token so it emits the metric name reef-log already publishes, *not* the
+generic `hydros_input_reading` fallback. The "All readings" table on the Tank
+dashboard is the early warning that the controller has started reporting it.
+
+⚠️ `UNIT_METRICS` is keyed by *unit*, and phosphate, nitrate and calcium are all
+in ppm. A single `ppm` key would map all three onto whichever metric it names, so
+each needs its own key (`phosphate`, `nitrate`, `calcium`) with a matching token.
+Put those in `_EXACT_TOKENS`, not `_PREFIX_TOKENS`: matching is whole-token, so
+the existing `ph` entry does not swallow "Phosphate", but a short prefix like
+`"ca"` would claim any future sensor named Cabinet or Canopy.
 
 ## What's in `kubernetes/apps/reef-log/`
 
@@ -152,7 +163,40 @@ value is dropped rather than republished as fiction.
 
 ## Adding a parameter
 
-Add a `Parameter` to `reeflog/parameters.py` (name, compound, metric name, and
-sanity bounds), then add it to `CHEM` in the dashboard generator. Alkalinity
-already has a metric name reserved — `hydros_input_alkalinity_dkh` — so a manual
-alk entry would merge automatically if an Alkatronic or Trident is ever added.
+Add a `Parameter` to `reeflog/parameters.py` — key, display name, basis, metric
+name, help text and sanity bounds — then a stat tile and a trend panel to
+`kubernetes/apps/monitoring/hydros/dashboard-tank.yaml`. Clone the alkalinity
+pair: they share every option except unit, decimals, thresholds and the query, so
+copying keeps the panels in lockstep.
+
+⚠️ **Panel ids and `gridPos` are both hand-managed.** Reuse an id and Grafana
+drops a panel; overlap two `gridPos` rectangles and Grafana silently reflows them,
+so the dashboard looks fine while the JSON is wrong (this is how #427 landed the
+"All readings" row on top of "State"). Check both after editing:
+
+```sh
+python3 - <<'EOF'
+import yaml, json
+d = yaml.safe_load(open("kubernetes/apps/monitoring/hydros/dashboard-tank.yaml"))
+panels = json.loads(d["data"]["hydros-tank.json"])["panels"]
+ids = [p["id"] for p in panels]
+assert len(ids) == len(set(ids)), "duplicate panel id"
+seen = {}
+for p in panels:
+    g = p["gridPos"]
+    for y in range(g["y"], g["y"] + g["h"]):
+        for x in range(g["x"], g["x"] + g["w"]):
+            assert (x, y) not in seen, f"{p['id']} overlaps {seen[(x, y)]}"
+            seen[(x, y)] = p["id"]
+    assert "$" not in str(p.get("fieldConfig", {}).get("defaults", {}).get("unit", ""))
+print(f"ok: {len(panels)} panels")
+EOF
+```
+
+Nine stat tiles no longer divide into rows of four, so `Exporter` — the one tile
+that is not a tank reading — sits below them as a full-width strip. Adding a
+tenth parameter fills that row again and the strip just moves down.
+
+Alkalinity is the only parameter whose name the exporter already reserves
+(`hydros_input_alkalinity_dkh`), so a manual alk entry would merge automatically
+if an Alkatronic or Trident is ever added.
