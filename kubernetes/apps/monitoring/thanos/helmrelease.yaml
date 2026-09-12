@@ -190,7 +190,37 @@ spec:
 
     compactor:
       # Must remain a singleton (the chart enforces replicas: 1).
-      enabled: true
+      #
+      # 🔴 DISABLED 2026-09-12. This workload cannot currently share a node, and
+      # running it does not just fail itself — it destroys its neighbours.
+      #
+      # On 09-12 it was restarted on worker-03 and exhausted that node's
+      # allocatable Longhorn space in ~30 minutes. Longhorn's iSCSI target then
+      # returned `Space allocation failed write protect` to the OTHER volumes on
+      # that disk, and the kernel responded by ABORTING their ext4 journals:
+      #     critical space allocation error, dev sdf, sector 21309392 op 0x1:(WRITE)
+      #     Aborting journal on device sdf-8.
+      #     EXT4-fs error (device sdf): comm postgres: Detected aborted journal
+      # An aborted journal returns EIO for every subsequent operation and does NOT
+      # recover when space is freed. authentik-postgres-3 and immich-postgres-2 both
+      # had to be re-cloned. The identical event on 09-09 is what started the whole
+      # incident chain (see [[cnpg-wal-slot-exhaustion]] / PR #471) — the EIO it
+      # left behind is why the compactor looked like it had "corrupt" scratch.
+      #
+      # The arithmetic, which no amount of resizing fixes: a worker disk is 97.9Gi,
+      # Longhorn reserves 30% (29.4Gi), leaving 68.5Gi allocatable — against a
+      # compaction peak measured at ~65Gi. This job alone wants ~95% of a node's
+      # entire Longhorn budget, so it cannot coexist with anything. Lowering the
+      # reserve is NOT the answer: that cushion is precisely what the fill consumed.
+      #
+      # Re-enable only once one of these is true:
+      #   - a worker's /dev/sdb is grown well past 98Gi (Proxmox, needs a reboot), or
+      #   - retention.resolutionRaw is cut so less raw data reaches the 14d tier
+      #     (thanos compact has no --block-ranges, so the tier itself is untunable).
+      # Consequence while disabled: no compaction, NO DOWNSAMPLING, and NO RETENTION
+      # enforcement in the object store. Bucket size grows and long-range queries get
+      # slower. This is a deliberate trade against corrupting live databases.
+      enabled: false
       # Scratch space: blocks are downloaded, compacted and downsampled here before
       # going back to RustFS. Nothing is authoritative, so longhorn-scratch (one
       # replica, trimmed hourly, excluded from the nightly backup group) fits — and
