@@ -209,10 +209,25 @@ spec:
       # 20Gi halted the compactor on 2026-08-27 ("no space left on device"). It had
       # never been survivable: on local-path, which enforces no quota, compaction
       # simply overran the declared size unnoticed for months.
+      #
+      # 100Gi -> 90Gi on 2026-09-12, NOT because the peak shrank. Longhorn schedules
+      # on DECLARED size against a per-node ceiling of 250% * (disk - reserved) =
+      # 171.3G, and no node had 100G of that ceiling left: the volume became
+      # unschedulable on 09-09 and stayed that way, so the compactor could not have
+      # moved off a failed node even though mobility is the whole reason it is on
+      # Longhorn. 90Gi fits the ceiling on three nodes (03/04/06) and restores that
+      # mobility, while still clearing the measured 65Gi peak by ~25Gi.
+      #
+      # ⚠️ This is headroom traded for schedulability, and the DECLARED ceiling is
+      # not the binding constraint at peak — physical space is. worker-03 holds
+      # 33.7G of real data against a 97.9G disk, so a full 65Gi compaction there
+      # would exhaust it. That is the same exhaustion that took authentik down on
+      # 09-12 (see prometheusrule-postgres.yaml). Until the over-provisioning budget
+      # (#349) is actually resolved, do not treat 90Gi as comfortable.
       persistence:
         enabled: true
         storageClass: longhorn-scratch
-        size: 100Gi
+        size: 90Gi
       # Downsample/retention policy in the object store (empty = keep forever).
       retention:
         resolutionRaw: 30d
