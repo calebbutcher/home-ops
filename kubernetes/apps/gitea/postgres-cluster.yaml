@@ -72,6 +72,34 @@ spec:
       isWALArchiver: true
       parameters:
         barmanObjectName: gitea-postgres-store
+  postgresql:
+    parameters:
+      # Cap how much WAL an INACTIVE replication slot may pin. Postgres defaults to
+      # -1 (unlimited): a slot whose consumer is gone holds every segment since its
+      # restart_lsn forever, and the primary fills its own volume and dies. That is
+      # exactly how authentik went down on 2026-09-12 — worker-03's Longhorn disk hit
+      # its over-provisioning ceiling on 09-09, instance -2 stopped consuming its
+      # slot, and the primary's 10Gi volume was full by 09-12 07:42. The database was
+      # 279MB; 9.5GB of the volume was pinned WAL.
+      #
+      # What makes this fast here rather than a slow leak: archive_timeout (5min, a
+      # CNPG default we rely on for backup correctness — see the backup.target note)
+      # forces a segment switch every 5 minutes whether or not anything was written,
+      # so a stalled slot accrues ~4.6GB/day of mostly-empty 16MB segments on an
+      # IDLE cluster. Low write volume is not protection.
+      #
+      # Set to ~40% of the volume so a stalled slot is invalidated with room to
+      # spare alongside max_wal_size. Invalidation is the GOOD outcome: the replica
+      # re-clones via pg_basebackup (CNPG does this automatically) instead of the
+      # primary dying. Reloadable (PGC_SIGHUP) — no instance restart.
+      #
+      # ⚠️ Before any MAJOR version upgrade: PostgreSQL 17.0-17.5 cannot be the
+      # *target* of a pg_upgrade while this is anything other than -1 (immich's
+      # pinned-tag note is where that constraint is written up). Nothing lands in
+      # that window today — the `:17` tags resolve to 17.6+, and authentik's PG16
+      # would upgrade into 17.6+ too — but if you ever pin a 17.0-17.5 target, set
+      # this back to -1 for the duration of the upgrade.
+      max_slot_wal_keep_size: "4GB"
   bootstrap:
     initdb:
       database: gitea
