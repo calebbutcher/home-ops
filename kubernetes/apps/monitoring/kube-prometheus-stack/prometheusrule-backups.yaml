@@ -334,6 +334,16 @@ spec:
         # unfiltered rule fires 14 false positives on merge and never clears.
         # Their contents are a cache — the real data is already in the restic
         # repository that the cache exists to accelerate.
+        #
+        # ⚠️ longhorn-scratch volumes are excluded for the same reason, but by
+        # STORAGE CLASS rather than by name. That class exists precisely to mark a
+        # volume as disposable — it carries the `scratch-trim` recurring job and is
+        # deliberately NOT in the `default` backup group — so "never backed up" is
+        # its designed state, not a gap. Doing it by class rather than by PVC name
+        # means the next scratch volume does not quietly reintroduce this alert:
+        # thanos-compactor's did, and a permanently-firing alert is one you learn
+        # to scroll past. The double label_replace bridges kube-state-metrics'
+        # persistentvolumeclaim/namespace to Longhorn's pvc/pvc_namespace.
         - alert: LonghornVolumeNeverBackedUp
           expr: |
             longhorn_volume_last_backup_at == 0
@@ -341,6 +351,12 @@ spec:
             label_replace(
               longhorn_volume_last_backup_at{pvc=~"volsync-src-.*-cache"},
               "volume", "$1", "volume", "(.*)"
+            )
+              unless on (pvc, pvc_namespace)
+            label_replace(label_replace(
+              kube_persistentvolumeclaim_info{storageclass="longhorn-scratch"},
+              "pvc", "$1", "persistentvolumeclaim", "(.*)"),
+              "pvc_namespace", "$1", "namespace", "(.*)"
             )
           for: 24h
           labels:
