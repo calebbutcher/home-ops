@@ -185,6 +185,70 @@ spec:
               archived to RustFS (>30m). Usually the S3 endpoint on the TrueNAS is
               unreachable. pg_wal keeps growing until this drains.
 
+        # An inactive replication slot on the PRIMARY. This is the alert that was
+        # missing on 2026-09-12: worker-03's Longhorn disk hit its over-provisioning
+        # ceiling on 09-09, authentik-postgres-2 stopped consuming its slot, and the
+        # slot pinned every WAL segment from that moment on. Three days later the
+        # primary's volume was full and authentik — the SSO for most of the cluster
+        # — was down. Nothing fired in between: the cluster read Ready, archiving
+        # read healthy, backups read successful, and the replica's own crashloop
+        # only produced a generic KubePodCrashLooping that looked like noise.
+        #
+        # `max_slot_wal_keep_size` (set on every Cluster CR) is now the actual
+        # safety net — Postgres invalidates the slot rather than filling the disk.
+        # This alert exists so the invalidation is never the FIRST thing you hear
+        # about it, because invalidation still costs the replica a full re-clone.
+        #
+        # ⚠️ Scoped to the primary via cnpg_pg_replication_is_wal_receiver_up == 0.
+        # Every instance exports this metric, and CNPG's HA slots are synchronized
+        # onto the standbys where they are legitimately inactive — without the join
+        # this alert fires constantly on healthy clusters.
+        - alert: PostgresReplicationSlotInactive
+          expr: |
+            (cnpg_pg_replication_slots_active == 0)
+              and on (namespace, pod)
+            (cnpg_pg_replication_is_wal_receiver_up == 0)
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Replication slot {{ $labels.slot_name }} is inactive on primary {{ $labels.pod }}"
+            description: >-
+              Slot {{ $labels.slot_name }} has had no consumer for >30m. It is
+              pinning WAL on the primary's volume for a replica that is not
+              reading it. Check whether that instance is down or unschedulable;
+              if it cannot return, drop the slot or let max_slot_wal_keep_size
+              invalidate it (the replica then re-clones via pg_basebackup).
+
+        # The backstop, and deliberately cause-agnostic: whatever pins WAL — a dead
+        # slot, a stalled archiver, a runaway query writing temp files — it ends the
+        # same way, with the primary's PVC at 100% and PostgreSQL refusing to start.
+        # CNPG's instance manager will not even boot postgres below its free-space
+        # floor, so a full volume is not a degraded cluster, it is a stopped one,
+        # and the replicas cannot trim their own WAL without a primary to send them
+        # checkpoint records. That deadlock is why 2026-09-12 needed a manual PVC
+        # expansion to break rather than resolving on its own.
+        #
+        # Matches CNPG PVCs by name (<cluster>-<instance>); every Postgres cluster
+        # in this repo is named *-postgres, so *-postgres-<n> is exact.
+        - alert: PostgresDataVolumeFillingUp
+          expr: |
+            kubelet_volume_stats_available_bytes{persistentvolumeclaim=~".*-postgres-[0-9]+"}
+              /
+            kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~".*-postgres-[0-9]+"}
+              < 0.25
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres volume {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} free"
+            description: >-
+              {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} has been
+              under 25% free for >15m. Compare pg_wal against base inside the pod —
+              if pg_wal dominates, something is pinning WAL (see
+              PostgresReplicationSlotInactive). Expanding the PVC group is the way
+              out once it is already full.
+
         - alert: PostgresConnectionsHigh
           expr: |
             sum by (namespace, pod) (cnpg_backends_total)
