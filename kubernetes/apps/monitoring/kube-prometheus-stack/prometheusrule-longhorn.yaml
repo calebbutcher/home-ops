@@ -176,6 +176,61 @@ spec:
               The Longhorn data disk on {{ $labels.node }} is nearly full. Volumes with
               replicas here risk write failure. Grow the disk urgently.
 
+        # 🔴 The alert the 2026-09-12 incident needed and did not have. The two rules
+        # above measure usage against RAW capacity, and worker-03 was only at 63% by
+        # that measure when it started destroying data — they never fired. What had
+        # actually run out was ALLOCATABLE space: capacity minus usage minus the 30%
+        # Longhorn holds in reserve. worker-03 reached 6.9Gi allocatable, and at that
+        # point Longhorn's iSCSI target began returning `Space allocation failed write
+        # protect` to volumes on that disk. The kernel does not treat that as a full
+        # disk — it ABORTS the ext4 journal:
+        #     critical space allocation error, dev sdf, op 0x1:(WRITE)
+        #     EXT4-fs error (device sdf): comm postgres: Detected aborted journal
+        # Every later operation then returns EIO, and — this is the part that matters —
+        # it does NOT recover when space is freed. Freeing 27.8Gi changed nothing;
+        # authentik-postgres-3 and immich-postgres-2 both had to be re-cloned. So this
+        # threshold is not about performance or scheduling, it is the last point at
+        # which a fill is still recoverable rather than destructive.
+        #
+        # Absolute bytes, not a ratio, because a write needs N bytes regardless of how
+        # large the disk is — and growing /dev/sdb is one of the remedies, which would
+        # silently loosen a percentage-based rule at exactly the wrong moment.
+        - alert: LonghornNodeAllocatableLow
+          expr: |
+            longhorn_node_storage_capacity_bytes
+              - longhorn_node_storage_usage_bytes
+              - longhorn_node_storage_reservation_bytes
+              < 10 * 1024 * 1024 * 1024
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn on {{ $labels.node }} has only {{ $value | humanize1024 }}B allocatable"
+            description: >-
+              {{ $labels.node }} has under 10GiB of allocatable Longhorn space (capacity
+              minus usage minus reserve) for >15m. Thin-provisioned volumes on this disk
+              cannot grow much further; when this reaches zero, writes fail with
+              `Space allocation failed` and neighbouring filesystems have their journals
+              aborted, which requires re-cloning to fix. Find what is growing —
+              the Longhorn capacity dashboard compares declared against actual.
+
+        - alert: LonghornNodeAllocatableCritical
+          expr: |
+            longhorn_node_storage_capacity_bytes
+              - longhorn_node_storage_usage_bytes
+              - longhorn_node_storage_reservation_bytes
+              < 4 * 1024 * 1024 * 1024
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Longhorn on {{ $labels.node }} is about to fail writes ({{ $value | humanize1024 }}B allocatable)"
+            description: >-
+              {{ $labels.node }} is within 4GiB of exhausting allocatable Longhorn space.
+              Data loss is imminent and NOT self-healing: filesystems on this disk will
+              have their ext4 journals aborted and will need re-cloning. Stop or move the
+              workload that is growing, immediately.
+
     - name: longhorn-backup.rules
       rules:
         # Scoped to volumes that HAVE been backed up at least once (> 0), so this
