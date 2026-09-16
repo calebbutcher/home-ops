@@ -29,6 +29,8 @@ resources:
   - tautulli/pvc.yaml
   - tautulli/helmrelease.yaml
   - tautulli/ingress.yaml
+  # Router only — Plex itself is a standalone server outside the cluster.
+  - plex/ingress.yaml
   - tracearr/secret.sops.yaml
   - tracearr/backup-secret.sops.yaml
   - tracearr/postgres-objectstore.yaml

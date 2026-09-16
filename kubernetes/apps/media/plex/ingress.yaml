@@ -1,0 +1,85 @@
+---
+# Routes plex.int.nerdbox.dev to the standalone Plex Media Server at
+# 10.2.30.15:32400 — a host on VLAN 30, outside the cluster.
+#
+# Plex is deliberately NOT run in k3s: it owns the GPU and the direct disk paths
+# on that box. This is a router only, so there is no HelmRelease, PVC or
+# ReplicationSource here — nothing about the server's state lives in this repo.
+#
+# Service with no selector + a hand-maintained EndpointSlice is how a
+# Kubernetes-native Ingress fronts an off-cluster address. Same pattern as
+# kubernetes/apps/technitium/primary-ingress.yaml; see that file for the longer
+# explanation of why the EndpointSlice must carry the service-name label.
+apiVersion: v1
+kind: Service
+metadata:
+  name: plex
+  namespace: media
+spec:
+  # No selector: endpoints are supplied manually below. Kubernetes will not
+  # manage (or garbage-collect) them.
+  ports:
+    - name: http
+      port: 32400
+      targetPort: 32400
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: plex
+  namespace: media
+  labels:
+    # Binds this slice to the Service above. Without this label the Service has
+    # no endpoints and Traefik returns 503.
+    kubernetes.io/service-name: plex
+addressType: IPv4
+ports:
+  - name: http
+    port: 32400
+    protocol: TCP
+endpoints:
+  # The Plex host's static VLAN 30 address. Not discovered — if the server moves,
+  # this line is the one that has to change.
+  - addresses:
+      - 10.2.30.15
+    conditions:
+      ready: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: plex
+  namespace: media
+  annotations:
+    # CNAME to the single self-healing ingress record (see the Traefik Service)
+    # rather than a second A record, so a Traefik IP change moves one record.
+    external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # internal-only, like every other media route. Plex has its own plex.tv
+    # account auth and its own remote-access path (app.plex.tv over the
+    # *.plex.direct cert, which does not pass through Traefik at all), so this
+    # hostname exists for LAN/Tailscale browsing — it is not the remote-access
+    # mechanism and does not need to be reachable from the internet.
+    #
+    # No forwardAuth: Plex clients authenticate with an X-Plex-Token, not a
+    # browser session, so an Authentik hop would 302 every app and API call.
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-internal-only@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - plex.int.nerdbox.dev
+      secretName: plex-tls
+  rules:
+    - host: plex.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: plex
+                port:
+                  number: 32400
