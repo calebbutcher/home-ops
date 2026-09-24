@@ -1,8 +1,8 @@
 # reef-log: hand-entered tank readings
 
-Phosphate, nitrate, alkalinity, calcium and salinity are measured with a test
-kit or a refractometer, not a probe. They are entered in the HYDROS app as static
-inputs, and **the public API never returns them** — see
+Phosphate, nitrate, alkalinity, calcium, magnesium and salinity are measured
+with a test kit or a refractometer, not a probe. They are entered in the HYDROS
+app as static inputs, and **the public API never returns them** — see
 [hydros-deploy.md](hydros-deploy.md) for the audit that established this.
 reef-log is the non-API path: a small form that records a reading and publishes
 it to Prometheus.
@@ -19,6 +19,7 @@ hydros_input_phosphate_ppm{name="Phosphate",   basis="PO4", source="manual"}
 hydros_input_nitrate_ppm{name="Nitrate",       basis="NO3", source="manual"}
 hydros_input_alkalinity_dkh{name="Alkalinity", basis="dKH", source="manual"}
 hydros_input_calcium_ppm{name="Calcium",       basis="Ca",  source="manual"}
+hydros_input_magnesium_ppm{name="Magnesium",   basis="Mg",  source="manual"}
 hydros_input_specific_gravity{name="Salinity", basis="SG",  source="manual"}
 hydros_input_salinity_ppt{name="Salinity", basis="SG-derived", source="manual"}
 hydros_input_measured_timestamp_seconds{name="Phosphate", source="manual"}
@@ -26,8 +27,8 @@ hydros_input_measured_timestamp_seconds{name="Phosphate", source="manual"}
 
 `hydros_input_alkalinity_dkh` is the name the exporter already reserves for a
 HYDROS alkalinity tester, so adding an Alky later joins this same series. The
-other four names are ours to choose — nothing in the HYDROS range measures
-phosphate, nitrate, calcium or salinity on this tank today.
+other five names are ours to choose — nothing in the HYDROS range measures
+phosphate, nitrate, calcium, magnesium or salinity on this tank today.
 
 That is deliberate, and it is the whole design. We control the metric name —
 `classify_input()` / `UNIT_METRICS` in the exporter decide it, not CoralVue — so
@@ -89,9 +90,10 @@ name token so it emits the metric name reef-log already publishes, *not* the
 generic `hydros_input_reading` fallback. The "All readings" table on the Tank
 dashboard is the early warning that the controller has started reporting it.
 
-⚠️ `UNIT_METRICS` is keyed by *unit*, and phosphate, nitrate and calcium are all
-in ppm. A single `ppm` key would map all three onto whichever metric it names, so
-each needs its own key (`phosphate`, `nitrate`, `calcium`) with a matching token.
+⚠️ `UNIT_METRICS` is keyed by *unit*, and phosphate, nitrate, calcium and
+magnesium are all in ppm. A single `ppm` key would map all four onto whichever
+metric it names, so each needs its own key (`phosphate`, `nitrate`, `calcium`,
+`magnesium`) with a matching token.
 Put those in `_EXACT_TOKENS`, not `_PREFIX_TOKENS`: matching is whole-token, so
 the existing `ph` entry does not swallow "Phosphate", but a short prefix like
 `"ca"` would claim any future sensor named Cabinet or Canopy.
@@ -193,9 +195,16 @@ print(f"ok: {len(panels)} panels")
 EOF
 ```
 
-Nine stat tiles no longer divide into rows of four, so `Exporter` — the one tile
-that is not a tank reading — sits below them as a full-width strip. Adding a
-tenth parameter fills that row again and the strip just moves down.
+Nine tank readings no longer divide into rows of four, so the stat tiles are
+three rows of three (`w: 8`), grouped live-probe / triad / refractometer plus
+nutrients. `Exporter` — the one tile that is not a tank reading — sits below
+them as a full-width strip. A tenth reading breaks the grid again: tile widths
+have to divide 24, so ten tiles land evenly only as five rows of two at `w: 12`
+— otherwise accept a ragged last row.
+
+The trends are 12-wide pairs, and nine of them leave one half-row empty. It is
+the slot beside magnesium, which keeps alkalinity and calcium paired on the row
+above it and phosphate and nitrate paired on the row below.
 
 Alkalinity is the only parameter whose name the exporter already reserves
 (`hydros_input_alkalinity_dkh`), so a manual alk entry would merge automatically
