@@ -47,7 +47,7 @@ metadata:
   name: k3s-agent
   namespace: system-upgrade
 spec:
-  version: v1.35.8+k3s1
+  version: v1.36.4+k3s1
   concurrency: 1
   cordon: true
   nodeSelector:
