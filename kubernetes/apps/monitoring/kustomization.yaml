@@ -30,6 +30,7 @@ resources:
   - kube-prometheus-stack/prometheusrule-backups.yaml
   - kube-prometheus-stack/prometheusrule-probes.yaml
   - kube-prometheus-stack/prometheusrule-nodes.yaml
+  - kube-prometheus-stack/prometheusrule-thanos-scratch.yaml
   - blackbox/helmrelease.yaml
   - blackbox/probe-edge.yaml
   - blackbox/probe-app.yaml

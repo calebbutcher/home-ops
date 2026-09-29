@@ -1,0 +1,133 @@
+---
+# The device is a /dev/disk/by-id symlink (see defaults/main.yml for why), but
+# ansible_devices is keyed by kernel name, so resolve it before any of the guards
+# can look the device up.
+- name: Resolve the scratch device symlink
+  ansible.builtin.stat:
+    path: "{{ scratch_disk_device }}"
+    follow: true
+  register: scratch_disk_stat
+
+- name: Assert the dedicated scratch device exists
+  ansible.builtin.assert:
+    that:
+      - scratch_disk_stat.stat.exists
+      - scratch_disk_stat.stat.isblk | default(false)
+    fail_msg: >-
+      {{ scratch_disk_device }} does not resolve to a block device on
+      {{ inventory_hostname }}. Attach the dedicated scratch disk as scsi2 before
+      running this play, and check `ls -l /dev/disk/by-id/ | grep scsi2`.
+
+- name: Resolve short device name
+  ansible.builtin.set_fact:
+    scratch_disk_device_short: "{{ scratch_disk_stat.stat.path | basename }}"
+
+- name: Assert the resolved device is known to Ansible
+  ansible.builtin.assert:
+    that:
+      - scratch_disk_device_short in ansible_devices
+    fail_msg: >-
+      {{ scratch_disk_device }} resolved to {{ scratch_disk_device_short }}, which is
+      not in ansible_devices on {{ inventory_hostname }}.
+
+# This is the guard the Longhorn role does not need. Both disks are ~100G,
+# unpartitioned and ext4, so the size and filesystem checks below cannot tell them
+# apart: if scratch_disk_device ever resolved to the Longhorn disk (or to the OS
+# root disk) every other assertion would pass and we would reformat live data.
+# What separates them is that both of those are always mounted, and a scratch disk
+# is only ever mounted at its own mount point.
+- name: Refuse to touch a device that is already mounted elsewhere
+  ansible.builtin.assert:
+    that:
+      - ansible_mounts
+        | selectattr('device', 'search', '/' ~ scratch_disk_device_short ~ '$')
+        | rejectattr('mount', 'equalto', scratch_disk_mount)
+        | list | length == 0
+    fail_msg: >-
+      Refusing to format {{ scratch_disk_device }} ({{ scratch_disk_device_short }})
+      on {{ inventory_hostname }}: it is already mounted at
+      {{ ansible_mounts | selectattr('device', 'search', '/' ~ scratch_disk_device_short ~ '$')
+         | map(attribute='mount') | list | join(', ') }}.
+      That is almost certainly the Longhorn data disk or the OS root disk.
+  # Note the one case this check does NOT cover: a whole-disk device whose
+  # PARTITIONS are mounted (e.g. /dev/sda, where the mount table shows /dev/sda1).
+  # The anchored regex will not match, by design — matching loosely would flag the
+  # scratch disk itself once it has a mount. That case is caught instead by the
+  # partitions assertion below, which is why both guards exist.
+
+- name: Read any existing filesystem signature on the scratch device
+  ansible.builtin.command: "blkid -o value -s TYPE {{ scratch_disk_stat.stat.path }}"
+  register: scratch_disk_blkid
+  changed_when: false
+  failed_when: false
+
+- name: Refuse to touch a device that holds foreign data
+  ansible.builtin.assert:
+    that:
+      - ansible_devices[scratch_disk_device_short].partitions | length == 0
+      - (scratch_disk_blkid.stdout | trim) in ["", scratch_disk_fstype]
+    fail_msg: >-
+      Refusing to format {{ scratch_disk_device }} on {{ inventory_hostname }}:
+      partitions={{ ansible_devices[scratch_disk_device_short].partitions.keys() | list }},
+      fs='{{ scratch_disk_blkid.stdout | trim }}'. Expected an empty disk or an
+      existing {{ scratch_disk_fstype }}. Investigate manually.
+
+- name: Sanity-check the device size (guards against the wrong disk)
+  ansible.builtin.assert:
+    that:
+      - (ansible_devices[scratch_disk_device_short].size | regex_replace(' GB$', '') | float) >= (scratch_disk_min_gb | float)
+      - (ansible_devices[scratch_disk_device_short].size | regex_replace(' GB$', '') | float) <= (scratch_disk_max_gb | float)
+    fail_msg: >-
+      {{ scratch_disk_device }} is {{ ansible_devices[scratch_disk_device_short].size }},
+      outside the expected {{ scratch_disk_min_gb }}-{{ scratch_disk_max_gb }} GB window.
+
+- name: Create the filesystem on the scratch device (idempotent, never forced)
+  community.general.filesystem:
+    fstype: "{{ scratch_disk_fstype }}"
+    dev: "{{ scratch_disk_stat.stat.path }}"
+    opts: "{{ scratch_disk_mkfs_opts }}"
+    force: false
+
+- name: Read the filesystem UUID
+  ansible.builtin.command: "blkid -o value -s UUID {{ scratch_disk_stat.stat.path }}"
+  register: scratch_disk_uuid
+  changed_when: false
+
+# By UUID, so /etc/fstab survives the kernel reassigning device letters on the next
+# boot — which it will, since the iSCSI LUNs come and go around this disk.
+#
+# `discard` needs discard=on set on the QEMU device (`qm set <vmid> --scsi2
+# ...,discard=on`, live only after the VM restarts) or it is a silent no-op: the
+# ~65GiB a compaction frees would never be returned to the Ceph pool, and every
+# node that ever compacted would hold that space forever.
+- name: Mount the scratch disk by UUID (persistent)
+  ansible.posix.mount:
+    path: "{{ scratch_disk_mount }}"
+    src: "UUID={{ scratch_disk_uuid.stdout | trim }}"
+    fstype: "{{ scratch_disk_fstype }}"
+    opts: defaults,discard
+    state: mounted
+
+- name: Create the Thanos compactor working directory
+  ansible.builtin.file:
+    path: "{{ scratch_disk_mount }}/{{ scratch_disk_thanos_compact_dir }}"
+    state: directory
+    owner: "{{ scratch_disk_thanos_uid }}"
+    group: "{{ scratch_disk_thanos_gid }}"
+    mode: u=rwx,g=rx,o=rx
+
+# Written last, and deliberately after the mount: the marker lives on the scratch
+# filesystem itself, so it is visible only while that filesystem is mounted. That
+# is what lets the compactor's init container tell "my dedicated disk is here"
+# from "I am about to fill the OS root disk through an empty mount point".
+- name: Write the scratch-disk marker file
+  ansible.builtin.copy:
+    content: |
+      # Written by ansible/roles/scratch_disk. Presence of this file on
+      # {{ scratch_disk_mount }} proves the dedicated scratch disk is mounted.
+      # The Thanos compactor's verify-scratch init container refuses to start
+      # without it. Do not delete.
+    dest: "{{ scratch_disk_mount }}/{{ scratch_disk_marker }}"
+    owner: root
+    group: root
+    mode: u=rw,g=r,o=r

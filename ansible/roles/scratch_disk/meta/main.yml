@@ -1,0 +1,28 @@
+---
+argument_specs:
+  main:
+    short_description: Dedicated node-local scratch disk (Thanos compactor working space)
+    options:
+      scratch_disk_device:
+        description: >-
+          Block device dedicated to scratch space. Must be a stable
+          /dev/disk/by-id path, not a kernel name — Longhorn's iSCSI LUNs reshuffle
+          /dev/sdX on every boot.
+        default: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi2
+      scratch_disk_mount:
+        description: Mount point for the scratch disk
+        default: /var/mnt/scratch
+      scratch_disk_fstype:
+        description: Filesystem created on the scratch disk
+        default: ext4
+      scratch_disk_mkfs_opts:
+        description: Extra mkfs options
+        default: -m 1
+      scratch_disk_thanos_compact_dir:
+        description: Subdirectory the Thanos compactor uses as its --data-dir
+        default: thanos-compact
+      scratch_disk_marker:
+        description: >-
+          Marker file written onto the mounted filesystem; the compactor's init
+          container refuses to start unless it is present.
+        default: .scratch-disk

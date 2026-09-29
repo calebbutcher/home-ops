@@ -1,0 +1,106 @@
+---
+# Alerts for the dedicated Thanos compactor scratch disk (/var/mnt/scratch, a 100G
+# scsi2 disk on k3s-worker-01/04/06, prepared by ansible/scratch-disk.yml).
+#
+# SCOPE: the Thanos chart's own `thanos-rules` PrometheusRule already covers the
+# compactor itself — ThanosCompactHalted (thanos_compact_halted == 1),
+# ThanosCompactIsDown, ThanosCompactHasNotRun and the failure-rate rules. Nothing
+# here duplicates those. What the chart cannot see is the filesystem underneath,
+# which is the thing that has actually broken twice.
+#
+# Why these alerts mean something when the Longhorn ones did not: this filesystem
+# is dedicated, and the compactor is its only writer. The old
+# longhorn-scratch volume shared /var/lib/longhorn with live Postgres data, so
+# usage-% on it was blind — worker-03 sat at 63% while being ~30 minutes from
+# aborting two databases' ext4 journals (see prometheusrule-longhorn.yaml and the
+# 09-12 incident). Here, "the disk is filling" has exactly one cause and one
+# consequence, and the consequence is bounded to the compactor.
+#
+# The stock node-exporter NodeFilesystemAlmostOutOfSpace rules do fire on this
+# mount too, but at generic thresholds (5%/3%) and with no idea what the number
+# should be. 65.3GiB of a ~97GiB filesystem is normal here and must not page;
+# 75GiB is the early warning. Hence purpose-built thresholds.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: thanos-scratch-rules
+  namespace: monitoring
+spec:
+  groups:
+    - name: thanos-scratch.rules
+      rules:
+        - alert: ThanosCompactScratchFilling
+          # ~24GiB left on a ~97GiB filesystem. The measured peak of a full 14d
+          # compaction is 65.3GiB (32.8GiB of 2d sources + the 32.5GiB block they
+          # merge into), so crossing this means a compaction is using materially
+          # more than any run we have measured — most likely because raw ingest
+          # has grown. Warning, not critical: there is still ~24GiB of room and
+          # the run will probably finish. It is the signal to grow the disk before
+          # the next tier boundary, which is now a safe operation.
+          expr: |
+            node_filesystem_avail_bytes{mountpoint="/var/mnt/scratch"}
+              / node_filesystem_size_bytes{mountpoint="/var/mnt/scratch"} < 0.25
+          for: 10m
+          labels:
+            severity: warning
+            component: thanos
+          annotations:
+            summary: "Thanos compactor scratch disk on {{ $labels.instance }} is over 75% used"
+            description: >-
+              {{ $value | humanizePercentage }} of /var/mnt/scratch remains on
+              {{ $labels.instance }}. A full 14d compaction peaks at ~65GiB of a
+              ~97GiB filesystem, so this is above any measured run. Check
+              thanos_compact_halted and the compactor logs; if a completed run
+              troughs here, grow the scsi2 disk (safe — nothing else is on it) and
+              raise compactor.persistence sizing notes in the thanos HelmRelease.
+
+        - alert: ThanosCompactScratchFull
+          # Absolute floor rather than a percentage: below ~10GiB the next
+          # downsample output cannot land, and Thanos will halt with "no space
+          # left on device". Halting is the designed failure here — it costs
+          # compaction, downsampling and retention, but it cannot touch anything
+          # else on the node. Paging because a halted compactor is invisible
+          # otherwise: the pod stays Running with 0 restarts and keeps logging
+          # "successfully synchronized block metadata" every minute.
+          expr: node_filesystem_avail_bytes{mountpoint="/var/mnt/scratch"} < 10 * 1024 * 1024 * 1024
+          for: 5m
+          labels:
+            severity: critical
+            component: thanos
+          annotations:
+            summary: "Thanos compactor scratch disk on {{ $labels.instance }} is nearly full"
+            description: >-
+              Only {{ $value | humanize1024 }}B free on /var/mnt/scratch on
+              {{ $labels.instance }}. Thanos compaction is about to fail with ENOSPC
+              and halt, which also stops downsampling and retention. This cannot
+              affect other workloads — the disk is dedicated — but the bucket will
+              grow and long-range queries will slow until it is resolved.
+
+        - alert: ThanosCompactScratchDiskMissing
+          # The compactor's own init container refuses to start without the
+          # .scratch-disk marker, so a missing disk shows up as a CrashLoop and
+          # eventually ThanosCompactIsDown. This alert catches the quieter version:
+          # the disk gone from a node that is NOT currently running the compactor,
+          # e.g. a rebuilt worker, a disk that failed to mount after a reboot, or a
+          # node added to the nodeAffinity list without running scratch-disk.yml.
+          # Left unnoticed, that silently shrinks the set of nodes the singleton can
+          # fail over to — which is the whole point of having three.
+          #
+          # ⚠️ `or vector(0)` is load-bearing, not decoration. count() over a
+          # selector that matches nothing returns an EMPTY vector, not 0, so a bare
+          # `count(...) < 3` is silent in precisely the worst case — all three disks
+          # gone. Verified against live Prometheus: the bare form returned no data
+          # while zero mounts existed; this form returns 0 and fires.
+          expr: (count(node_filesystem_size_bytes{mountpoint="/var/mnt/scratch"}) or vector(0)) < 3
+          for: 15m
+          labels:
+            severity: critical
+            component: thanos
+          annotations:
+            summary: "Fewer than 3 workers have the Thanos scratch disk mounted"
+            description: >-
+              Only {{ $value }} of the 3 expected workers (k3s-worker-01/04/06) are
+              reporting /var/mnt/scratch. The compactor can only schedule where the
+              disk exists, so its failover set has shrunk. Check `findmnt
+              /var/mnt/scratch` on each and re-run
+              `ansible-playbook scratch-disk.yml`.
