@@ -50,12 +50,34 @@ spec:
               REDIS_HOSTNAME: immich-redis
               REDIS_PORT: "6379"
               IMMICH_MACHINE_LEARNING_URL: http://immich-machine-learning:3003
+            # This one container runs BOTH Immich processes — the API and the
+            # microservices job worker — because IMMICH_WORKERS_INCLUDE is unset.
+            # They share a cgroup, so a job worker that outgrows the limit takes
+            # the API down with it and in-flight uploads fail client-side. That is
+            # the failure this sizing is chosen to prevent, not a theoretical one:
+            # at 4Gi the container was OOMKilled 16 times in one evening of bulk
+            # uploads, and every killed job landed in BullMQ as "job stalled more
+            # than allowable limit" (9 thumbnailGeneration, all source=upload).
+            #
+            # requests: idle steady state measured flat at ~1160Mi for 6h, so the
+            # old 512Mi request was under half of true baseline. That understated
+            # the pod to the scheduler and is why worker-03 ended up carrying it
+            # alongside a CNPG instance at 215% limit over-subscription.
+            #
+            # limits: observed ramp during bulk upload was 1.2Gi -> 4.0Gi in about
+            # two minutes, i.e. it hit the ceiling at full speed rather than
+            # creeping up to it. 8Gi leaves real headroom above the ~4Gi the job
+            # queues actually want once faceDetection concurrency is back to the
+            # upstream default of 2 (it had been raised to 6; smartSearch to 3).
+            # Job concurrency lives in the DB (system_metadata → system-config),
+            # NOT here, so it is UI state that this file cannot pin — see
+            # docs/immich-oom.md.
             resources:
               requests:
                 cpu: 250m
-                memory: 512Mi
+                memory: 1536Mi
               limits:
-                memory: 4Gi
+                memory: 8Gi
       immich-machine-learning:
         # Keep the tag in lockstep with the server.
         replicas: 1
