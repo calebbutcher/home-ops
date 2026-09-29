@@ -1,0 +1,141 @@
+---
+# Alerts for containers killed by the kernel OOM reaper, and for crash loops in
+# general.
+#
+# WHY THIS FILE EXISTS: the stock KubePodCrashLooping alert cannot detect a fast
+# crash loop, and nobody noticed until immich-server spent 17 days OOMKilling
+# itself in silence. The stock rule is:
+#
+#   expr: max_over_time(kube_pod_container_status_waiting_reason{
+#           reason="CrashLoopBackOff"}[5m]) >= 1
+#   for:  15m
+#
+# That samples a *state* which only exists while the kubelet is sitting out a
+# backoff delay. A container that dies every ~2 minutes spends most of its life
+# Running, so the series keeps dropping out, the `for: 15m` clock keeps resetting,
+# and the alert sits in `pending` forever without ever firing. Verified against
+# live Prometheus during the incident: KubePodCrashLooping was `pending` on
+# immich-immich-server while the container was on its 16th OOMKill. The stock rule
+# is fine for a container stuck in a long backoff; it is blind to a hot loop.
+#
+# So these rules key on the restart COUNTER instead of the waiting state. A
+# counter cannot oscillate away, which makes the signal immune to the exact
+# failure mode above.
+#
+# There is also no OOM-specific rule anywhere else in the stack (checked every
+# PrometheusRule in the cluster), which is why an OOMKill — the single most common
+# way a workload here dies — produced no alert of any kind.
+#
+# REJECTED: a generic "container near its memory limit" rule, which looks like the
+# obvious preventative complement to these. Measured over 7d before writing this,
+# peak working-set/limit ratios were media/app 99.9%, monitoring/prometheus 99.5%,
+# immich/app 97.1%, grafana 92%, memcached 84%. Several workloads here ride their
+# limit as designed — memcached fills its cache to the ceiling on purpose — so any
+# threshold low enough to be predictive fires constantly on healthy pods. Worse,
+# it would not have caught the incident it was meant to: immich ramped 1.2Gi ->
+# 4.0Gi in about two minutes, so no `for:` duration long enough to suppress the
+# noise is short enough to beat the kill. Per-workload thresholds might be
+# defensible someday; a cluster-wide one is not.
+#
+# No `release:` label needed — ruleSelectorNilUsesHelmValues: false — and the
+# `severity` labels route to Discord via the catch-all AlertmanagerConfig.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: oom
+  namespace: monitoring
+spec:
+  groups:
+    - name: oom.rules
+      rules:
+        # The two OOM tiers are deliberately MUTUALLY EXCLUSIVE (`> 0 and < 3`
+        # here, `>= 3` below) rather than nested thresholds. The chart's stock
+        # inhibit_rules suppress a warning with a critical only when `namespace`
+        # AND `alertname` are equal, so two rules with different names both reach
+        # Discord. Splitting the ranges is what keeps one OOM event from
+        # producing two notifications.
+        - alert: ContainerOOMKilled
+          # An isolated or occasional OOM: the container's last termination was
+          # the OOM reaper, but it is not in a loop. Usually one oversized request
+          # or one unlucky job, and often self-correcting — hence warning.
+          #
+          # The `and on (...)` join against last_terminated_reason is what makes
+          # this OOM-specific rather than a generic restart alert. Note the join
+          # needs the reason to still be OOMKilled *now*: if the container has
+          # since died some other way the series flips and this goes quiet, which
+          # is the behaviour we want.
+          expr: |
+            (
+              increase(kube_pod_container_status_restarts_total[1h]) > 0
+                and
+              increase(kube_pod_container_status_restarts_total[1h]) < 3
+            )
+              and on (namespace, pod, container)
+            kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+          for: 5m
+          labels:
+            severity: warning
+            component: kubernetes
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.container }} was OOMKilled"
+            description: >-
+              Container {{ $labels.container }} in pod {{ $labels.pod }} has
+              restarted {{ $value | printf "%.0f" }} time(s) in the last hour and
+              its last termination reason was OOMKilled — it exceeded its memory
+              limit and the kernel killed it. Compare
+              container_memory_working_set_bytes against the container's limit; if
+              the peak is legitimate, raise the limit, otherwise find what grew.
+        - alert: ContainerOOMCrashLooping
+          # The case that went unseen for 17 days. Three or more OOM kills inside
+          # an hour is not a workload that got unlucky, it is a workload that
+          # cannot start and stay under its limit, and it will keep dying until
+          # the limit or the work is changed.
+          #
+          # Critical because the blast radius is usually wider than the container.
+          # immich-server runs the API and the job worker in one cgroup, so each
+          # kill also broke in-flight uploads and left jobs stranded in BullMQ as
+          # "job stalled more than allowable limit". A single-purpose container
+          # OOMing is a degraded feature; a multi-process one is an outage.
+          expr: |
+            increase(kube_pod_container_status_restarts_total[1h]) >= 3
+              and on (namespace, pod, container)
+            kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+          for: 5m
+          labels:
+            severity: critical
+            component: kubernetes
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.container }} is in an OOM crash loop"
+            description: >-
+              Container {{ $labels.container }} in pod {{ $labels.pod }} has been
+              OOMKilled {{ $value | printf "%.0f" }} times in the last hour. It
+              cannot stay within its memory limit, so it will keep restarting and
+              dropping work until the limit is raised or the workload is reduced.
+              Note that KubePodCrashLooping will NOT fire alongside this if the
+              loop is fast — see the header of this file.
+        - alert: ContainerRestartsLooping
+          # Non-OOM crash loops, which the stock rule misses for the same
+          # structural reason. `unless` excludes anything the two rules above
+          # already own, so each crash-looping container produces exactly one
+          # alert with the right diagnosis attached.
+          #
+          # Threshold calibrated against 7d of real history rather than guessed:
+          # >= 5 restarts/hour matched exactly ONE container across the whole
+          # cluster over a week (immich, peak 7.1) and nothing else, so this is
+          # quiet by measurement and not by hope.
+          expr: |
+            increase(kube_pod_container_status_restarts_total[1h]) >= 5
+              unless on (namespace, pod, container)
+            kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+          for: 10m
+          labels:
+            severity: warning
+            component: kubernetes
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.container }} is restarting repeatedly"
+            description: >-
+              Container {{ $labels.container }} in pod {{ $labels.pod }} restarted
+              {{ $value | printf "%.0f" }} times in the last hour for a reason
+              other than OOM. Check
+              `kubectl logs -n {{ $labels.namespace }} {{ $labels.pod }} --previous`
+              and the container's last terminated reason and exit code.
