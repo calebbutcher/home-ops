@@ -21,6 +21,46 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 3
+  # Point the compactor's working directory at the dedicated node-local scratch
+  # disk (see the long comment under `compactor:` for why it must not be a PVC).
+  #
+  # This has to be a post-renderer rather than plain values. The chart hardcodes
+  # `--data-dir=/var/thanos/compact` and mounts a volume named `data` there, and
+  # Thanos refuses a repeated flag outright:
+  #     error parsing commandline arguments: flag 'data-dir' cannot be repeated
+  # so `compactor.extraArgs` cannot redirect it, and a second volumeMount on the
+  # same mountPath is rejected by the API server. Setting
+  # `compactor.persistence.enabled: false` makes the chart emit `data` as an
+  # emptyDir, which this patch then swaps for the hostPath.
+  #
+  # Strategic-merge keyed on the volume `name`, so it does not depend on the
+  # chart's volume ordering; `emptyDir: null` deletes the field the chart set.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: StatefulSet
+              name: thanos-compactor
+            patch: |
+              apiVersion: apps/v1
+              kind: StatefulSet
+              metadata:
+                name: thanos-compactor
+              spec:
+                template:
+                  spec:
+                    volumes:
+                      - name: data
+                        emptyDir: null
+                        hostPath:
+                          path: /var/mnt/scratch/thanos-compact
+                          # Directory, NOT DirectoryOrCreate. DirectoryOrCreate
+                          # would have kubelet create the path root-owned (the
+                          # compactor runs as 1001 and could not write to it), and
+                          # worse, it would happily create it on the OS root disk
+                          # if the scratch disk were not mounted. A missing path
+                          # should be a loud FailedMount.
+                          type: Directory
   values:
     # Object store config lives in the SOPS-managed Secret thanos-objstore
     # (key objstore.yml). Every component mounts it as --objstore.config-file.
@@ -191,74 +231,151 @@ spec:
     compactor:
       # Must remain a singleton (the chart enforces replicas: 1).
       #
-      # 🔴 DISABLED 2026-09-12. This workload cannot currently share a node, and
-      # running it does not just fail itself — it destroys its neighbours.
+      # Re-enabled 2026-09-29 after 17 days off, on a dedicated node-local disk.
+      # Full rationale and runbook: docs/thanos-compactor-scratch.md.
       #
-      # On 09-12 it was restarted on worker-03 and exhausted that node's
-      # allocatable Longhorn space in ~30 minutes. Longhorn's iSCSI target then
-      # returned `Space allocation failed write protect` to the OTHER volumes on
-      # that disk, and the kernel responded by ABORTING their ext4 journals:
+      # Why it was off: on 09-12 its 90Gi `longhorn-scratch` volume exhausted
+      # worker-03's allocatable Longhorn space in ~30 minutes. Longhorn's iSCSI
+      # target then returned `Space allocation failed write protect` to the OTHER
+      # volumes sharing that disk, and the kernel responded by ABORTING their ext4
+      # journals:
       #     critical space allocation error, dev sdf, sector 21309392 op 0x1:(WRITE)
       #     Aborting journal on device sdf-8.
       #     EXT4-fs error (device sdf): comm postgres: Detected aborted journal
-      # An aborted journal returns EIO for every subsequent operation and does NOT
-      # recover when space is freed. authentik-postgres-3 and immich-postgres-2 both
-      # had to be re-cloned. The identical event on 09-09 is what started the whole
-      # incident chain (see [[cnpg-wal-slot-exhaustion]] / PR #471) — the EIO it
-      # left behind is why the compactor looked like it had "corrupt" scratch.
+      # An aborted journal returns EIO forever and does not recover when space is
+      # freed; authentik-postgres-3 and immich-postgres-2 both had to be re-cloned.
       #
-      # The arithmetic, which no amount of resizing fixes: a worker disk is 97.9Gi,
-      # Longhorn reserves 30% (29.4Gi), leaving 68.5Gi allocatable — against a
-      # compaction peak measured at ~65Gi. This job alone wants ~95% of a node's
-      # entire Longhorn budget, so it cannot coexist with anything. Lowering the
-      # reserve is NOT the answer: that cushion is precisely what the fill consumed.
-      #
-      # Re-enable only once one of these is true:
-      #   - a worker's /dev/sdb is grown well past 98Gi (Proxmox, needs a reboot), or
-      #   - retention.resolutionRaw is cut so less raw data reaches the 14d tier
-      #     (thanos compact has no --block-ranges, so the tier itself is untunable).
-      # Consequence while disabled: no compaction, NO DOWNSAMPLING, and NO RETENTION
-      # enforcement in the object store. Bucket size grows and long-range queries get
-      # slower. This is a deliberate trade against corrupting live databases.
-      enabled: false
+      # The fix is isolation, not capacity. Every previous attempt here tuned the
+      # size (20Gi -> 100Gi -> 90Gi -> off) while leaving the volume on a filesystem
+      # shared with live databases, so overrunning it destroyed neighbours. On a
+      # disk of its own, overrunning it halts the compactor and nothing else —
+      # loud, recoverable, and already alerted by `thanos_compact_halted`.
+      enabled: true
       # Scratch space: blocks are downloaded, compacted and downsampled here before
-      # going back to RustFS. Nothing is authoritative, so longhorn-scratch (one
-      # replica, trimmed hourly, excluded from the nightly backup group) fits — and
-      # being a singleton, mobility matters more here than anywhere else in this
-      # chart, since a dead node otherwise stops compaction outright.
+      # going back to RustFS. Nothing here is authoritative.
       #
-      # Sized for what compaction needs *while running* (steady state is under 1Mi).
-      # The top raw tier is 14d built from seven 2d blocks and `thanos compact` has no
-      # flag to tune those ranges, so peak is every source on disk at once plus the
-      # output written beside them — measured on the 08-13 -> 08-27 window:
+      # `persistence.enabled: false` makes the chart emit the `data` volume as an
+      # emptyDir; spec.postRenderers above replaces it with a hostPath onto
+      # /var/mnt/scratch/thanos-compact, a dedicated 100G disk (scsi2) prepared by
+      # ansible/scratch-disk.yml on the three workers listed in nodeAffinity below.
+      #
+      # Why a hostPath and not any kind of PVC:
+      #   - A PVC binds to one node's volume permanently. For a singleton that means
+      #     a dead node leaves the pod Pending — the exact failure the move to
+      #     Longhorn was meant to prevent, and which it failed to prevent anyway
+      #     because the 90Gi declaration had made the volume unschedulable since
+      #     09-09. A hostPath has no binding at all: the data is disposable, so
+      #     nothing has to follow the pod, and it can start on any equipped node.
+      #   - local-path would be strictly worse than Longhorn here, not better. It
+      #     provisions into the OS root filesystem, which is 95.8GiB per worker with
+      #     17-42GiB free, shared with containerd images and every other local-path
+      #     PVC, and kubelet evicts at nodefs.available < 5%. A 65GiB compaction
+      #     there takes the whole node into DiskPressure. (It is also why the
+      #     original 20Gi "worked" for months: local-path enforces no quota, so
+      #     compaction silently overran the declared size until Longhorn made the
+      #     number real.)
+      #
+      # Sizing, unchanged in substance: the top raw tier is 14d built from seven 2d
+      # blocks and `thanos compact` has no flag to tune those ranges, so peak is
+      # every source on disk at once plus the output written beside them — measured
+      # on the 08-13 -> 08-27 window:
       #   32.8Gi  7x 2d sources
       # + 32.5Gi  the 14d block they merge into (it barely dedupes — do not assume
       #           the output is smaller than the input)
       # = ~65Gi   peak
-      #
-      # 20Gi halted the compactor on 2026-08-27 ("no space left on device"). It had
-      # never been survivable: on local-path, which enforces no quota, compaction
-      # simply overran the declared size unnoticed for months.
-      #
-      # 100Gi -> 90Gi on 2026-09-12, NOT because the peak shrank. Longhorn schedules
-      # on DECLARED size against a per-node ceiling of 250% * (disk - reserved) =
-      # 171.3G, and no node had 100G of that ceiling left: the volume became
-      # unschedulable on 09-09 and stayed that way, so the compactor could not have
-      # moved off a failed node even though mobility is the whole reason it is on
-      # Longhorn. 90Gi fits the ceiling on three nodes (03/04/06) and restores that
-      # mobility, while still clearing the measured 65Gi peak by ~25Gi.
-      #
-      # ⚠️ This is headroom traded for schedulability, and the DECLARED ceiling is
-      # not the binding constraint at peak — physical space is. worker-03 holds
-      # 33.7G of real data against a 97.9G disk, so a full 65Gi compaction there
-      # would exhaust it. That is the same exhaustion that took authentik down on
-      # 09-12 (see prometheusrule-postgres.yaml). Until the over-provisioning budget
-      # (#349) is actually resolved, do not treat 90Gi as comfortable.
+      # A 100G disk formats to ~97GiB available (ext4 metadata, mkfs -m 1), leaving
+      # ~32GiB of headroom. Watch ThanosCompactScratchFilling through the first full
+      # 14d merge; if the trough goes under ~20GiB, grow the disk — which is now a
+      # safe, isolated operation.
       persistence:
-        enabled: true
-        storageClass: longhorn-scratch
-        size: 90Gi
+        enabled: false
+      # The three workers carrying a scratch disk, kept in step with the
+      # [scratch_disk] group in ansible/inventory/my-cluster/hosts.ini.
+      #
+      # Explicit hostnames rather than a node label, because hosts.ini is
+      # .gitignore'd: this block and docs/thanos-compactor-scratch.md are the only
+      # tracked record of which nodes are equipped. A node listed here without a
+      # prepared disk gets a pod stuck on FailedMount (loud, and safe).
+      #
+      # worker-01 is on a different Proxmox host from 04/06, so one PVE host failure
+      # cannot strand the pod. Three, not one, so the singleton still has somewhere
+      # to land with one node down and another cordoned during an update roll.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - k3s-worker-01
+                      - k3s-worker-04
+                      - k3s-worker-06
+      # Mounted by the init container only, one level above the compactor's own
+      # data-dir, so it can see the marker file and measure the filesystem.
+      extraVolumes:
+        - name: scratch-root
+          hostPath:
+            path: /var/mnt/scratch
+            type: Directory
+      # The safety interlock. hostPath is the one volume type that will happily
+      # write to whatever is behind the path, so before Thanos gets to run we prove
+      # the path really is the dedicated disk and really has room.
+      #
+      # `.scratch-disk` is written by ansible/roles/scratch_disk onto the scratch
+      # filesystem itself, so it is visible only while that filesystem is mounted.
+      # If the disk is missing, failed to mount, or the node was rebuilt without
+      # running the play, this fails loudly instead of letting a 65GiB compaction
+      # fill the OS root disk through an empty mount point.
+      extraInitContainers:
+        - name: verify-scratch
+          # Reusing the Thanos image only so this pod pulls nothing extra — the
+          # script needs sh/test/find/df/awk and no Thanos binary. Renovate's
+          # helm-values manager covers kubernetes/** and will bump (and digest-pin)
+          # this independently of the chart's appVersion; a mismatch between the two
+          # is harmless and is NOT something to hand-correct.
+          image: quay.io/thanos/thanos:v0.42.4
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              test -f /scratch/.scratch-disk || {
+                echo "FATAL: /var/mnt/scratch is not the dedicated scratch disk"
+                echo "       (marker .scratch-disk absent — run ansible/scratch-disk.yml)"
+                exit 1
+              }
+              # Start every run from a clean slate so the ~65GiB peak above is the
+              # whole story. -mindepth 1 clears the contents but keeps the
+              # directory and its 1001:1001 ownership, which Ansible set and which
+              # fsGroup cannot fix for a hostPath.
+              find /scratch/thanos-compact -mindepth 1 -delete
+              avail=$(df -P /scratch | awk 'NR==2 {print $4}')
+              [ "$avail" -ge 83886080 ] || {
+                echo "FATAL: only ${avail}KiB free on /var/mnt/scratch, need 80GiB"
+                exit 1
+              }
+              echo "scratch disk OK: ${avail}KiB available"
+          volumeMounts:
+            - name: scratch-root
+              mountPath: /scratch
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
       # Downsample/retention policy in the object store (empty = keep forever).
+      # The first run after 17 days off will apply resolutionRaw for the first time
+      # since 09-12 and delete a large batch at once; that is expected.
       retention:
         resolutionRaw: 30d
         resolution5m: 180d

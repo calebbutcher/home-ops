@@ -1,0 +1,34 @@
+---
+# Prepare the dedicated node-local scratch disk on the workers that carry one.
+# Standalone on purpose — run it explicitly, never via a full site.yml re-run
+# (which would also touch k3s):
+#
+#   ansible-playbook scratch-disk.yml
+#
+# Idempotent: skips (re)formatting if the disk already carries the expected ext4,
+# and refuses to touch a device that holds foreign data or is mounted elsewhere.
+#
+# Only the hosts in the [scratch_disk] inventory group have the disk:
+#
+#   [scratch_disk]
+#   10.2.169.40  # k3s-worker-01
+#   10.2.169.43  # k3s-worker-04
+#   10.2.169.45  # k3s-worker-06
+#
+# That group is reproduced here because hosts.ini is .gitignore'd, so this file and
+# docs/thanos-compactor-scratch.md are the only tracked record of it. It must stay
+# in step with the compactor's nodeAffinity in
+# kubernetes/apps/monitoring/thanos/helmrelease.yaml — a node listed there without
+# a prepared disk gets a pod that cannot mount, and a node prepared here but not
+# listed there is just a wasted disk.
+#
+# Prerequisite: the disk must be attached as scsi2 with discard=on, and the VM
+# restarted since, or the `discard` mount option silently does nothing. See
+# roles/scratch_disk/defaults/main.yml and docs/thanos-compactor-scratch.md.
+- name: Prepare the dedicated scratch disk
+  hosts: scratch_disk
+  gather_facts: true
+  become: true
+  environment: "{{ proxy_env | default({}) }}"
+  roles:
+    - role: scratch_disk

@@ -1,0 +1,43 @@
+---
+# Dedicated block device for disposable node-local scratch space, formatted and
+# mounted at scratch_disk_mount. Currently used only by the Thanos compactor,
+# which needs ~65GiB of working space while it merges the 14d raw tier.
+#
+# Addressed by /dev/disk/by-id, NOT /dev/sdX, and deliberately so. Longhorn
+# presents every attached volume to the node as an iSCSI LUN, so each worker
+# already carries a shifting set of sdc..sdn devices; the 100G QEMU disk landed
+# on a different letter on every node (sdg / sde / sdf) and those letters are
+# reassigned on each boot depending on iSCSI attach order. A literal /dev/sdc
+# here would eventually point at a live Longhorn volume — which is unpartitioned,
+# ext4 and about the right size, so it would pass every guard below before being
+# reformatted. The Longhorn role gets away with a literal /dev/sdb only because
+# scsi0/scsi1 are attached at boot, ahead of any iSCSI LUN.
+#
+# Proxmox names the symlink after the QEMU drive slot, so the disk must stay on
+# scsi2. Equivalent by-path form, if by-id is ever unavailable:
+#   /dev/disk/by-path/pci-0000:00:05.0-scsi-0:0:0:2
+scratch_disk_device: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi2
+scratch_disk_mount: /var/mnt/scratch
+scratch_disk_fstype: ext4
+# A dedicated scratch filesystem has no need for ext4's 5% root reserve — that is
+# ~4GiB of a 100G disk handed back to the workload.
+scratch_disk_mkfs_opts: -m 1
+# Guard rails: the data disk must fall inside this size window before we format
+# it, so a misnamed device is never wiped by accident. Note this window overlaps
+# the Longhorn data disk's (90-110GB) — the two are the same size — so size alone
+# does NOT distinguish them. The "already mounted" assertion below is what does.
+scratch_disk_min_gb: 90
+scratch_disk_max_gb: 110
+
+# Directory the Thanos compactor mounts as its --data-dir, and the ownership it
+# needs. quay.io/thanos/thanos runs as uid/gid 1001; fsGroup does not apply to
+# hostPath volumes, so the ownership has to be right here on the host.
+scratch_disk_thanos_compact_dir: thanos-compact
+scratch_disk_thanos_uid: 1001
+scratch_disk_thanos_gid: 1001
+
+# Marker written onto the filesystem itself once mounted. The compactor's init
+# container refuses to start unless it can see this file, which is what turns a
+# missing disk or a failed mount into a loud CrashLoop instead of 65GiB written
+# to the OS root disk.
+scratch_disk_marker: .scratch-disk
