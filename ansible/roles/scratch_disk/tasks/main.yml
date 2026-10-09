@@ -2,33 +2,56 @@
 # The device is a /dev/disk/by-id symlink (see defaults/main.yml for why), but
 # ansible_devices is keyed by kernel name, so resolve it before any of the guards
 # can look the device up.
-- name: Resolve the scratch device symlink
+#
+# ⚠️ `follow: false` is required and must not be "simplified" to `follow: true`.
+# With follow: true the stat module stats the TARGET but still reports the path you
+# gave it, sets islnk: false and omits lnk_source entirely — so the resolved kernel
+# name is unobtainable and `path | basename` yields the by-id name. Only
+# follow: false populates lnk_source (= os.path.realpath), which is what we need.
+- name: Read the scratch device path (not followed — we need the link target)
   ansible.builtin.stat:
     path: "{{ scratch_disk_device }}"
-    follow: true
+    follow: false
+  register: scratch_disk_link
+
+- name: Assert the scratch device path exists
+  ansible.builtin.assert:
+    that:
+      - scratch_disk_link.stat.exists
+    fail_msg: >-
+      {{ scratch_disk_device }} does not exist on {{ inventory_hostname }}. Attach the
+      dedicated scratch disk as scsi2 before running this play, and check
+      `ls -l /dev/disk/by-id/ | grep scsi2`.
+
+# Accepts either a by-id symlink (the default, and what you should use) or a bare
+# kernel device, so an explicit /dev/sdX override still works.
+- name: Resolve the device to its kernel device path
+  ansible.builtin.set_fact:
+    scratch_disk_resolved: >-
+      {{ (scratch_disk_link.stat.lnk_source
+          if (scratch_disk_link.stat.islnk | default(false))
+          else scratch_disk_device) | trim }}
+
+- name: Stat the resolved kernel device
+  ansible.builtin.stat:
+    path: "{{ scratch_disk_resolved }}"
+    follow: false
   register: scratch_disk_stat
 
-- name: Assert the dedicated scratch device exists
+- name: Resolve short device name
+  ansible.builtin.set_fact:
+    scratch_disk_device_short: "{{ scratch_disk_resolved | basename }}"
+
+- name: Assert the resolved device is a block device known to Ansible
   ansible.builtin.assert:
     that:
       - scratch_disk_stat.stat.exists
       - scratch_disk_stat.stat.isblk | default(false)
-    fail_msg: >-
-      {{ scratch_disk_device }} does not resolve to a block device on
-      {{ inventory_hostname }}. Attach the dedicated scratch disk as scsi2 before
-      running this play, and check `ls -l /dev/disk/by-id/ | grep scsi2`.
-
-- name: Resolve short device name
-  ansible.builtin.set_fact:
-    scratch_disk_device_short: "{{ scratch_disk_stat.stat.path | basename }}"
-
-- name: Assert the resolved device is known to Ansible
-  ansible.builtin.assert:
-    that:
       - scratch_disk_device_short in ansible_devices
     fail_msg: >-
-      {{ scratch_disk_device }} resolved to {{ scratch_disk_device_short }}, which is
-      not in ansible_devices on {{ inventory_hostname }}.
+      {{ scratch_disk_device }} resolved to {{ scratch_disk_resolved }}
+      (short name {{ scratch_disk_device_short }}), which is not a block device known
+      to Ansible on {{ inventory_hostname }}.
 
 # This is the guard the Longhorn role does not need. Both disks are ~100G,
 # unpartitioned and ext4, so the size and filesystem checks below cannot tell them
@@ -56,7 +79,7 @@
   # partitions assertion below, which is why both guards exist.
 
 - name: Read any existing filesystem signature on the scratch device
-  ansible.builtin.command: "blkid -o value -s TYPE {{ scratch_disk_stat.stat.path }}"
+  ansible.builtin.command: "blkid -o value -s TYPE {{ scratch_disk_resolved }}"
   register: scratch_disk_blkid
   changed_when: false
   failed_when: false
@@ -84,12 +107,12 @@
 - name: Create the filesystem on the scratch device (idempotent, never forced)
   community.general.filesystem:
     fstype: "{{ scratch_disk_fstype }}"
-    dev: "{{ scratch_disk_stat.stat.path }}"
+    dev: "{{ scratch_disk_resolved }}"
     opts: "{{ scratch_disk_mkfs_opts }}"
     force: false
 
 - name: Read the filesystem UUID
-  ansible.builtin.command: "blkid -o value -s UUID {{ scratch_disk_stat.stat.path }}"
+  ansible.builtin.command: "blkid -o value -s UUID {{ scratch_disk_resolved }}"
   register: scratch_disk_uuid
   changed_when: false
 
