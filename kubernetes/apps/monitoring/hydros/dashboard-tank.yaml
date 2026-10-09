@@ -80,7 +80,7 @@ data:
           "title": "Temperature",
           "gridPos": {
             "h": 4,
-            "w": 6,
+            "w": 8,
             "x": 0,
             "y": 1
           },
@@ -154,8 +154,8 @@ data:
           "title": "pH",
           "gridPos": {
             "h": 4,
-            "w": 6,
-            "x": 6,
+            "w": 8,
+            "x": 8,
             "y": 1
           },
           "datasource": {
@@ -228,9 +228,9 @@ data:
           "title": "Salinity",
           "gridPos": {
             "h": 4,
-            "w": 6,
-            "x": 12,
-            "y": 1
+            "w": 8,
+            "x": 0,
+            "y": 9
           },
           "datasource": {
             "type": "prometheus",
@@ -310,8 +310,8 @@ data:
           "title": "ORP",
           "gridPos": {
             "h": 4,
-            "w": 6,
-            "x": 18,
+            "w": 8,
+            "x": 16,
             "y": 1
           },
           "datasource": {
@@ -360,7 +360,7 @@ data:
           "title": "Alkalinity",
           "gridPos": {
             "h": 4,
-            "w": 6,
+            "w": 8,
             "x": 0,
             "y": 5
           },
@@ -434,8 +434,8 @@ data:
           "title": "Calcium",
           "gridPos": {
             "h": 4,
-            "w": 6,
-            "x": 6,
+            "w": 8,
+            "x": 8,
             "y": 5
           },
           "datasource": {
@@ -503,14 +503,88 @@ data:
           ]
         },
         {
+          "id": 22,
+          "type": "stat",
+          "title": "Magnesium",
+          "gridPos": {
+            "h": 4,
+            "w": 8,
+            "x": 16,
+            "y": 5
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "suffix:ppm",
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1150
+                  },
+                  {
+                    "color": "green",
+                    "value": 1250
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1451
+                  },
+                  {
+                    "color": "red",
+                    "value": 1550
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "area",
+            "textMode": "auto",
+            "justifyMode": "auto"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max by (name) (hydros_input_magnesium_ppm)",
+              "legendFormat": "{{name}}"
+            }
+          ]
+        },
+        {
           "id": 6,
           "type": "stat",
           "title": "Phosphate",
           "gridPos": {
             "h": 4,
-            "w": 6,
-            "x": 12,
-            "y": 5
+            "w": 8,
+            "x": 8,
+            "y": 9
           },
           "datasource": {
             "type": "prometheus",
@@ -582,9 +656,9 @@ data:
           "title": "Nitrate",
           "gridPos": {
             "h": 4,
-            "w": 6,
-            "x": 18,
-            "y": 5
+            "w": 8,
+            "x": 16,
+            "y": 9
           },
           "datasource": {
             "type": "prometheus",
@@ -658,7 +732,7 @@ data:
             "h": 3,
             "w": 24,
             "x": 0,
-            "y": 9
+            "y": 13
           },
           "datasource": {
             "type": "prometheus",
@@ -734,7 +808,7 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 12
+            "y": 16
           },
           "collapsed": false,
           "panels": [],
@@ -748,7 +822,7 @@ data:
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 13
+            "y": 17
           },
           "datasource": {
             "type": "prometheus",
@@ -832,7 +906,7 @@ data:
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 13
+            "y": 17
           },
           "datasource": {
             "type": "prometheus",
@@ -916,7 +990,7 @@ data:
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 20
+            "y": 24
           },
           "datasource": {
             "type": "prometheus",
@@ -1011,7 +1085,7 @@ data:
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 20
+            "y": 24
           },
           "datasource": {
             "type": "prometheus",
@@ -1067,7 +1141,7 @@ data:
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 27
+            "y": 31
           },
           "datasource": {
             "type": "prometheus",
@@ -1152,7 +1226,7 @@ data:
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 27
+            "y": 31
           },
           "datasource": {
             "type": "prometheus",
@@ -1230,6 +1304,91 @@ data:
           "description": "Green 400-450 ppm inclusive -- 450 is high but acceptable, so yellow starts at 451 (Grafana threshold steps are inclusive lower bounds, which would otherwise paint an exactly-450 reading yellow). Paired with the 8-11 dKH alkalinity band beside it -- corals consume the two together, so calcium falling alongside alkalinity is uptake, while either one moving alone points at dosing or a bad test. Hand-entered from a test kit via reef-log, so the line steps at the moment each result was recorded. The query is source-agnostic, so if a tester ever reports this reading the two merge into one series with no dashboard change."
         },
         {
+          "id": 23,
+          "type": "timeseries",
+          "title": "Magnesium",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 38
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "suffix:ppm",
+              "decimals": 0,
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "stepAfter",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "always",
+                "spanNulls": true,
+                "pointSize": 7,
+                "thresholdsStyle": {
+                  "mode": "dashed"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1150
+                  },
+                  {
+                    "color": "green",
+                    "value": 1250
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1451
+                  },
+                  {
+                    "color": "red",
+                    "value": 1550
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max by (name) (hydros_input_magnesium_ppm)",
+              "legendFormat": "{{name}}"
+            }
+          ],
+          "description": "Green 1250-1450 ppm inclusive, so yellow starts at 1451 on the same inclusive-lower-bound convention as calcium. The third leg of the alkalinity/calcium triad above: magnesium is what keeps the other two in solution, so alkalinity and calcium that will not hold their numbers despite dosing is the classic sign to test this one. It is consumed far more slowly than the other two, so this line should be close to flat -- a visible slope means something is using or precipitating it. Hand-entered from a test kit via reef-log, so the line steps at the moment each result was recorded. The query is source-agnostic, so if a tester ever reports this reading the two merge into one series with no dashboard change."
+        },
+        {
           "id": 14,
           "type": "timeseries",
           "title": "Phosphate",
@@ -1237,7 +1396,7 @@ data:
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 34
+            "y": 45
           },
           "datasource": {
             "type": "prometheus",
@@ -1322,7 +1481,7 @@ data:
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 34
+            "y": 45
           },
           "datasource": {
             "type": "prometheus",
@@ -1407,7 +1566,7 @@ data:
             "h": 7,
             "w": 24,
             "x": 0,
-            "y": 41
+            "y": 52
           },
           "datasource": {
             "type": "prometheus",
@@ -1463,7 +1622,7 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 48
+            "y": 59
           },
           "collapsed": false,
           "panels": [],
@@ -1477,7 +1636,7 @@ data:
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 49
+            "y": 60
           },
           "datasource": {
             "type": "prometheus",
@@ -1555,7 +1714,7 @@ data:
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 49
+            "y": 60
           },
           "datasource": {
             "type": "prometheus",
@@ -1616,7 +1775,7 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 55
+            "y": 66
           },
           "collapsed": false,
           "panels": [],
@@ -1630,7 +1789,7 @@ data:
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 56
+            "y": 67
           },
           "datasource": {
             "type": "prometheus",
