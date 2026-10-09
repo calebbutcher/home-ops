@@ -80,7 +80,8 @@
 #           unique_id: hvac_system_status_code
 #           state: >-
 #             {% set s = states('sensor.thermostat_1_system_status') %}
-#             {{ {'System Idle': 0, 'Waiting...': 1, 'Cooling': 2}.get(s, -1) }}
+#             {{ {'System Idle': 0, 'Waiting...': 1, 'Cooling': 2,
+#                 'Fan Running': 3, 'System Off': 4}.get(s, -1) }}
 #           availability: >-
 #             {{ states('sensor.thermostat_1_system_status')
 #                not in ['unknown', 'unavailable'] }}
@@ -93,6 +94,10 @@
 # the map, and staging is captured from that day on. The `availability:` guard
 # matters: without it every HA restart would blip -1 while the source is
 # `unavailable` and cry wolf.
+#
+# 3 and 4 were the first catch (2026-10-09): with the mode off and the fan on
+# Circulate, Nexia alternates "Fan Running" / "System Off" every 30 minutes.
+# Neither is a heating state — the furnace vocabulary is still uncaptured.
 #
 # Nothing exports compressor speed usefully. The AC compressor is single-stage
 # and the furnace is gas, so current/requested_compressor_speed read a constant

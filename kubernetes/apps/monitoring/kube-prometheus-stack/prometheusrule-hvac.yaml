@@ -138,9 +138,10 @@ spec:
               sensor.thermostat_1_system_status is reporting a string the
               template sensor does not recognise, so it records as -1. Read the
               live value in Home Assistant and add it to the mapping in
-              configuration.yaml. Almost certainly a heating state appearing for
-              the first time this season — capture it and furnace staging starts
-              being measured.
+              configuration.yaml, then mirror it in the servicemonitor.yaml
+              comment and the dashboard value mappings. Likely a heating state
+              appearing for the first time this season — capture it and furnace
+              staging starts being measured.
 
         # Metrics present but frozen. HA keeps serving the last known value of a
         # stale entity indefinitely, so `up == 1` and the series keeps a constant

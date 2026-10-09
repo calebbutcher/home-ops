@@ -383,6 +383,16 @@ data:
                       "text": "Cooling",
                       "color": "blue",
                       "index": 3
+                    },
+                    "3": {
+                      "text": "Fan Running",
+                      "color": "purple",
+                      "index": 4
+                    },
+                    "4": {
+                      "text": "System Off",
+                      "color": "text",
+                      "index": 5
                     }
                   }
                 }
@@ -737,6 +747,16 @@ data:
                       "text": "Cooling",
                       "color": "blue",
                       "index": 3
+                    },
+                    "3": {
+                      "text": "Fan Running",
+                      "color": "purple",
+                      "index": 4
+                    },
+                    "4": {
+                      "text": "System Off",
+                      "color": "text",
+                      "index": 5
                     }
                   }
                 }
