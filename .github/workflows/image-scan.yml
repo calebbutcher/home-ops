@@ -32,7 +32,7 @@ permissions:
 
 env:
   # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize
-  KUSTOMIZE_VERSION: 5.8.1
+  KUSTOMIZE_VERSION: 5.8.3
   # renovate: datasource=github-releases depName=aquasecurity/trivy
   TRIVY_VERSION: 0.74.0
 

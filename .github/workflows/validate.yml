@@ -33,7 +33,7 @@ env:
   # by the first customManager in renovate.json, which keeps these current.
   # Values are stored WITHOUT a leading `v` — the download URLs add it.
   # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize
-  KUSTOMIZE_VERSION: 5.8.1
+  KUSTOMIZE_VERSION: 5.8.3
   # renovate: datasource=github-releases depName=yannh/kubeconform
   KUBECONFORM_VERSION: 0.8.0
   # renovate: datasource=github-releases depName=gitleaks/gitleaks
