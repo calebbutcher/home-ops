@@ -314,12 +314,16 @@ spec:
           labelValue: "1"
           searchNamespace: ALL
 
+      # Idle RSS is ~300Mi and dashboard sessions spike it well past that. At a
+      # 512Mi limit Grafana never OOMs — the kernel evicts its file pages
+      # instead (~200 major faults/s), SQLite times out, /api/health 503s and
+      # Traefik answers "no available server". 1Gi leaves headroom.
       resources:
         requests:
-          memory: 128Mi
+          memory: 384Mi
           cpu: 100m
         limits:
-          memory: 512Mi
+          memory: 1Gi
           cpu: 500m
 
     # -------------------------------------------------------------------------
