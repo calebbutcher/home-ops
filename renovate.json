@@ -137,7 +137,7 @@
     {
       "description": "A digest move on a floating tag (seerr `latest@sha256`, sockpuppetbrowser `latest`) can hide a version jump of any size.",
       "matchUpdateTypes": ["digest"],
-      "matchCurrentValue": ["latest", "main", "master", "stable", "nightly", "develop"],
+      "matchCurrentValue": "/^(latest|main|master|stable|nightly|develop)$/",
       "automerge": false,
       "labels": ["renovate"]
     },
