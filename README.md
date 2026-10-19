@@ -52,7 +52,8 @@ Flux CD ──► infrastructure ──► apps
 - **Observability** — [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack)
   (Prometheus, Alertmanager, Grafana) plus [Uptime Kuma](https://github.com/louislam/uptime-kuma).
 - **GitOps / updates** — Flux reconciles every 30m; [Renovate](https://docs.renovatebot.com/)
-  opens one PR per dependency update (approve-then-apply, nothing auto-merges).
+  opens one PR per dependency update. Low-risk app updates automerge and auto-revert
+  if the rollout fails; platform and k3s updates are always merged by hand.
 
 ## Repository layout
 
@@ -142,8 +143,11 @@ not ansible-vault.
 ## Updates
 
 Versions are pinned — exact Helm chart versions and image tags, no floating
-ranges. Renovate opens a PR per available update; merging the PR is the
-approval, and Flux applies it on the next reconcile. Details:
+ranges. Renovate opens a PR per available update. Low-risk app updates (HelmRelease
+charts/images under `kubernetes/apps`, ≥ 3 days old, no breaking-change wording)
+merge themselves and are reverted automatically if the rollout fails. Everything
+else, including all infrastructure and k3s updates, is approved by merging the PR,
+and Flux applies it on the next reconcile. Details:
 [`docs/updates.md`](docs/updates.md).
 
 Exactly **one** image floats:

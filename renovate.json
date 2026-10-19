@@ -5,7 +5,8 @@
     ":dependencyDashboard",
     ":semanticCommits",
     ":enablePreCommit",
-    "helpers:pinGitHubActionDigestsToSemver"
+    "helpers:pinGitHubActionDigestsToSemver",
+    "local>calebbutcher/home-ops//.github/renovate/quarantine"
   ],
   "timezone": "America/Chicago",
   "schedule": ["before 6am on monday"],
@@ -14,6 +15,10 @@
   "labels": ["renovate"],
   "rebaseWhen": "conflicted",
   "pinDigests": true,
+  "automergeType": "pr",
+  "platformAutomerge": true,
+  "automergeStrategy": "squash",
+  "internalChecksFilter": "strict",
   "ignorePaths": [
     "ansible/roles/**",
     "ansible/collections/**",
@@ -61,20 +66,98 @@
   ],
   "packageRules": [
     {
-      "description": "Never auto-merge anything — every update is reviewed and merged by hand",
-      "matchManagers": [
-        "flux",
-        "helm-values",
-        "helmv3",
-        "kubernetes",
-        "github-actions",
-        "custom.regex"
+      "description": [
+        "AUTOMERGE, tier 1: app updates that Flux applies through a HelmRelease (the chart, and the images in its values) under kubernetes/apps. Docs: docs/updates.md.",
+        "Only these can automerge, because only these have a way back: Helm rolls back a failed upgrade, the rollout-guard soak check watches the release for 45m, and rollout-revert reverts the PR. Raw manifests (the `kubernetes` manager: redis.yaml, gotenberg, CronJobs) get none of that.",
+        "Everything outside kubernetes/apps (infrastructure, k3s and the SUC Plans, Flux, kube-vip, CI tool pins, ansible) never matches this rule, so it stays manual.",
+        "minimumReleaseAge 3 days: lets a broken release get pulled or patched first, and outlasts the 24h HelmRepository refresh, so a merged chart bump can't hit 'chart not found'. Paired with internalChecksFilter strict at the top level, which keeps the PR from being created until the 3 days have passed; otherwise GitHub auto-merge would merge it straight away.",
+        "Every rule below CARVES OUT an exception. Later rules win, and they set `labels` (which replaces) rather than `addLabels`, so an exception also drops the `automerge` label and the label always tells the truth.",
+        "The `automerge gate` check (.github/scripts/automerge-gate.py) independently re-checks paths, update types, quarantine and release-note wording before GitHub merges anything."
       ],
-      "automerge": false
+      "matchManagers": ["flux", "helm-values"],
+      "matchFileNames": ["kubernetes/apps/**"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "minimumReleaseAge": "3 days",
+      "automerge": true,
+      "labels": ["renovate", "automerge"]
     },
     {
-      "description": "Separate PRs for major vs minor/patch so breaking changes stand out",
+      "description": "DB-backed apps: patches only. A minor often runs schema migrations, and a migrated database can't be rolled back by reverting the image. Minors (and digest moves, which can hide one) stay manual.",
+      "matchFileNames": [
+        "kubernetes/apps/immich/**",
+        "kubernetes/apps/paperless/**",
+        "kubernetes/apps/gitea/**",
+        "kubernetes/apps/n8n/**",
+        "kubernetes/apps/tandoor/**",
+        "kubernetes/apps/uptime-kuma/**",
+        "kubernetes/apps/media/tracearr/**"
+      ],
+      "matchUpdateTypes": ["minor", "digest"],
+      "automerge": false,
+      "labels": ["renovate"]
+    },
+    {
+      "description": [
+        "Never automerge these apps:",
+        "authentik is SSO for everything; a bad rollout locks you out of the apps you'd use to fix it.",
+        "technitium must match the version on the VM primary (see its helmrelease.yaml), and DNS sits on the path the revert itself needs.",
+        "bambustudio fails silently (see the rule further down).",
+        "The monitoring platform IS the detection layer: the soak check reads its blackbox probes, and kube-prometheus-stack bumps carry CRDs."
+      ],
+      "matchFileNames": [
+        "kubernetes/apps/authentik/**",
+        "kubernetes/apps/technitium/**",
+        "kubernetes/apps/bambustudio/**",
+        "kubernetes/apps/monitoring/kube-prometheus-stack/**",
+        "kubernetes/apps/monitoring/loki/**",
+        "kubernetes/apps/monitoring/thanos/**",
+        "kubernetes/apps/monitoring/alloy/**",
+        "kubernetes/apps/monitoring/blackbox/**"
+      ],
+      "automerge": false,
+      "labels": ["renovate"]
+    },
+    {
+      "description": "Home Assistant's monthly YYYY.M releases are 'minor' to Renovate but regularly carry backward-incompatible changes to integrations. Patches (YYYY.M.x) still automerge.",
+      "matchPackageNames": ["ghcr.io/home-operations/home-assistant"],
+      "matchUpdateTypes": ["minor"],
+      "automerge": false,
+      "labels": ["renovate"]
+    },
+    {
+      "description": "Datastore images never automerge, wherever they appear. tracearr runs Redis inside its own HelmRelease, so a path rule alone would miss it.",
+      "matchPackageNames": [
+        "/(^|/)(redis|valkey|mariadb|mysql|postgres|postgresql)$/",
+        "/cloudnative-vectorchord/",
+        "/timescale/"
+      ],
+      "automerge": false,
+      "labels": ["renovate"]
+    },
+    {
+      "description": "A digest move on a floating tag (seerr `latest@sha256`, sockpuppetbrowser `latest`) can hide a version jump of any size.",
+      "matchUpdateTypes": ["digest"],
+      "matchCurrentValue": ["latest", "main", "master", "stable", "nightly", "develop"],
+      "automerge": false,
+      "labels": ["renovate"]
+    },
+    {
+      "description": "app-template is a shared library chart: one bump re-renders ~27 releases at once (including the DB apps and technitium), and its majors have changed immutable selectors before. Kept manual until rollout-revert has a track record.",
+      "matchPackageNames": ["app-template"],
+      "automerge": false,
+      "labels": ["renovate"]
+    },
+    {
+      "description": "0.x versions: a minor bump is a major bump (semver section 4).",
+      "matchCurrentVersion": "/^v?0\\./",
+      "matchUpdateTypes": ["minor"],
+      "automerge": false,
+      "labels": ["renovate", "type/major"]
+    },
+    {
+      "description": "Majors: separate PRs so breaking changes stand out. Never automerged. Last of the label-setting tier rules, so `type/major` survives.",
       "matchUpdateTypes": ["major"],
+      "automerge": false,
       "labels": ["renovate", "type/major"]
     },
     {
@@ -103,6 +186,12 @@
         "aquasecurity/trivy"
       ],
       "extractVersion": "^v(?<version>.+)$"
+    },
+    {
+      "description": "Renovate itself (the CI validator pin) releases several times a day. Monthly is plenty for a linter.",
+      "matchDatasources": ["npm"],
+      "matchDepNames": ["renovate"],
+      "schedule": ["before 6am on the first day of the month"]
     },
     {
       "description": "kustomize lives in a monorepo and tags its releases `kustomize/vX.Y.Z`, alongside `api/…` and `cmd/config/…` tags for sibling modules.",
