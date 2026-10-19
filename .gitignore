@@ -128,6 +128,7 @@ temp/
 *.out
 dist/
 build/
+__pycache__/
 
 # Cloud image files (downloaded by create-ubuntu-template.sh)
 *.img
