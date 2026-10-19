@@ -1,0 +1,19 @@
+---
+# rollout-guard: post-upgrade soak check for HelmReleases. See soak-check.sh for what
+# it checks, and docs/updates.md "Automatic revert" for where its events go.
+#
+# Lives in flux-system so it can POST events straight to notification-controller
+# (Flux's own allow-egress NetworkPolicy admits same-namespace pods) and needs no
+# GitHub token. No top-level `namespace:` transformer: every resource sets its own.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - rbac.yaml
+  - cronjob.yaml
+configMapGenerator:
+  # Hash suffix kept on purpose: a script change renames the ConfigMap, which
+  # changes the CronJob template, so the next run uses the new script.
+  - name: rollout-guard-script
+    namespace: flux-system
+    files:
+      - soak-check.sh

@@ -1,0 +1,86 @@
+---
+# Every 5 minutes, check HelmReleases upgraded in the last 45 minutes for pods that
+# broke AFTER Helm's wait passed (restarts, CrashLoop, OOMKilled, stuck NotReady, a
+# failing blackbox probe). Failures become Flux events, which go to #flux-deploys and
+# to the rollout-revert workflow. Logic: soak-check.sh.
+#
+# A run that itself fails is a broken checker, not a broken app. Failed Jobs are kept
+# so kube-prometheus-stack's KubeJobFailed nags about it.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rollout-guard
+  namespace: flux-system
+spec:
+  schedule: "*/5 * * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # Stop the checker: set true in a PR (a kubectl patch is reverted by Flux).
+  suspend: false
+  jobTemplate:
+    spec:
+      # No retry: the next run is 5 minutes away, and state means nothing is lost.
+      backoffLimit: 0
+      activeDeadlineSeconds: 240
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: rollout-guard
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: soak-check
+              # Same pin as backup-verify: kubectl, jq and curl in one image.
+              image: docker.io/alpine/k8s:1.36.2@sha256:44ef4942e171939b9c665a4a84beb80e2dcdb9a24330d4651cfdfd2e9deecc47
+              command: ["/bin/sh", "/scripts/soak-check.sh"]
+              env:
+                - name: HOME
+                  value: /tmp
+                # 45m: long enough to catch a slow failure, like an app that OOMs
+                # once real load arrives (immich, 2026-10).
+                - name: SOAK_WINDOW
+                  value: "2700"
+                # Ignore the first 2 minutes: Helm's wait covers those.
+                - name: GRACE
+                  value: "120"
+                - name: NOTREADY_GRACE
+                  value: "300"
+                - name: RESTART_THRESHOLD
+                  value: "1"
+                - name: PROM_URL
+                  value: http://prometheus-operated.monitoring.svc:9090
+                # "true" logs failures without posting events.
+                - name: DRY_RUN
+                  value: "false"
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: script
+              configMap:
+                name: rollout-guard-script
+            - name: tmp
+              emptyDir:
+                sizeLimit: 64Mi
