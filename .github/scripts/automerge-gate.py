@@ -152,6 +152,10 @@ def quarantined(gh, deps):
             names = rule.get("matchDepNames", []) + rule.get("matchPackageNames", [])
             if not any(regex_or_exact(n, d["dep"]) for n in names):
                 continue
+            # rollout-revert writes digest quarantines as matchUpdateTypes: ["digest"]
+            # (a digest update has no new version to pin).
+            if "matchUpdateTypes" in rule and d["update"] not in rule["matchUpdateTypes"]:
+                continue
             nv = rule.get("matchNewValue")
             if nv is None or regex_or_exact(nv, d["to"]):
                 hits.append(f"`{d['dep']}` `{d['to']}` is quarantined: "
