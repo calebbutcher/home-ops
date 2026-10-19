@@ -177,17 +177,18 @@ Timeouts are all overridable: `drain_timeout` (300s), `reboot_timeout` (600s),
 Kubernetes calls run from the Ansible controller (`delegate_to: localhost`), so this
 needs the same working kubeconfig `kubectl` uses.
 
-## Follow-on: Discord notifications (not yet enabled)
+## Notifications
 
-GitHub already notifies on PRs and the Dependency Dashboard. To *also* push Flux
-events (reconcile success/failure, applied upgrades) to a Discord channel, the
-notification-controller is already installed — this is purely additive:
+Discord is the notification sink, one channel per source:
 
-1. Create a Discord channel webhook (Channel → Integrations → Webhooks).
-2. Store the webhook URL as a SOPS-encrypted Secret (`.sops.yaml` already covers
-   `kubernetes/`), e.g. `kubernetes/flux/cluster/flux-system/discord-webhook.sops.yaml`.
-3. Add a Flux `Provider` (type `discord`, `secretRef` → the webhook secret) and an
-   `Alert` selecting the resources to report on (e.g. all `HelmRelease` and
-   `Kustomization` events at `info` level). Reference:
-   <https://fluxcd.io/flux/monitoring/alerts/>
-4. Add both manifests to the `flux-system` kustomization and commit.
+| Channel | Source | Configured in |
+| --- | --- | --- |
+| `#flux-deploys` | Flux events — Kustomization applies, HelmRelease upgrades, **failed upgrades and rollbacks** | `kubernetes/infrastructure/configs/flux-discord-{provider,alert}.yaml` |
+| `#cluster-alerts` | Alertmanager (incl. `FluxHelmReleaseNotReady`) | `kubernetes/apps/monitoring/kube-prometheus-stack/alertmanagerconfig.yaml` |
+| `#git-prs` | GitHub PRs and merges (incl. Renovate) | GitHub repo Settings → Webhooks |
+
+**Flux Alerts need one `eventSources` entry per HelmRelease namespace.**
+notification-controller has no namespace wildcard — an entry without `namespace:`
+means the Alert's own namespace (`flux-system`), which holds no HelmReleases. When you
+add an app in a new namespace, add a line to `flux-discord-alert.yaml`; CI
+(`.github/scripts/check-alert-coverage.py`) fails the PR until you do.
