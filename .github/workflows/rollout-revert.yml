@@ -1,0 +1,80 @@
+---
+# Revert an automerged Renovate update whose rollout failed.
+#
+# Triggered by the cluster: the Flux Alert `rollout-revert`
+# (kubernetes/infrastructure/configs/github-dispatch-alert.yaml) forwards
+# "Helm upgrade failed" and "Soak check failed" events for app HelmReleases as a
+# repository_dispatch. This workflow finds the change that caused the failure and,
+# only if it was a Renovate PR that was automerged, opens a revert PR. That PR also
+# quarantines the version so it can't automerge again. Manual merges are never
+# reverted. Full flow: docs/updates.md "Automatic revert".
+#
+# Repo variables:
+#   ROLLOUT_REVERT_MODE  dry-run (default: open the revert PR, never merge it)
+#                        live    (enable auto-merge on the revert PR)
+#                        off     (do nothing)
+#   ROLLOUT_DRILL        true: also accept PRs labelled `rollout-drill`+`automerge`
+# Secret:
+#   ROLLOUT_REVERT_TOKEN  fine-grained PAT (Contents + Pull requests: read/write).
+#                         PRs pushed with GITHUB_TOKEN don't trigger other
+#                         workflows, so the required checks would never report and
+#                         auto-merge would hang.
+name: rollout-revert
+
+on:
+  # No `types:` filter: event_type is "HelmRelease/<name>.<namespace>", one per app.
+  repository_dispatch:
+  # For drills and re-runs.
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: HelmRelease namespace
+        required: true
+      name:
+        description: HelmRelease name
+        required: true
+      reason:
+        description: Event reason
+        default: ManualTest
+      message:
+        description: Event message (must start "Helm upgrade failed for release " or "Soak check failed for release ")
+        required: true
+
+# Run reverts one at a time; the de-duplication relies on it. Helm retries mean one
+# failure can dispatch up to 4 events, plus one from the soak check.
+concurrency:
+  group: rollout-revert
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  revert:
+    name: revert failed automerge
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.action, 'HelmRelease/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Event fields are untrusted text: they reach the script only through env.
+      HR_NAME: ${{ github.event.client_payload.involvedObject.name || inputs.name }}
+      HR_NS: ${{ github.event.client_payload.involvedObject.namespace || inputs.namespace }}
+      EV_REASON: ${{ github.event.client_payload.reason || inputs.reason }}
+      EV_MESSAGE: ${{ github.event.client_payload.message || inputs.message }}
+      MODE: ${{ vars.ROLLOUT_REVERT_MODE || 'dry-run' }}
+      DRILL: ${{ vars.ROLLOUT_DRILL || 'false' }}
+      GH_TOKEN: ${{ github.token }}
+      PUSH_TOKEN: ${{ secrets.ROLLOUT_REVERT_TOKEN }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: main
+          # Enough history to find the newest change to an app directory within 24h.
+          fetch-depth: 300
+          token: ${{ secrets.ROLLOUT_REVERT_TOKEN || github.token }}
+
+      - name: Revert
+        run: .github/scripts/rollout-revert.sh

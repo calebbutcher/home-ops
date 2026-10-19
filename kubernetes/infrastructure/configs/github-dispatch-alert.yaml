@@ -1,0 +1,53 @@
+---
+# Rollout failures in APP namespaces -> GitHub -> rollout-revert workflow.
+#
+# Two kinds of message trigger it (inclusionList is matched against the event
+# MESSAGE, never the reason):
+#   * "Helm upgrade failed for release ..." — helm-controller. Pods never became
+#     Ready within the Helm wait. Helm has already rolled the cluster back, so the
+#     revert only brings git back in line.
+#   * "Soak check failed for release ..."   — the rollout-guard CronJob. Pods became
+#     Ready, then crashed, OOMed, went NotReady or failed their blackbox probe within
+#     the soak window.
+# Chart-pull problems ("HelmChart ... is not ready", ArtifactFailed) and dependency
+# waits don't match, so a chart that isn't in the index yet is not treated as a
+# broken app.
+#
+# The workflow decides whether to act: it only reverts a Renovate PR that was
+# automerged. A failure after a manual merge only gets reported.
+#
+# One entry per namespace. There is no namespace wildcard (see
+# flux-discord-alert.yaml), and .github/scripts/check-alert-coverage.py fails CI if
+# an app namespace is missing. Infrastructure namespaces are deliberately absent:
+# infrastructure never automerges.
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Alert
+metadata:
+  name: rollout-revert
+  namespace: flux-system
+spec:
+  providerRef:
+    name: github-dispatch
+  eventSeverity: error
+  inclusionList:
+    - "^Helm upgrade failed for release "
+    - "^Soak check failed for release "
+  eventSources:
+    - {kind: HelmRelease, name: "*", namespace: audiobookshelf}
+    - {kind: HelmRelease, name: "*", namespace: authentik}
+    - {kind: HelmRelease, name: "*", namespace: bambustudio}
+    - {kind: HelmRelease, name: "*", namespace: coc-trade-bot}
+    - {kind: HelmRelease, name: "*", namespace: gitea}
+    - {kind: HelmRelease, name: "*", namespace: home-assistant}
+    - {kind: HelmRelease, name: "*", namespace: immich}
+    - {kind: HelmRelease, name: "*", namespace: media}
+    - {kind: HelmRelease, name: "*", namespace: monitoring}
+    - {kind: HelmRelease, name: "*", namespace: n8n}
+    - {kind: HelmRelease, name: "*", namespace: paperless}
+    - {kind: HelmRelease, name: "*", namespace: pricewatch}
+    - {kind: HelmRelease, name: "*", namespace: reef-log}
+    - {kind: HelmRelease, name: "*", namespace: speedtest}
+    - {kind: HelmRelease, name: "*", namespace: tandoor}
+    - {kind: HelmRelease, name: "*", namespace: technitium}
+    - {kind: HelmRelease, name: "*", namespace: tools}
+    - {kind: HelmRelease, name: "*", namespace: uptime-kuma}

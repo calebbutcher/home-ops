@@ -9,3 +9,8 @@ resources:
   - flux-discord-webhook.sops.yaml
   - flux-discord-provider.yaml
   - flux-discord-alert.yaml
+  # Flux -> GitHub repository_dispatch: failed app rollouts trigger the
+  # rollout-revert workflow (docs/updates.md "Automatic revert").
+  - github-dispatch-token.sops.yaml
+  - github-dispatch-provider.yaml
+  - github-dispatch-alert.yaml

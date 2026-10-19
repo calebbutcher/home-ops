@@ -1,0 +1,9 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Dependency versions that .github/workflows/rollout-revert.yml had to revert after a failed automerged rollout. The workflow appends a rule here in the same PR as the revert.",
+    "ENFORCEMENT IS THE `automerge gate` CHECK, not this file. Preset packageRules are sorted BEFORE renovate.json's own rules, so an `automerge: false` here would lose to the later automerge rule. The rules add the `quarantined` label and a PR note, and the gate fails on either the label or a dep/version match against this file as read from main.",
+    "To retry a quarantined version: delete its rule in a PR."
+  ],
+  "packageRules": []
+}
