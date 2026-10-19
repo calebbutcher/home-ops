@@ -1,0 +1,44 @@
+---
+# The `automerge gate`: a REQUIRED status check (main ruleset) that decides whether a
+# Renovate PR marked for automerge may merge without a human. Every other PR passes
+# in seconds. Logic and the full pass/fail table: .github/scripts/automerge-gate.py.
+# Policy and overrides: docs/updates.md.
+#
+# Runs on `pull_request`, not `pull_request_target`, so the check attaches to the PR
+# head like the validate checks do. Only the owner and Renovate open PRs here, and
+# Renovate's github-actions updates never automerge.
+name: automerge-gate
+
+on:
+  pull_request:
+    # labeled/unlabeled: adding `gate-approved` (or removing `quarantined`) re-evaluates.
+    # Labels the gate adds itself use GITHUB_TOKEN, which does not trigger workflows,
+    # so it cannot loop. edited: Renovate rewrites the body (and its release notes).
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled]
+
+concurrency:
+  group: automerge-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  gate:
+    name: automerge gate  # the ruleset's required-check context — do not rename
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      # The PR body is untrusted text: everything reaches the script via env, never
+      # via ${{ }} interpolation inside `run:`.
+      - name: Evaluate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # Kill switch: `gh variable set AUTOMERGE_ENABLED --body false`
+          AUTOMERGE_ENABLED: ${{ vars.AUTOMERGE_ENABLED || 'true' }}
+        run: python3 .github/scripts/automerge-gate.py --pr "$PR_NUMBER"
