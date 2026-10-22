@@ -140,6 +140,15 @@
     },
     {
       "description": [
+        "speedtest-tracker is pinned to a LinuxServer build (`1.15.0-ls176`), not the bare app version. The image bundles PHP, and a PHP security fix (e.g. php2shell, CVE-2026-109618/109619) arrives as a new `-lsNNN` rebuild of the SAME app version — the bare `1.15.0` tag never changes, so Renovate never saw it and the pod kept running the old PHP.",
+        "Default docker versioning treats `-ls176` as a compatibility suffix and will not move to `-ls177`, so the ls number is mapped to `build` here to make rebuilds show up as updates."
+      ],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["lscr.io/linuxserver/speedtest-tracker"],
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-ls(?<build>\\d+)$"
+    },
+    {
+      "description": [
         "MariaDB. The operator does not set MARIADB_AUTO_UPGRADE, so the on-disk system tables are NOT migrated automatically, and MariaDB cannot be downgraded in place.",
         "Patch releases within a minor are routine; anything larger is a database migration."
       ],
