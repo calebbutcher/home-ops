@@ -1,0 +1,21 @@
+---
+# Flux -> GitHub `repository_dispatch`. This is how a failed app rollout reaches
+# .github/workflows/rollout-revert.yml, which reverts the automerged Renovate PR that
+# caused it. The cluster is LAN-only, so GitHub can't poll it; the cluster pushes.
+#
+# event_type     = "HelmRelease/<name>.<namespace>"
+# client_payload = the Flux event (involvedObject, reason, message, severity, ...)
+#
+# The token is a fine-grained PAT scoped to this repo only, with Contents: read+write
+# (which repository_dispatch requires). It lives in github-dispatch-token.sops.yaml.
+# The `main` ruleset has no `always` bypass, so this token cannot push to main.
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Provider
+metadata:
+  name: github-dispatch
+  namespace: flux-system
+spec:
+  type: githubdispatch
+  address: https://github.com/calebbutcher/home-ops
+  secretRef:
+    name: github-dispatch  # key: token

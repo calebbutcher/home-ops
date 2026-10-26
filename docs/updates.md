@@ -20,6 +20,61 @@ This cluster is **approve-then-apply**. Nothing upgrades on its own.
 Install the Renovate app on the repo at <https://github.com/apps/renovate>, grant it
 `calebbutcher/home-ops`, and merge the onboarding ("Configure Renovate") PR it opens.
 
+### Automatic revert (rollout-revert)
+
+When an **automerged** app update fails to roll out, the cluster reports it and
+GitHub reverts it. Updates you merge yourself are never auto-reverted.
+
+```text
+helm-controller: "Helm upgrade failed ..."     (pods never Ready; Helm already rolled back)
+rollout-guard:   "Soak check failed ..."       (Ready, then crashed / OOMed / probe failing)
+        │  Flux Alert `rollout-revert` (app namespaces, those two messages only)
+        ▼  Provider `github-dispatch` → repository_dispatch "HelmRelease/<name>.<ns>"
+.github/workflows/rollout-revert.yml
+        │  newest change to that app's directory in 24h — automerged Renovate PR?
+        ▼  yes → branch revert/pr-N: git revert + quarantine rule → PR (auto-merges in live mode)
+Flux applies the revert → the HelmRelease's failure count resets → app back on the old version
+```
+
+- **Eligible:** the newest first-parent commit touching the HelmRelease's directory
+  in the last 24h is the merge of a Renovate PR labelled `automerge` and merged by
+  `renovate[bot]`. If you changed the app after the automerge, nothing happens. A
+  grouped PR is reverted as a whole.
+- **Quarantine:** the revert PR also adds a rule per dependency/version to
+  [`.github/renovate/quarantine.json`](../.github/renovate/quarantine.json). The
+  automerge gate then blocks that exact version, so it comes back as a manual PR.
+  Newer versions can still automerge. To retry the version, delete its rule.
+- **DB-backed apps after a soak failure:** the revert PR opens but does **not**
+  auto-merge. The new version ran and may have migrated the database, so a human
+  should decide whether downgrading is safe. A Helm-wait failure always auto-merges:
+  Helm has already rolled the cluster back, so the revert only brings git in line.
+- **No loops, no pile-ups:** one revert per PR, however many events arrive. Helm
+  retries send up to 4. If the reverted version also fails, the newest change is now
+  the revert, which isn't an automerge, so nothing more happens. `#flux-deploys`
+  shows the failure, and that's the point to step in.
+- **Every run writes its decision to the job summary**, including "no action"
+  outcomes (Actions → rollout-revert).
+
+**Setup** (once):
+
+1. Create the cluster's dispatch token: a fine-grained PAT named
+   `home-ops-cluster-dispatch`, repository access *only* `calebbutcher/home-ops`,
+   **Contents: read and write** (repository_dispatch requires it), 1-year expiry. Put
+   it in `kubernetes/infrastructure/configs/github-dispatch-token.yaml` (gitignored
+   template), then run
+   `sops --encrypt github-dispatch-token.yaml > github-dispatch-token.sops.yaml`.
+2. Create the workflow's token: a fine-grained PAT named `home-ops-rollout-revert`,
+   same repo, **Contents + Pull requests: read and write**. Then run
+   `gh secret set ROLLOUT_REVERT_TOKEN`. It has to be a PAT: PRs pushed with
+   `GITHUB_TOKEN` don't trigger the required checks, so auto-merge would hang.
+3. `gh variable set ROLLOUT_REVERT_MODE --body dry-run`. Switch it to `live` after the
+   drills. `off` disables reverts. `gh variable set ROLLOUT_DRILL --body true` while
+   drilling.
+4. Calendar both PATs' expiry. An expired token fails silently.
+
+**Drill / re-run by hand:**
+`gh workflow run rollout-revert -f namespace=tools -f name=it-tools -f message="Helm upgrade failed for release tools/it-tools ..."`
+
 ### Seerr note
 
 `seerr/seerr` publishes only a moving `latest` tag (no semver releases), so it is
