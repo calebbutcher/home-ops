@@ -10,7 +10,44 @@ spec:
   # info = report successes and failures; switch to "error" for failures only.
   eventSeverity: info
   eventSources:
+    # Every Kustomization lives in flux-system, so the Alert's own namespace is right.
     - kind: Kustomization
       name: "*"
-    - kind: HelmRelease
-      name: "*"
+    # HelmReleases need one entry PER NAMESPACE. notification-controller has no
+    # namespace wildcard: an entry without `namespace:` means flux-system (which holds
+    # no HelmReleases), and the match is an exact string compare. A single
+    # `{kind: HelmRelease, name: "*"}` therefore matched nothing, and failed Helm
+    # upgrades never reached Discord. .github/scripts/check-alert-coverage.py fails CI
+    # if a namespace with a HelmRelease is missing here.
+    # apps
+    - {kind: HelmRelease, name: "*", namespace: audiobookshelf}
+    - {kind: HelmRelease, name: "*", namespace: authentik}
+    - {kind: HelmRelease, name: "*", namespace: bambustudio}
+    - {kind: HelmRelease, name: "*", namespace: coc-trade-bot}
+    - {kind: HelmRelease, name: "*", namespace: gitea}
+    - {kind: HelmRelease, name: "*", namespace: home-assistant}
+    - {kind: HelmRelease, name: "*", namespace: immich}
+    - {kind: HelmRelease, name: "*", namespace: media}
+    - {kind: HelmRelease, name: "*", namespace: monitoring}
+    - {kind: HelmRelease, name: "*", namespace: n8n}
+    - {kind: HelmRelease, name: "*", namespace: paperless}
+    - {kind: HelmRelease, name: "*", namespace: pricewatch}
+    - {kind: HelmRelease, name: "*", namespace: reef-log}
+    - {kind: HelmRelease, name: "*", namespace: speedtest}
+    - {kind: HelmRelease, name: "*", namespace: tandoor}
+    - {kind: HelmRelease, name: "*", namespace: technitium}
+    - {kind: HelmRelease, name: "*", namespace: tools}
+    - {kind: HelmRelease, name: "*", namespace: uptime-kuma}
+    # infrastructure
+    - {kind: HelmRelease, name: "*", namespace: cert-manager}
+    - {kind: HelmRelease, name: "*", namespace: cnpg-system}
+    - {kind: HelmRelease, name: "*", namespace: crowdsec}
+    - {kind: HelmRelease, name: "*", namespace: external-dns}
+    - {kind: HelmRelease, name: "*", namespace: falco}
+    - {kind: HelmRelease, name: "*", namespace: kube-system}
+    - {kind: HelmRelease, name: "*", namespace: longhorn-system}
+    - {kind: HelmRelease, name: "*", namespace: mariadb-system}
+    - {kind: HelmRelease, name: "*", namespace: snapshot-controller}
+    - {kind: HelmRelease, name: "*", namespace: tailscale}
+    - {kind: HelmRelease, name: "*", namespace: traefik}
+    - {kind: HelmRelease, name: "*", namespace: volsync-system}
