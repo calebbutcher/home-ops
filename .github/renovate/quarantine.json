@@ -5,5 +5,21 @@
     "ENFORCEMENT IS THE `automerge gate` CHECK, not this file. Preset packageRules are sorted BEFORE renovate.json's own rules, so an `automerge: false` here would lose to the later automerge rule. The rules add the `quarantined` label and a PR note, and the gate fails on either the label or a dep/version match against this file as read from main.",
     "To retry a quarantined version: delete its rule in a PR."
   ],
-  "packageRules": []
+  "packageRules": [
+    {
+      "description": [
+        "Quarantined 2026-10-27 by rollout-revert: #545 was reverted. UpgradeFailed: Helm upgrade failed for release tools/it-tools with chart app-template@5.2.1: timeout waiting for: [Deployment/tools/it-tools status: 'InProgress']\n\nLast Helm logs:\n\n2026-10-27T00:15:13.913464206Z: determined release apply method: {\"previous_release_apply_method\":\"ssa\",\"server_side_ap https://github.com/calebbutcher/home-ops/actions/runs/40425743685"
+      ],
+      "matchDepNames": [
+        "corentinth/it-tools"
+      ],
+      "addLabels": [
+        "quarantined"
+      ],
+      "prBodyNotes": [
+        "⚠️ **Quarantined.** An update of this dependency was automatically reverted after a failed rollout (#545). Automerge is blocked; review it and merge by hand, or add `gate-approved`."
+      ],
+      "matchNewValue": "/^v?2099\\.1\\.1\\-drill$/"
+    }
+  ]
 }
