@@ -1,0 +1,154 @@
+---
+# trivy-operator: continuous CVE scanning of every image the cluster is RUNNING.
+#
+# This replaces .github/workflows/image-scan.yml, which could only see the ~7
+# images written as a literal `image:` line. Most tags here live inside
+# HelmRelease values or a chart's defaults and only become concrete in-cluster,
+# so the inventory has to come from the cluster. The operator watches workloads,
+# scans each container image, and writes a VulnerabilityReport per container
+# next to the workload.
+#
+# What consumes the reports:
+#   * cve-tracker (../cve-tracker) turns the serious, fixable ones into GitHub
+#     issues in the private calebbutcher/home-ops-security repo.
+#   * The summary metrics feed the "Security / Vulnerabilities" dashboard
+#     (kubernetes/apps/monitoring/trivy/dashboard.yaml).
+#
+# Runbook: docs/cve-tracking.md.
+#
+# 0.x chart: CRD schemas can change between minors. Infrastructure is never
+# automerged, so Renovate PRs for this wait for a human. Read them.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: trivy-operator
+  namespace: trivy-system
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: trivy-operator
+      version: "0.37.0"
+      sourceRef:
+        kind: HelmRepository
+        name: aquasecurity
+        namespace: flux-system
+  install:
+    # Twelve CRDs in crds/. Helm installs those but never upgrades them;
+    # CreateReplace on upgrade is what keeps them current.
+    crds: Create
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # One-shot Jobs (SUC upgrade pods, Helm hooks, backup-verify) are gone before
+    # a scan finishes, and their reports would only be noise. `job` is the only
+    # kind dropped from the chart default. CronJobs stay in: they are scanned
+    # from their jobTemplate, so they're covered even between runs.
+    targetWorkloads: "pod,replicaset,replicationcontroller,statefulset,daemonset,cronjob"
+    # Scratch CNPG clusters and restic restores live here for minutes at a time.
+    # cve-tracker uses the same exclusion (EXCLUDE_NAMESPACES).
+    excludeNamespaces: "backup-verify"
+
+    operator:
+      # ClientServer mode: one trivy server holds the vulnerability DB and every
+      # scan Job asks it, instead of each Job downloading the ~80MB DB itself.
+      builtInTrivyServer: true
+
+      # The default of 10 concurrent scans would pull 10 images at once over
+      # the WAN, from the same NAT IP the kubelets pull through. Three is slow
+      # enough to stay well inside Docker Hub's anonymous limits on the first
+      # full sweep (~117 images), and the sweep only happens once; see the SBOM
+      # cache below.
+      scanJobsConcurrentLimit: 3
+      # immich-machine-learning is >1.5GB, which doesn't fit in the 5m default.
+      scanJobTimeout: 15m
+
+      # How new CVEs reach us: each VulnerabilityReport is deleted after 24h,
+      # which triggers a rescan against the server's current DB. The DB itself
+      # refreshes every few hours, so a CVE published today shows up by
+      # tomorrow's cve-tracker run.
+      scannerReportTTL: "24h"
+
+      # Without this cache every daily rescan pulls every image again. An
+      # image's contents never change for a given digest, so the operator keeps
+      # one ClusterSbomReport per digest and rescans that SBOM against the new
+      # DB with no registry traffic at all. 720h = a digest that's been gone
+      # for a month is forgotten.
+      sbomGenerationEnabled: true
+      clusterSbomCacheEnabled: true
+      cacheReportTTL: "720h"
+
+      # Vulnerabilities only. Every other scanner is switched off:
+      #   config-audit / RBAC / compliance  overlap with what Falco and the PSA
+      #                                     baseline already police, and would
+      #                                     add hundreds of reports nobody reads.
+      #   infra-assessment                  needs the node-collector, which needs
+      #                                     hostPath, which baseline PSA rejects.
+      #   exposed-secret                    copies matched secret snippets INTO
+      #                                     the report CRs, readable by anything
+      #                                     with read access to those CRs.
+      configAuditScannerEnabled: false
+      rbacAssessmentScannerEnabled: false
+      infraAssessmentScannerEnabled: false
+      clusterComplianceEnabled: false
+      exposedSecretScannerEnabled: false
+      # A label per CVE id would mean tens of thousands of series. The
+      # per-image counts by severity are what the dashboard needs; per-CVE
+      # detail is in the reports and the issues.
+      metricsVulnIdEnabled: false
+
+    # The chart renders these ClusterComplianceReport CRs from `specs` alone,
+    # even with clusterComplianceEnabled: false. Empty, so nothing half-on
+    # sits in the cluster looking like a feature.
+    compliance:
+      specs: []
+
+    serviceMonitor:
+      enabled: true
+
+    trivy:
+      # The default creates a 5Gi PVC for the server's DB on the default class,
+      # i.e. Longhorn, which schedules on declared size and is near its budget.
+      # The DB is a cache that re-downloads in under a minute, so emptyDir.
+      storageClassEnabled: false
+
+      # MEDIUM and above. LOW/UNKNOWN never meet cve-tracker's threshold, and
+      # dropping them keeps the larger reports well under etcd's object limit.
+      # MEDIUM stays because a distro can rate a CVE MEDIUM that CISA has in
+      # KEV, and KEV alone is enough to open an issue.
+      severity: MEDIUM,HIGH,CRITICAL
+      # Unfixed CVEs stay in the reports and on the dashboard. The tracker
+      # drops them itself, because "no fix exists yet" is worth seeing.
+      ignoreUnfixed: false
+      timeout: "15m0s"
+
+      # Per scan Job. The default 500M limit OOMs on the large ML images.
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256M
+        limits:
+          memory: 1500M
+
+      server:
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+            # The DB lives on the emptyDir above, so it's charged here.
+            ephemeral-storage: 2Gi
+          limits:
+            memory: 1536Mi
+            ephemeral-storage: 4Gi
+
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi

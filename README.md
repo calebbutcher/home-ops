@@ -98,6 +98,7 @@ Ansible; see **Networking** above.
 | tailscale-operator | Tailscale exit node + LAN subnet router |
 | Falco | Runtime security — syscall monitoring via eBPF, alerts to Discord (see [`docs/falco-deploy.md`](docs/falco-deploy.md)) |
 | Falco k8saudit | Kubernetes API audit monitoring — second Falco instance on the control planes (see [`docs/falco-k8saudit.md`](docs/falco-k8saudit.md)) |
+| trivy-operator + cve-tracker | Daily CVE scan of every running image → one issue per affected service in a private repo, auto-closed when patched (see [`docs/cve-tracking.md`](docs/cve-tracking.md)) |
 
 ## Applications
 
@@ -183,9 +184,10 @@ no path in from a hosted runner) and validating SOPS-encrypted Secrets (that
 would mean putting the age private key in GitHub). Encrypted Secrets are reported
 as skipped rather than silently counted as passing.
 
-A weekly [`image-scan.yml`](.github/workflows/image-scan.yml) reports CVEs, but
-only for images pinned directly in a manifest — the chart-managed majority is not
-covered. See that file's header before reading a green run as cluster-wide.
+CVE scanning is not in CI. A runner can't see the images that only become concrete
+in the cluster, which is most of them. trivy-operator scans every running container
+instead, and cve-tracker files the serious, fixable findings as issues in a private
+repo; see [`docs/cve-tracking.md`](docs/cve-tracking.md).
 
 ## Backup & recovery
 

@@ -50,4 +50,5 @@ spec:
     - {kind: HelmRelease, name: "*", namespace: snapshot-controller}
     - {kind: HelmRelease, name: "*", namespace: tailscale}
     - {kind: HelmRelease, name: "*", namespace: traefik}
+    - {kind: HelmRelease, name: "*", namespace: trivy-system}
     - {kind: HelmRelease, name: "*", namespace: volsync-system}

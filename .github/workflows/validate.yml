@@ -147,6 +147,12 @@ jobs:
       - name: shellcheck
         run: git ls-files '*.sh' | grep -E '^(\.github/scripts|kubernetes)/' | xargs -r shellcheck
 
+      # cve-tracker decides when an issue opens, closes and reopens, which is
+      # exactly the logic that would fail silently in a CronJob. stdlib only,
+      # so the runner's own python3 is enough.
+      - name: cve-tracker unit tests
+        run: python3 -m unittest discover -s kubernetes/infrastructure/controllers/cve-tracker -v
+
       # A dashboard that hardcodes its datasource uid is pinned to the local
       # Prometheus and cannot reach the Thanos history, and nothing else notices
       # — it renders fine, it just goes blank past ~2d. Not pinning PyYAML: it is

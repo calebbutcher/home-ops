@@ -1,0 +1,19 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: trivy-system
+  labels:
+    # PodSecurity baseline, set explicitly. An unlabelled namespace would be
+    # privileged by default, and nothing here needs that: the operator, the
+    # trivy server and the scan Jobs all run non-root with every capability
+    # dropped. The one scanner that would need hostPath (the infra-assessment
+    # node-collector) is switched off in helmrelease.yaml, and this label is
+    # what makes switching it back on fail loudly rather than quietly widen
+    # the namespace.
+    #
+    # Scan Jobs run HERE, not in the scanned workload's namespace
+    # (scanJobsInSameNamespace: false), so the media namespace's privileged
+    # level never leaks into a scanner pod.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
