@@ -27,6 +27,9 @@ metadata:
   namespace: speedtest
 spec:
   interval: 30m
+  # The startup probe allows 5m for Laravel's boot migrations, which equals Helm's
+  # default wait, so a slow-but-healthy boot would read as a failed upgrade.
+  timeout: 10m
   chart:
     spec:
       chart: app-template
@@ -69,7 +72,9 @@ spec:
               # bundles PHP, and a PHP security fix ships as a new -lsNNN build
               # of the same app version that Renovate can't see on "1.15.0".
               # ls176 = PHP 8.5.12 (php2shell, CVE-2026-109618/109619).
-              tag: "1.15.0-ls176"
+              # LinuxServer's build tags are v-prefixed: `1.15.0-ls176` does not
+              # exist (404), and pinning it stalled this release from 2026-10-22.
+              tag: "v1.15.0-ls176"
             env:
               # LinuxServer convention: the uid/gid the app is dropped to, and
               # what fsGroup above matches so /config is writable.
