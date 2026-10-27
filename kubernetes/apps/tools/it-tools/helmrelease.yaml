@@ -29,9 +29,6 @@ spec:
             image:
               repository: corentinth/it-tools
               tag: 2024.10.22-7ca5933
-            # DRILL B (rollout-revert soak path): serve normally, then exit after 3m.
-            command: ["/bin/sh", "-c"]
-            args: ["timeout 180 nginx -g 'daemon off;'; exit 1"]
             resources:
               requests:
                 cpu: 10m
