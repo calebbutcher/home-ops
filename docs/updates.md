@@ -1,6 +1,32 @@
 # Updates: how they work
 
-This cluster is **approve-then-apply**. Nothing upgrades on its own.
+App updates **merge themselves when they're low-risk, and revert themselves when
+they break**. Everything else, including every platform and Kubernetes update, waits
+for you to merge it.
+
+| Tier | Automerges | Rule (`renovate.json`) |
+| --- | --- | --- |
+| Stateless apps: HelmRelease chart/images under `kubernetes/apps` | minor, patch, digest, once the release is ≥ 3 days old | tier 1 |
+| DB-backed apps: immich, paperless, gitea, n8n, tandoor, uptime-kuma, tracearr | **patch only** | DB-backed apps |
+| authentik, technitium, bambustudio, monitoring platform (kube-prometheus-stack, loki, thanos, alloy, blackbox) | never | never automerge these apps |
+| Home Assistant monthly releases (`YYYY.M`) | never (its patches do) | Home Assistant |
+| Datastore images (redis, mariadb, postgres, ...), floating-tag digests, `app-template`, 0.x minors, majors | never | individual rules |
+| Everything outside `kubernetes/apps`: infrastructure, **k3s / SUC Plans**, Flux, kube-vip, CI pins, ansible; raw manifests anywhere | never | doesn't match tier 1 |
+
+An automerge has three safety nets:
+
+1. **Before the merge:** the [automerge gate](#the-automerge-gate) re-checks the PR and
+   reads the release notes. Anything that looks like it needs planning gets
+   `needs-planning` and waits for you.
+2. **During the rollout:** Helm waits for the pods and rolls back if they never become
+   Ready.
+3. **After the rollout:** the rollout-guard soak check watches the release for 45m.
+   Either failure triggers the [automatic revert](#automatic-revert-rollout-revert).
+
+Kill switches: `gh variable set AUTOMERGE_ENABLED --body false` stops every
+automerge, and `gh variable set ROLLOUT_REVERT_MODE --body dry-run` (or `off`) stops
+reverts from merging. The soak check is stopped by `suspend: true` in
+`kubernetes/infrastructure/controllers/rollout-guard/cronjob.yaml`.
 
 ## The flow
 
@@ -9,11 +35,13 @@ This cluster is **approve-then-apply**. Nothing upgrades on its own.
    bjw-s `values.*.image.tag` fields. No floating ranges, no `latest`.
 2. **[Renovate](https://docs.renovatebot.com/)** (Mend-hosted GitHub App) scans the repo on a
    weekly schedule and opens **one PR per available update**. Config: [`renovate.json`](../renovate.json).
-3. **You approve by merging the PR.** Flux then reconciles `main` and applies the
-   change to the cluster within ~30m.
+3. **Low-risk app updates merge themselves** once the required checks pass,
+   including the automerge gate (tiers above). **Everything else waits for you to
+   merge it**, and merging is the approval. Flux then reconciles `main` and applies
+   the change within ~30m.
 4. **Awareness** = the **"Renovate Dependency Dashboard"** GitHub issue (a live list
-   of every pending update) plus GitHub's normal PR notifications. Nothing is set
-   to auto-merge.
+   of every pending update), `#git-prs` for PRs and merges (including automerges
+   and reverts), and `#flux-deploys` for what actually rolled out or failed.
 
 ### One-time setup (manual)
 

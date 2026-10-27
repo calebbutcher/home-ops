@@ -40,6 +40,8 @@ env:
   GITLEAKS_VERSION: 8.30.1
   # renovate: datasource=pypi depName=yamllint
   YAMLLINT_VERSION: 1.38.0
+  # renovate: datasource=npm depName=renovate
+  RENOVATE_VERSION: 44.171.1
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -176,6 +178,25 @@ jobs:
       # unparseable YAML) is worth failing on.
       - name: Lint
         run: yamllint --strict kubernetes/ ansible/inventory/ .github/
+
+  # ---------------------------------------------------------------------------
+  # renovate.json decides what merges without a human, so a typo there is not
+  # cosmetic: an unknown key is silently ignored and a rule simply stops applying.
+  # --strict also fails on deprecated options. Not a required check: Renovate
+  # surfaces a broken config itself, on the Dependency Dashboard.
+  # ---------------------------------------------------------------------------
+  renovate-config:
+    name: renovate-config-validator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Validate
+        run: |
+          set -euo pipefail
+          files=(renovate.json)
+          if [[ -f .github/renovate/quarantine.json ]]; then files+=(.github/renovate/quarantine.json); fi
+          npx --yes --package "renovate@${RENOVATE_VERSION}" -- renovate-config-validator --strict "${files[@]}"
 
   # ---------------------------------------------------------------------------
   # The repo is public. A committed credential is an incident, not a nit.
