@@ -58,9 +58,14 @@ spec:
     excludedLabels:
       - kustomize.toolkit.fluxcd.io/name
       - kustomize.toolkit.fluxcd.io/namespace
+    # The operator caches every Secret and ConfigMap in the cluster (its
+    # *-in-use-finalizer controllers), so its STARTUP peak is a full LIST of all
+    # ~400 Secrets, Helm release history included. 128Mi fit in steady state for
+    # 27 days but not a restart: after the 2026-10-27 control-plane OOM it sat at
+    # 127/128Mi, too slow to answer /readyz, and was liveness-killed in a loop.
     resources:
       requests:
         cpu: 10m
-        memory: 64Mi
-      limits:
         memory: 128Mi
+      limits:
+        memory: 384Mi
