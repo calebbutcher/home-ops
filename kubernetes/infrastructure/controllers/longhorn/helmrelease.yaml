@@ -6,6 +6,9 @@ metadata:
   namespace: longhorn-system
 spec:
   interval: 30m
+  # Room for a slow rollout (manager DaemonSet, instance managers, CSI, post-upgrade
+  # hook) so a merely slow upgrade is never treated as a failed one. See `upgrade:`.
+  timeout: 15m
   dependsOn:
     # Longhorn's CSI snapshot support uses the external snapshot-controller CRDs.
     - name: snapshot-controller
@@ -21,10 +24,16 @@ spec:
   install:
     remediation:
       retries: 3
+  # A failed upgrade is fixed FORWARD, by hand. Longhorn does not support downgrades:
+  # once the new manager starts it migrates Longhorn's CRs, so the default remediation
+  # (Helm rollback to the old images) would run old managers against new-version
+  # state. cleanupOnFail is off for the same reason: it would delete the objects the
+  # upgrade just added (in 1.13: longhorn-global-manager and three CRDs, which this
+  # chart ships as templates).
   upgrade:
-    cleanupOnFail: true
     remediation:
-      retries: 3
+      retries: 0
+      remediateLastFailure: false
   values:
     persistence:
       # `longhorn` is the cluster-default StorageClass (2 replicas). local-path is
