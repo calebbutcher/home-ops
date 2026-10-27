@@ -10,7 +10,9 @@
 # between GRACE and SOAK_WINDOW seconds ago, check the release's pods
 # (app.kubernetes.io/instance=<release>) for:
 #   - waiting in CrashLoopBackOff / ImagePullBackOff / ErrImagePull / Create*Error
-#   - >= RESTART_THRESHOLD container restarts since the upgrade
+#   - >= RESTART_THRESHOLD container restarts since the upgrade, when the last exit
+#     came after GRACE (restarts while the rollout settles are start-up races, e.g.
+#     longhorn-manager exiting on a settings conflict before its peers are up)
 #   - an OOMKilled exit since the upgrade
 #   - NotReady since after the upgrade, for longer than NOTREADY_GRACE
 #   - the app's blackbox probe failing for a full 5m (probe_success, job blackbox-app)
@@ -77,7 +79,8 @@ while read -r hr; do
   # Pod-level reasons, one per line.
   reasons=$(kubectl -n "$relns" get pods -l "app.kubernetes.io/instance=$rel" -o json | jq -r \
     --argjson now "$NOW" --argjson since "$deployed" \
-    --argjson threshold "$RESTART_THRESHOLD" --argjson nrgrace "$NOTREADY_GRACE" '
+    --argjson threshold "$RESTART_THRESHOLD" --argjson nrgrace "$NOTREADY_GRACE" \
+    --argjson grace "$GRACE" '
     def ts: sub("\\.[0-9]+"; "") | fromdateiso8601;
     .items[]
     | select(.metadata.deletionTimestamp == null and .status.phase != "Succeeded")
@@ -91,10 +94,10 @@ while read -r hr; do
             (.state.waiting.reason // empty
               | select(test("^(CrashLoopBackOff|ImagePullBackOff|ErrImagePull|CreateContainerConfigError|CreateContainerError|RunContainerError)$"))
               | "\($pod)/\($c.name) is \(.)"),
-            ((if $created >= $since then $c.restartCount
-              elif (($c.lastState.terminated.finishedAt // null) != null
-                    and ($c.lastState.terminated.finishedAt | ts) > $since) then 1
-              else 0 end) as $r
+            ((if (($c.lastState.terminated.finishedAt // null) == null
+                  or ($c.lastState.terminated.finishedAt | ts) <= ($since + $grace)) then 0
+              elif $created >= $since then $c.restartCount
+              else 1 end) as $r
               | select($r >= $threshold)
               | "\($pod)/\($c.name) restarted \($r)x since the upgrade"),
             (select(($c.lastState.terminated.reason // "") == "OOMKilled"
