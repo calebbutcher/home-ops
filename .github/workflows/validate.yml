@@ -132,6 +132,21 @@ jobs:
       - name: Every manifest is wired into a kustomization
         run: python3 .github/scripts/check-orphaned-manifests.py kubernetes
 
+      # Flux Alerts have no namespace wildcard, so each HelmRelease namespace must be
+      # listed by hand — and a missing one is a silent notification (and, later,
+      # auto-revert) gap. See the script header.
+      - name: Every HelmRelease namespace is covered by the Flux Alerts
+        run: |
+          set -euo pipefail
+          python3 -c 'import yaml' 2>/dev/null || pip install --quiet pyyaml
+          python3 .github/scripts/check-alert-coverage.py kubernetes
+
+      # Shell that runs unattended (in-cluster CronJobs, CI-triggered automation),
+      # where a quoting bug fails silently rather than in front of someone.
+      # shellcheck is preinstalled on ubuntu-latest.
+      - name: shellcheck
+        run: git ls-files '*.sh' | grep -E '^(\.github/scripts|kubernetes)/' | xargs -r shellcheck
+
       # A dashboard that hardcodes its datasource uid is pinned to the local
       # Prometheus and cannot reach the Thanos history, and nothing else notices
       # — it renders fine, it just goes blank past ~2d. Not pinning PyYAML: it is

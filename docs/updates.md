@@ -48,11 +48,140 @@ reverts from merging. The soak check is stopped by `suspend: true` in
 Install the Renovate app on the repo at <https://github.com/apps/renovate>, grant it
 `calebbutcher/home-ops`, and merge the onboarding ("Configure Renovate") PR it opens.
 
+### Automatic revert (rollout-revert)
+
+When an **automerged** app update fails to roll out, the cluster reports it and
+GitHub reverts it. Updates you merge yourself are never auto-reverted.
+
+```text
+helm-controller: "Helm upgrade failed ..."     (pods never Ready; Helm already rolled back)
+rollout-guard:   "Soak check failed ..."       (Ready, then crashed / OOMed / probe failing)
+        │  Flux Alert `rollout-revert` (app namespaces, those two messages only)
+        ▼  Provider `github-dispatch` → repository_dispatch "HelmRelease/<name>.<ns>"
+.github/workflows/rollout-revert.yml
+        │  newest change to that app's directory in 24h — automerged Renovate PR?
+        ▼  yes → branch revert/pr-N: git revert + quarantine rule → PR (auto-merges in live mode)
+Flux applies the revert → the HelmRelease's failure count resets → app back on the old version
+```
+
+- **Eligible:** the newest first-parent commit touching the HelmRelease's directory
+  in the last 24h is the merge of a Renovate PR labelled `automerge` and merged by
+  `renovate[bot]`. If you changed the app after the automerge, nothing happens. A
+  grouped PR is reverted as a whole.
+- **Quarantine:** the revert PR also adds a rule per dependency/version to
+  [`.github/renovate/quarantine.json`](../.github/renovate/quarantine.json). The
+  automerge gate then blocks that exact version, so it comes back as a manual PR.
+  Newer versions can still automerge. To retry the version, delete its rule.
+- **DB-backed apps after a soak failure:** the revert PR opens but does **not**
+  auto-merge. The new version ran and may have migrated the database, so a human
+  should decide whether downgrading is safe. A Helm-wait failure always auto-merges:
+  Helm has already rolled the cluster back, so the revert only brings git in line.
+- **No loops, no pile-ups:** one revert per PR, however many events arrive. Helm
+  retries send up to 4. If the reverted version also fails, the newest change is now
+  the revert, which isn't an automerge, so nothing more happens. `#flux-deploys`
+  shows the failure, and that's the point to step in.
+- **Every run writes its decision to the job summary**, including "no action"
+  outcomes (Actions → rollout-revert).
+
+**Setup** (once):
+
+1. Create the cluster's dispatch token: a fine-grained PAT named
+   `home-ops-cluster-dispatch`, repository access *only* `calebbutcher/home-ops`,
+   **Contents: read and write** (repository_dispatch requires it), 1-year expiry. Put
+   it in `kubernetes/infrastructure/configs/github-dispatch-token.yaml` (gitignored
+   template), then run
+   `sops --encrypt github-dispatch-token.yaml > github-dispatch-token.sops.yaml`.
+2. Create the workflow's token: a fine-grained PAT named `home-ops-rollout-revert`,
+   same repo, **Contents + Pull requests: read and write**. Then run
+   `gh secret set ROLLOUT_REVERT_TOKEN`. It has to be a PAT: PRs pushed with
+   `GITHUB_TOKEN` don't trigger the required checks, so auto-merge would hang.
+3. `gh variable set ROLLOUT_REVERT_MODE --body dry-run`. Switch it to `live` after the
+   drills. `off` disables reverts. `gh variable set ROLLOUT_DRILL --body true` while
+   drilling.
+4. Calendar both PATs' expiry. An expired token fails silently.
+
+**Drill / re-run by hand:**
+`gh workflow run rollout-revert -f namespace=tools -f name=it-tools -f message="Helm upgrade failed for release tools/it-tools ..."`
+
 ### Seerr note
 
 `seerr/seerr` publishes only a moving `latest` tag (no semver releases), so it is
 pinned by **immutable digest** (`tag: latest@sha256:...`). Renovate's `pinDigests`
 opens a PR whenever that digest changes.
+
+## The automerge gate
+
+`.github/workflows/automerge-gate.yml` runs a check called **`automerge gate`** on
+every PR, and the `main` ruleset requires it. It only has an opinion about Renovate
+PRs that Renovate has marked for automerge. Every other PR (yours, rollout reverts,
+manual Renovate PRs) passes in seconds.
+
+Renovate's `packageRules` decide what is *eligible* to automerge. The gate is the
+second opinion, and the only thing that reads the release notes. It **fails**, which
+blocks GitHub auto-merge, when:
+
+- any changed file is not a `helmrelease*.yaml` under `kubernetes/apps/`. Raw
+  manifests get no Helm rollback and can't be auto-reverted.
+- the file belongs to a never-automerge app (authentik, technitium, bambustudio, the
+  monitoring platform).
+- a DB-backed app (immich, paperless, gitea, n8n, tandoor, uptime-kuma, tracearr) gets
+  anything other than a patch.
+- the update is a major, or a minor of a `0.x` version.
+- the dependency and version are quarantined (`.github/renovate/quarantine.json` on
+  `main`, or the `quarantined` label). That means rollout-revert already had to roll
+  this exact version back once.
+- the release notes contain breaking-change wording ("breaking", "migration
+  required", "action required", "removed config", "database migration", ...).
+- the repo variable `AUTOMERGE_ENABLED` is `false` (the kill switch).
+
+On a failure it adds `needs-planning` and leaves one sticky comment listing the
+reasons and the matching release-note lines. **To proceed:** read the notes, then
+either merge by hand or add the **`gate-approved`** label. The label re-runs the gate,
+it passes, and auto-merge finishes.
+
+Test it against any PR without touching it:
+
+```sh
+GITHUB_TOKEN=$(gh auth token) python3 .github/scripts/automerge-gate.py --pr 536 --dry-run --as-automerge
+```
+
+`--as-automerge` evaluates the PR as if Renovate had marked it, which is useful for
+checking the gate against old PRs.
+
+### One-time GitHub setup
+
+```sh
+# Labels the gate, Renovate and rollout-revert use
+for l in automerge:0e8a16 needs-planning:d93f0b quarantined:b60205 \
+         gate-approved:5319e7 revert:b60205 rollout-drill:c5def5; do
+  gh label create "${l%%:*}" --color "${l##*:}" --force
+done
+
+# Let GitHub auto-merge PRs (Renovate's platformAutomerge), and tidy merged branches
+gh api -X PATCH repos/calebbutcher/home-ops -F allow_auto_merge=true -F delete_branch_on_merge=true
+gh variable set AUTOMERGE_ENABLED --body true
+
+# Ruleset: require the checks on main. Apply AFTER `automerge gate` has run on at
+# least one PR, so GitHub knows the check name.
+gh api -X POST repos/calebbutcher/home-ops/rulesets --input .github/rulesets/main.json
+```
+
+**Required checks are what make auto-merge safe.** On a branch with no required
+checks, GitHub auto-merge merges as soon as it is enabled, before CI has run. The
+ruleset ([`.github/rulesets/main.json`](../.github/rulesets/main.json)) requires
+the three `validate` checks plus `automerge gate`, and pins each to the GitHub
+Actions app (id 15368) so nothing else can post a passing status under the same
+name.
+
+Other settings in the ruleset:
+
+- **`strict: false`.** With `rebaseWhen: conflicted`, Renovate PRs are often behind
+  `main`, and `strict` would stop them merging.
+- **A PR is required for every change to `main`**, matching how this repo already
+  works.
+- **Admin bypass is `pull_request` mode, not `always`.** You can tick "bypass" when
+  merging a PR, but nothing can push straight to `main`. That includes the cluster's
+  dispatch token.
 
 ## k3s version upgrades (System Upgrade Controller)
 
@@ -205,17 +334,18 @@ Timeouts are all overridable: `drain_timeout` (300s), `reboot_timeout` (600s),
 Kubernetes calls run from the Ansible controller (`delegate_to: localhost`), so this
 needs the same working kubeconfig `kubectl` uses.
 
-## Follow-on: Discord notifications (not yet enabled)
+## Notifications
 
-GitHub already notifies on PRs and the Dependency Dashboard. To *also* push Flux
-events (reconcile success/failure, applied upgrades) to a Discord channel, the
-notification-controller is already installed — this is purely additive:
+Discord is the notification sink, one channel per source:
 
-1. Create a Discord channel webhook (Channel → Integrations → Webhooks).
-2. Store the webhook URL as a SOPS-encrypted Secret (`.sops.yaml` already covers
-   `kubernetes/`), e.g. `kubernetes/flux/cluster/flux-system/discord-webhook.sops.yaml`.
-3. Add a Flux `Provider` (type `discord`, `secretRef` → the webhook secret) and an
-   `Alert` selecting the resources to report on (e.g. all `HelmRelease` and
-   `Kustomization` events at `info` level). Reference:
-   <https://fluxcd.io/flux/monitoring/alerts/>
-4. Add both manifests to the `flux-system` kustomization and commit.
+| Channel | Source | Configured in |
+| --- | --- | --- |
+| `#flux-deploys` | Flux events — Kustomization applies, HelmRelease upgrades, **failed upgrades and rollbacks** | `kubernetes/infrastructure/configs/flux-discord-{provider,alert}.yaml` |
+| `#cluster-alerts` | Alertmanager (incl. `FluxHelmReleaseNotReady`) | `kubernetes/apps/monitoring/kube-prometheus-stack/alertmanagerconfig.yaml` |
+| `#git-prs` | GitHub PRs and merges (incl. Renovate) | GitHub repo Settings → Webhooks |
+
+**Flux Alerts need one `eventSources` entry per HelmRelease namespace.**
+notification-controller has no namespace wildcard — an entry without `namespace:`
+means the Alert's own namespace (`flux-system`), which holds no HelmReleases. When you
+add an app in a new namespace, add a line to `flux-discord-alert.yaml`; CI
+(`.github/scripts/check-alert-coverage.py`) fails the PR until you do.
