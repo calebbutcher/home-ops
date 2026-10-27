@@ -20,6 +20,21 @@
         "⚠️ **Quarantined.** An update of this dependency was automatically reverted after a failed rollout (#545). Automerge is blocked; review it and merge by hand, or add `gate-approved`."
       ],
       "matchNewValue": "/^v?2099\\.1\\.1\\-drill$/"
+    },
+    {
+      "description": [
+        "Quarantined 2026-10-27 by rollout-revert: #547 was reverted. SoakFailed: Soak check failed for release tools/it-tools with chart app-template@5.2.1 (revision 8): it-tools-7c7d666497-xqcts/app restarted 4x since the upgrade https://github.com/calebbutcher/home-ops/actions/runs/40428372743"
+      ],
+      "matchDepNames": [
+        "corentinth/it-tools"
+      ],
+      "addLabels": [
+        "quarantined"
+      ],
+      "prBodyNotes": [
+        "⚠️ **Quarantined.** An update of this dependency was automatically reverted after a failed rollout (#547). Automerge is blocked; review it and merge by hand, or add `gate-approved`."
+      ],
+      "matchNewValue": "/^v?2024\\.10\\.22\\-7ca5933\\-drillb$/"
     }
   ]
 }
