@@ -334,7 +334,7 @@ spec:
           # helm-values manager covers kubernetes/** and will bump (and digest-pin)
           # this independently of the chart's appVersion; a mismatch between the two
           # is harmless and is NOT something to hand-correct.
-          image: quay.io/thanos/thanos:v0.42.4
+          image: quay.io/thanos/thanos:v0.42.5@sha256:0a546b98a8dd47735456ab389983675ee363d68127e334937a9fceeea10da5e7
           command:
             - /bin/sh
             - -ec
