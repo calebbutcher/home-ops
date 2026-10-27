@@ -26,7 +26,7 @@ spec:
         fsGroup: 999
       containers:
         - name: redis
-          image: redis:8.10.1-alpine@sha256:becdda6c7f4b3fb42e42fd7f120bbf5c54c4caaaf16f26da24e4563d2c1f0576
+          image: redis:8.10.3-alpine@sha256:896f241f438ab6a210cfb24f573b84bea721a4cbe67f1b4fd07eb638b3b02a7b
           args:
             - --save
             - ""           # disable RDB snapshots
