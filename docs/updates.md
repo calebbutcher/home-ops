@@ -253,6 +253,10 @@ the current release. **Never skip a minor.** Keep the Ansible `k3s_version`
 (`ansible/inventory/my-cluster/group_vars/all/main.yml`) roughly in sync so freshly-joined
 nodes don't land far behind.
 
+**Currently held on 1.35.** `renovate.json` caps `k3s-io/k3s` at `v1.35.x` with
+`allowedVersions`, so only patch PRs open, and caps the `alpine/k8s` kubectl image at 1.36.x
+(kubectl's +/-1 skew). To take the next minor, raise both caps in the same PR.
+
 **Rollback / stop.** Remove the label from un-upgraded nodes to halt further rollout
 (`kubectl label node <name> k3s-upgrade-`). Nodes already upgraded stay upgraded — recover
 those from the etcd snapshot if needed. The controller only bundles CoreDNS / metrics-server
