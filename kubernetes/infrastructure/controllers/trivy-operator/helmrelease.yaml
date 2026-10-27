@@ -124,11 +124,14 @@ spec:
       # The DB is a cache that re-downloads in under a minute, so emptyDir.
       storageClassEnabled: false
 
-      # MEDIUM and above. LOW/UNKNOWN never meet cve-tracker's threshold, and
-      # dropping them keeps the larger reports well under etcd's object limit.
-      # MEDIUM stays because a distro can rate a CVE MEDIUM that CISA has in
-      # KEV, and KEV alone is enough to open an issue.
-      severity: MEDIUM,HIGH,CRITICAL
+      # HIGH and above, because a report has to fit in one etcd object
+      # (~1.5MiB, ~400-500 bytes per finding). With MEDIUM included,
+      # uptime-kuma (~5k findings) and bambustudio (~6.5k) produced 2.5MB
+      # reports that the API server rejected, so those workloads had no
+      # report at all. Measured 2026-10-27: HIGH+ is ~2.5k and ~1k.
+      # Cost: a CVE in KEV that the distro rates MEDIUM is missed here. The
+      # Phase 3 KEV backstop is meant to cover that (docs/cve-tracking.md).
+      severity: HIGH,CRITICAL
       # Unfixed CVEs stay in the reports and on the dashboard. The tracker
       # drops them itself, because "no fix exists yet" is worth seeing.
       ignoreUnfixed: false
