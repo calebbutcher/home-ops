@@ -1,0 +1,530 @@
+---
+# Vulnerability overview: trivy-operator's summary metrics plus the cve-tracker
+# log. Auto-imported by the kube-prometheus-stack Grafana sidecar via the
+# grafana_dashboard label. Pipeline: kubernetes/infrastructure/controllers/
+# {trivy-operator,cve-tracker}; runbook: docs/cve-tracking.md.
+#
+# This is the "everything" view: it counts every CRITICAL/HIGH finding,
+# including the ones with no fix and the ones below cve-tracker's threshold.
+# The actionable list is the issues in calebbutcher/home-ops-security, NOT this.
+#
+# Defaults to Thanos so the trend panel spans more than Prometheus's 2d. The
+# metrics come from trivy-operator's ServiceMonitor (per container, per
+# severity; per-CVE labels are off on purpose, see its HelmRelease). Severity
+# is matched case-insensitively because the exporter's capitalisation isn't
+# something to bet a blank dashboard on.
+#
+# Generated once from a script and then hand-maintained. If you edit panels,
+# keep the `id`s unique and the gridPos rows from overlapping.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: security-vulnerabilities-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  security-vulnerabilities.json: |
+    {
+      "annotations": {
+        "list": []
+      },
+      "editable": true,
+      "graphTooltip": 1,
+      "schemaVersion": 39,
+      "version": 1,
+      "id": null,
+      "uid": "security-vulnerabilities",
+      "title": "Security / Vulnerabilities",
+      "tags": [
+        "security",
+        "trivy",
+        "cve"
+      ],
+      "time": {
+        "from": "now-14d",
+        "to": "now"
+      },
+      "refresh": "15m",
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "label": "Datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {
+              "text": "Thanos",
+              "value": "thanos",
+              "selected": true
+            },
+            "options": [],
+            "refresh": 1,
+            "regex": "",
+            "hide": 0
+          },
+          {
+            "name": "loki",
+            "label": "Logs",
+            "type": "datasource",
+            "query": "loki",
+            "current": {
+              "selected": false,
+              "text": "Loki",
+              "value": "loki"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "options": [],
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false
+          }
+        ]
+      },
+      "panels": [
+        {
+          "type": "row",
+          "title": "Is it working?",
+          "collapsed": false,
+          "panels": [],
+          "datasource": null,
+          "id": 1,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "type": "stat",
+          "title": "cve-tracker: last success",
+          "description": "Age of the last successful cve-tracker run. Red at 48h, when CveTrackerStale fires.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "time() - kube_cronjob_status_last_successful_time{namespace=\"cve-tracker\", cronjob=\"cve-tracker\"}",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 100000
+                  },
+                  {
+                    "color": "red",
+                    "value": 172800
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value"
+          },
+          "id": 2,
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 1
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Containers with a report",
+          "description": "Distinct workload containers trivy-operator currently has a VulnerabilityReport for. The cve-tracker INVENTORY log line below gives the number it expects.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(count by (namespace, resource_kind, resource_name, container_name) (trivy_image_vulnerabilities))",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value"
+          },
+          "id": 3,
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 6,
+            "y": 1
+          }
+        },
+        {
+          "type": "stat",
+          "title": "CRITICAL findings",
+          "description": "All CRITICAL findings across running containers, fixed or not, counted once per container. Most won't be issues: the tracker only opens one when a fix exists.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(trivy_image_vulnerabilities{severity=~\"(?i)critical\"})",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value"
+          },
+          "id": 4,
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 12,
+            "y": 1
+          }
+        },
+        {
+          "type": "stat",
+          "title": "HIGH findings",
+          "description": "All HIGH findings, fixed or not. Only those with EPSS >= 0.1 or in CISA KEV become issues.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(trivy_image_vulnerabilities{severity=~\"(?i)high\"})",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value"
+          },
+          "id": 5,
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 18,
+            "y": 1
+          }
+        },
+        {
+          "type": "row",
+          "title": "Where",
+          "collapsed": false,
+          "panels": [],
+          "datasource": null,
+          "id": 6,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 6
+          }
+        },
+        {
+          "type": "table",
+          "title": "Images by CRITICAL / HIGH findings",
+          "description": "One row per running image. Counts include unfixed CVEs, so a high number here is not necessarily actionable: the issues in calebbutcher/home-ops-security are the actionable list.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "instant": true,
+              "format": "table",
+              "expr": "max by (namespace, image_registry, image_repository, image_tag) (sum by (namespace, resource_name, container_name, image_registry, image_repository, image_tag) (trivy_image_vulnerabilities{severity=~\"(?i)critical\"}))"
+            },
+            {
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "instant": true,
+              "format": "table",
+              "expr": "max by (namespace, image_registry, image_repository, image_tag) (sum by (namespace, resource_name, container_name, image_registry, image_repository, image_tag) (trivy_image_vulnerabilities{severity=~\"(?i)high\"}))"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "Value #A": "CRITICAL",
+                  "Value #B": "HIGH",
+                  "image_registry": "registry",
+                  "image_repository": "repository",
+                  "image_tag": "tag"
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "sort": [
+                  {
+                    "field": "CRITICAL",
+                    "desc": true
+                  }
+                ]
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm"
+          },
+          "id": 7,
+          "gridPos": {
+            "h": 12,
+            "w": 14,
+            "x": 0,
+            "y": 7
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Findings over time",
+          "description": "Total CRITICAL and HIGH findings across running containers. Drops after an upgrade; rises when a new CVE lands in a common base image.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "legendFormat": "{{severity}}",
+              "expr": "sum by (severity) (trivy_image_vulnerabilities{severity=~\"(?i)critical|high\"})"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 10
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "id": 8,
+          "gridPos": {
+            "h": 12,
+            "w": 10,
+            "x": 14,
+            "y": 7
+          }
+        },
+        {
+          "type": "row",
+          "title": "What the tracker did",
+          "collapsed": false,
+          "panels": [],
+          "datasource": null,
+          "id": 9,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 19
+          }
+        },
+        {
+          "type": "logs",
+          "title": "cve-tracker runs",
+          "description": "ACTION lines are issue changes (open / reopen / update / close-fixed / close-removed / deferred). With DRY_RUN=true they are what WOULD have happened. SUMMARY is one line per run.",
+          "datasource": {
+            "type": "loki",
+            "uid": "$loki"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "$loki"
+              },
+              "expr": "{namespace=\"cve-tracker\"} |~ \"^(ACTION|SUMMARY|INVENTORY|ERROR|WARN)\""
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "wrapLogMessage": true,
+            "sortOrder": "Descending",
+            "dedupStrategy": "none"
+          },
+          "id": 10,
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 20
+          }
+        }
+      ]
+    }

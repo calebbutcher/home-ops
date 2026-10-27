@@ -78,6 +78,8 @@ resources:
   - backup-verify/dashboard.yaml
   - kube-prometheus-stack/prometheusrule-speedtest.yaml
   - speedtest/dashboard.yaml
+  - kube-prometheus-stack/prometheusrule-cve-tracker.yaml
+  - trivy/dashboard.yaml
   - kube-prometheus-stack/prometheusrule-falco.yaml
   - falco/servicemonitor.yaml
   - falco/servicemonitor-falcosidekick.yaml

@@ -18,4 +18,6 @@ resources:
   - controllers/falco
   - controllers/falco-k8saudit
   - controllers/rollout-guard
+  - controllers/trivy-operator
+  - controllers/cve-tracker
   - configs

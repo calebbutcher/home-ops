@@ -1,0 +1,13 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# No top-level transformers: every manifest sets its own namespace, matching the
+# other controllers (and keeping the door open for a .sops.yaml here later).
+resources:
+  - namespace.yaml
+  - helmrepository.yaml
+  - helmrelease.yaml
+# Nothing else here creates trivy-operator CRs, so this can live in the main
+# `infrastructure` Kustomization. If that ever changes (a ClusterComplianceReport,
+# say), those CRs go in a separate Flux Kustomization; see falco/kustomization.yaml
+# for the CRD-ordering reason.
