@@ -6,6 +6,10 @@ metadata:
   namespace: monitoring
 spec:
   interval: 30m
+  # A DaemonSet on 9 nodes rolls one pod at a time (~40-60s each), which outlasts
+  # Helm's default 5m wait: the 1.12→1.14 upgrade "failed" mid-rollout and each
+  # remediation retry rolled every node back and forth.
+  timeout: 15m
   chart:
     spec:
       chart: alloy
