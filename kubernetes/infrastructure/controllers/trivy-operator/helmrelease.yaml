@@ -134,12 +134,13 @@ spec:
       # dropped by the policy below.
       ignoreUnfixed: false
       # A report has to fit in ONE etcd object: the API server rejects
-      # anything over 2MiB (~780 bytes per finding, so ~2,600 findings).
+      # anything over 2MiB (~890 bytes per finding, so ~2,350 findings).
       # The rejection is logged once and the workload is left with no report
       # at all (alert: TrivyReportWriteFailed). With MEDIUM+ and no policy,
-      # uptime-kuma had 4,964 findings and bambustudio 6,504. Measured with
-      # this policy: 2,127 and 1,803. Each rule removes findings the tracker
-      # can't act on:
+      # uptime-kuma 2.5.6 had 4,964 findings and bambustudio 6,504. Measured
+      # with this policy: bambustudio 1,351 (1.6MB at 1,803 before the
+      # no-fix rule worked), uptime-kuma 2.5.7 467. Each rule removes
+      # findings the tracker can't act on:
       #   linux-libc-dev   kernel headers. A container runs the node's
       #                    kernel, not this one; node kernels are Phase 2.
       #                    3,929 of bambustudio's rows, plus false KEV hits.
@@ -164,9 +165,11 @@ spec:
           input.Severity == "MEDIUM"
         }
 
+        # FixedVersion is omitted, not "", when there's no fix: comparing a
+        # missing field is undefined in Rego, so `== ""` never matched.
         ignore if {
           input.Severity == "MEDIUM"
-          input.FixedVersion == ""
+          object.get(input, "FixedVersion", "") == ""
         }
       timeout: "15m0s"
 
