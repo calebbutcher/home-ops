@@ -24,6 +24,14 @@ metadata:
   name: trivy-operator
   namespace: trivy-system
 spec:
+  # SUSPENDED 2026-10-27, ~3 min into the first sweep: its report writes and the
+  # API server's handling of these large CRs pushed k3s on the 4GB control-plane
+  # nodes past their memory (control-01 wedged, OOM restarts on 02/03, etcd
+  # quorum at risk). The operator and trivy-server were scaled to 0 by hand and
+  # the SBOM reports deleted; while suspended, Helm won't scale them back up.
+  # Don't resume until the control planes have headroom or reports move off
+  # etcd (alternateReportStorage). See docs/cve-tracking.md.
+  suspend: true
   interval: 30m
   chart:
     spec:
