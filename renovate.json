@@ -202,11 +202,13 @@
       "description": [
         "k3s. Both places the version is written move together: the SUC Plans (which drive the live rolling upgrade) and the ansible inventory (the fresh-install/node-join baseline).",
         "k3s versions look like v1.32.13+k3s1, which is not semver, hence the regex versioning.",
-        "separateMultipleMinor gives one PR PER MINOR STREAM rather than a single jump to the newest release. That matches the documented upgrade rule — k3s supports only +1 minor of skew, so 1.32 -> 1.36 must be walked one minor at a time, and four separate PRs is exactly that walk."
+        "separateMultipleMinor gives one PR PER MINOR STREAM rather than a single jump to the newest release. That matches the documented upgrade rule — k3s supports only +1 minor of skew, so 1.32 -> 1.36 must be walked one minor at a time, and four separate PRs is exactly that walk.",
+        "HELD on the 1.35 minor (2026-10-27, by choice): allowedVersions keeps 1.35.x patch PRs coming and offers no 1.36. To move on, raise this and the alpine/k8s cap below together."
       ],
       "matchDepNames": ["k3s-io/k3s"],
       "groupName": "k3s",
       "versioning": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\+k3s(?<build>\\d+)$",
+      "allowedVersions": "/^v1\\.35\\./",
       "separateMinorPatch": true,
       "separateMultipleMinor": true,
       "labels": ["renovate", "type/cluster-upgrade"],
@@ -214,6 +216,14 @@
         "⚠️ **Merging this upgrades the live cluster.** The system-upgrade-controller acts on every node labelled `k3s-upgrade=true` as soon as Flux applies the new Plan — control-plane nodes first, one at a time, cordoned but not drained. Run `kubectl get nodes -L k3s-upgrade` first to see how much of the cluster that is.",
         "Take one minor at a time and let the cluster settle in between. Watch with `kubectl -n system-upgrade get jobs -w` and `kubectl get nodes -w`."
       ]
+    },
+    {
+      "description": [
+        "alpine/k8s is the kubectl image for rollout-guard and the backup-verify CronJobs. Its tag is the kubectl version, and kubectl supports only +/-1 minor of skew against the apiserver.",
+        "Capped at 1.36 while k3s is held on 1.35 (see the k3s rule above): 1.37 would be two minors ahead of the cluster. Raise it together with the k3s cap."
+      ],
+      "matchPackageNames": ["docker.io/alpine/k8s", "alpine/k8s"],
+      "allowedVersions": "/^1\\.36\\./"
     },
     {
       "description": [
