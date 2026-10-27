@@ -150,7 +150,11 @@ while read -r hr; do
       severity: "error", timestamp: (now | todate), reason: "SoakFailed", message: $msg,
       metadata: {revision: $ver},
       reportingController: "rollout-guard", reportingInstance: $host}' > /tmp/event.json
-  curl -sS -f --max-time 20 -X POST -H 'Content-Type: application/json' \
+  # Retry a refused connect: k3s's kube-router adds a new pod's IP to the
+  # NetworkPolicy ipsets asynchronously, and until it does, allow-egress's
+  # same-namespace ingress rule REJECTs this pod. This job is seconds old here.
+  curl -sS -f --max-time 20 --retry 5 --retry-delay 2 --retry-connrefused \
+    -X POST -H 'Content-Type: application/json' \
     --data @/tmp/event.json "$NC_URL"
   # Mark reported only after a successful POST, so a failed POST is retried next run.
   kubectl -n flux-system patch configmap "$STATE" --type merge \
