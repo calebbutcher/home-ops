@@ -50,10 +50,11 @@ spec:
         - alert: ProxmoxStorageNearFull
           # Guard against disabled storages (size==0 → divide-by-zero) by keeping only
           # size>0 series before dividing; max by (id) dedups across members.
+          # PBS-01-iSCSI has its own threshold in the rule below.
           expr: |
             max by (id) (
-              pve_disk_usage_bytes{job="proxmox-ve", id=~"storage/.*"}
-                / (pve_disk_size_bytes{job="proxmox-ve", id=~"storage/.*"} > 0)
+              pve_disk_usage_bytes{job="proxmox-ve", id=~"storage/.*", id!~"storage/.*/PBS-01-iSCSI"}
+                / (pve_disk_size_bytes{job="proxmox-ve", id=~"storage/.*", id!~"storage/.*/PBS-01-iSCSI"} > 0)
             ) > 0.85
           for: 15m
           labels:
@@ -61,8 +62,29 @@ spec:
           annotations:
             summary: "Proxmox storage near full ({{ $labels.id }})"
             description: >-
-              PVE storage {{ $labels.id }} is >85% full for 15m. Free space or expand
-              it before guests/backups start failing writes.
+              PVE storage {{ $labels.id }} is {{ $value | humanizePercentage }} full
+              (>85% for 15m). Free space or expand it before guests/backups start
+              failing writes.
+
+        - alert: ProxmoxStorageNearFull
+          # The Proxmox Backup Server datastore runs deliberately full: PBS prune + GC
+          # hold it at ~87-89% (30d peak 89% as of 2026-10-27), which is accepted and
+          # managed on the PBS side. 85% fired permanently, so it gets headroom above
+          # its normal peak while still warning before backups fail on a full disk.
+          expr: |
+            max by (id) (
+              pve_disk_usage_bytes{job="proxmox-ve", id=~"storage/.*/PBS-01-iSCSI"}
+                / (pve_disk_size_bytes{job="proxmox-ve", id=~"storage/.*/PBS-01-iSCSI"} > 0)
+            ) > 0.95
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Proxmox storage near full ({{ $labels.id }})"
+            description: >-
+              PBS datastore {{ $labels.id }} is {{ $value | humanizePercentage }} full
+              (>95% for 15m), above its normal 87-89% working level. Check PBS
+              prune/GC ran, or retention grew, before backups fail on a full disk.
 
         - alert: ProxmoxNodeMemoryPressure
           expr: |
