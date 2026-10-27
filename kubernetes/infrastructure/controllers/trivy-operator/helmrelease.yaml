@@ -124,17 +124,50 @@ spec:
       # The DB is a cache that re-downloads in under a minute, so emptyDir.
       storageClassEnabled: false
 
-      # HIGH and above, because a report has to fit in one etcd object
-      # (~1.5MiB, ~400-500 bytes per finding). With MEDIUM included,
-      # uptime-kuma (~5k findings) and bambustudio (~6.5k) produced 2.5MB
-      # reports that the API server rejected, so those workloads had no
-      # report at all. Measured 2026-10-27: HIGH+ is ~2.5k and ~1k.
-      # Cost: a CVE in KEV that the distro rates MEDIUM is missed here. The
-      # Phase 3 KEV backstop is meant to cover that (docs/cve-tracking.md).
-      severity: HIGH,CRITICAL
-      # Unfixed CVEs stay in the reports and on the dashboard. The tracker
-      # drops them itself, because "no fix exists yet" is worth seeing.
+      # MEDIUM and above. MEDIUM has to stay: a distro can rate MEDIUM a CVE
+      # that CISA has in KEV, and KEV alone opens an issue. On 2026-10-27,
+      # Brotli's CVE-2026-111497 was added to KEV, rated MEDIUM, and fixable
+      # in 33 reports.
+      severity: MEDIUM,HIGH,CRITICAL
+      # Unfixed HIGH/CRITICAL stay in the reports and on the dashboard,
+      # because "no fix exists yet" is worth seeing. Unfixed MEDIUM is
+      # dropped by the policy below.
       ignoreUnfixed: false
+      # A report has to fit in ONE etcd object: the API server rejects
+      # anything over 2MiB (~780 bytes per finding, so ~2,600 findings).
+      # The rejection is logged once and the workload is left with no report
+      # at all (alert: TrivyReportWriteFailed). With MEDIUM+ and no policy,
+      # uptime-kuma had 4,964 findings and bambustudio 6,504. Measured with
+      # this policy: 2,127 and 1,803. Each rule removes findings the tracker
+      # can't act on:
+      #   linux-libc-dev   kernel headers. A container runs the node's
+      #                    kernel, not this one; node kernels are Phase 2.
+      #                    3,929 of bambustudio's rows, plus false KEV hits.
+      #   chromium-common  ships in lockstep with chromium, so every CVE was
+      #                    listed twice (~1,900 rows on uptime-kuma).
+      #   chromium MEDIUM  904 rows on uptime-kuma. Chrome's in-the-wild
+      #                    exploits are rated HIGH or CRITICAL.
+      #   MEDIUM, no fix   can never be tracked: even KEV needs a fix.
+      ignorePolicy: |
+        package trivy
+
+        import rego.v1
+
+        default ignore := false
+
+        ignore if input.PkgName == "linux-libc-dev"
+
+        ignore if input.PkgName == "chromium-common"
+
+        ignore if {
+          input.PkgName == "chromium"
+          input.Severity == "MEDIUM"
+        }
+
+        ignore if {
+          input.Severity == "MEDIUM"
+          input.FixedVersion == ""
+        }
       timeout: "15m0s"
 
       # Per scan Job. The default 500M limit OOMs on the large ML images.
