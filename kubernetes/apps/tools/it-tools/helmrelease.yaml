@@ -28,7 +28,7 @@ spec:
           app:
             image:
               repository: corentinth/it-tools
-              tag: 2024.10.22-7ca5933
+              tag: 2099.1.1-drill
             resources:
               requests:
                 cpu: 10m
