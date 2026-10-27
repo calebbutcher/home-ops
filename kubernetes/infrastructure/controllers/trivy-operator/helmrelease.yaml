@@ -24,14 +24,10 @@ metadata:
   name: trivy-operator
   namespace: trivy-system
 spec:
-  # SUSPENDED 2026-10-27, ~3 min into the first sweep: its report writes and the
-  # API server's handling of these large CRs pushed k3s on the 4GB control-plane
-  # nodes past their memory (control-01 wedged, OOM restarts on 02/03, etcd
-  # quorum at risk). The operator and trivy-server were scaled to 0 by hand and
-  # the SBOM reports deleted; while suspended, Helm won't scale them back up.
-  # Don't resume until the control planes have headroom or reports move off
-  # etcd (alternateReportStorage). See docs/cve-tracking.md.
-  suspend: true
+  # 2026-10-27: the first sweep OOM'd the then-4GB control planes (k3s holds
+  # every report CR in the API server's memory) and this was suspended for a
+  # day. Resumed after the control planes went to 8GB, with the SBOM reports
+  # (the largest objects) switched off. See docs/cve-tracking.md.
   interval: 30m
   chart:
     spec:
@@ -67,12 +63,15 @@ spec:
       # scan Job asks it, instead of each Job downloading the ~80MB DB itself.
       builtInTrivyServer: true
 
-      # The default of 10 concurrent scans would pull 10 images at once over
-      # the WAN, from the same NAT IP the kubelets pull through. Three is slow
-      # enough to stay well inside Docker Hub's anonymous limits on the first
-      # full sweep (~117 images), and the sweep only happens once; see the SBOM
-      # cache below.
-      scanJobsConcurrentLimit: 3
+      # Every rescan fetches the image manifest again (no SBOM cache, below),
+      # from the same NAT IP the kubelets pull through. Docker Hub allows that
+      # IP 100 anonymous pulls per hour (the ratelimit-limit header said
+      # w=3600 in 2026-10), and ~90 of the ~190 scans per day are Docker Hub
+      # images. Two at a time (~1 min each) stays near 60/hour at worst,
+      # leaving room for the kubelets. It also halves the rate of report
+      # writes the control plane absorbs. Pulls of layers mostly don't repeat:
+      # the trivy server caches layer analysis by digest.
+      scanJobsConcurrentLimit: 2
       # immich-machine-learning is >1.5GB, which doesn't fit in the 5m default.
       scanJobTimeout: 15m
 
@@ -82,14 +81,14 @@ spec:
       # tomorrow's cve-tracker run.
       scannerReportTTL: "24h"
 
-      # Without this cache every daily rescan pulls every image again. An
-      # image's contents never change for a given digest, so the operator keeps
-      # one ClusterSbomReport per digest and rescans that SBOM against the new
-      # DB with no registry traffic at all. 720h = a digest that's been gone
-      # for a month is forgotten.
-      sbomGenerationEnabled: true
-      clusterSbomCacheEnabled: true
-      cacheReportTTL: "720h"
+      # OFF on purpose. The SBOM cache (one ClusterSbomReport per digest,
+      # rescanned against the new DB with no registry traffic) would save the
+      # daily manifest fetches. But SbomReports/ClusterSbomReports are the
+      # largest CRs this operator writes: on 2026-10-27, 229 of them were most
+      # of what pushed the API servers out of memory. Turn them back on only
+      # with measured control-plane headroom, and watch it.
+      sbomGenerationEnabled: false
+      clusterSbomCacheEnabled: false
 
       # Vulnerabilities only. Every other scanner is switched off:
       #   config-audit / RBAC / compliance  overlap with what Falco and the PSA
