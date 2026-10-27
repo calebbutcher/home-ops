@@ -5,7 +5,7 @@ metadata:
   name: uptime-kuma-mariadb
   namespace: uptime-kuma
 spec:
-  image: mariadb:12.3.3@sha256:ab1c3dd381940233af12512b97d47b508fd3a0f17fbe3ba388739b7bc17cbc0b
+  image: mariadb:12.3.3@sha256:99c125f103f5d081ebbc9ffe064e63daf7f688ac33a5f7f29af2d7260a96debf
   rootPasswordSecretKeyRef:
     name: uptime-kuma-mariadb
     key: root-password
