@@ -81,6 +81,80 @@ Flux applies the revert → the HelmRelease's failure count resets → app back 
 pinned by **immutable digest** (`tag: latest@sha256:...`). Renovate's `pinDigests`
 opens a PR whenever that digest changes.
 
+## The automerge gate
+
+`.github/workflows/automerge-gate.yml` runs a check called **`automerge gate`** on
+every PR, and the `main` ruleset requires it. It only has an opinion about Renovate
+PRs that Renovate has marked for automerge. Every other PR (yours, rollout reverts,
+manual Renovate PRs) passes in seconds.
+
+Renovate's `packageRules` decide what is *eligible* to automerge. The gate is the
+second opinion, and the only thing that reads the release notes. It **fails**, which
+blocks GitHub auto-merge, when:
+
+- any changed file is not a `helmrelease*.yaml` under `kubernetes/apps/`. Raw
+  manifests get no Helm rollback and can't be auto-reverted.
+- the file belongs to a never-automerge app (authentik, technitium, bambustudio, the
+  monitoring platform).
+- a DB-backed app (immich, paperless, gitea, n8n, tandoor, uptime-kuma, tracearr) gets
+  anything other than a patch.
+- the update is a major, or a minor of a `0.x` version.
+- the dependency and version are quarantined (`.github/renovate/quarantine.json` on
+  `main`, or the `quarantined` label). That means rollout-revert already had to roll
+  this exact version back once.
+- the release notes contain breaking-change wording ("breaking", "migration
+  required", "action required", "removed config", "database migration", ...).
+- the repo variable `AUTOMERGE_ENABLED` is `false` (the kill switch).
+
+On a failure it adds `needs-planning` and leaves one sticky comment listing the
+reasons and the matching release-note lines. **To proceed:** read the notes, then
+either merge by hand or add the **`gate-approved`** label. The label re-runs the gate,
+it passes, and auto-merge finishes.
+
+Test it against any PR without touching it:
+
+```sh
+GITHUB_TOKEN=$(gh auth token) python3 .github/scripts/automerge-gate.py --pr 536 --dry-run --as-automerge
+```
+
+`--as-automerge` evaluates the PR as if Renovate had marked it, which is useful for
+checking the gate against old PRs.
+
+### One-time GitHub setup
+
+```sh
+# Labels the gate, Renovate and rollout-revert use
+for l in automerge:0e8a16 needs-planning:d93f0b quarantined:b60205 \
+         gate-approved:5319e7 revert:b60205 rollout-drill:c5def5; do
+  gh label create "${l%%:*}" --color "${l##*:}" --force
+done
+
+# Let GitHub auto-merge PRs (Renovate's platformAutomerge), and tidy merged branches
+gh api -X PATCH repos/calebbutcher/home-ops -F allow_auto_merge=true -F delete_branch_on_merge=true
+gh variable set AUTOMERGE_ENABLED --body true
+
+# Ruleset: require the checks on main. Apply AFTER `automerge gate` has run on at
+# least one PR, so GitHub knows the check name.
+gh api -X POST repos/calebbutcher/home-ops/rulesets --input .github/rulesets/main.json
+```
+
+**Required checks are what make auto-merge safe.** On a branch with no required
+checks, GitHub auto-merge merges as soon as it is enabled, before CI has run. The
+ruleset ([`.github/rulesets/main.json`](../.github/rulesets/main.json)) requires
+the three `validate` checks plus `automerge gate`, and pins each to the GitHub
+Actions app (id 15368) so nothing else can post a passing status under the same
+name.
+
+Other settings in the ruleset:
+
+- **`strict: false`.** With `rebaseWhen: conflicted`, Renovate PRs are often behind
+  `main`, and `strict` would stop them merging.
+- **A PR is required for every change to `main`**, matching how this repo already
+  works.
+- **Admin bypass is `pull_request` mode, not `always`.** You can tick "bypass" when
+  merging a PR, but nothing can push straight to `main`. That includes the cluster's
+  dispatch token.
+
 ## k3s version upgrades (System Upgrade Controller)
 
 The **k3s version itself** (Kubernetes version) is upgraded in-cluster by the
