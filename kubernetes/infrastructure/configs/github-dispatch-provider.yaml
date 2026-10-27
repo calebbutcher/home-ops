@@ -9,7 +9,7 @@
 # The token is a fine-grained PAT scoped to this repo only, with Contents: read+write
 # (which repository_dispatch requires). It lives in github-dispatch-token.sops.yaml.
 # The `main` ruleset has no `always` bypass, so this token cannot push to main.
-apiVersion: notification.toolkit.fluxcd.io/v1beta3
+apiVersion: notification.toolkit.fluxcd.io/v1
 kind: Provider
 metadata:
   name: github-dispatch

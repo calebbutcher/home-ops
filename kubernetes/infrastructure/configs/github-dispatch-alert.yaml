@@ -20,7 +20,7 @@
 # flux-discord-alert.yaml), and .github/scripts/check-alert-coverage.py fails CI if
 # an app namespace is missing. Infrastructure namespaces are deliberately absent:
 # infrastructure never automerges.
-apiVersion: notification.toolkit.fluxcd.io/v1beta3
+apiVersion: notification.toolkit.fluxcd.io/v1
 kind: Alert
 metadata:
   name: rollout-revert
