@@ -103,3 +103,57 @@ spec:
       ports:
         - protocol: TCP
           port: 9121
+---
+# The machine-learning API has no authentication of its own: anything that can
+# reach :3003 can make it run models. Only immich-server needs it.
+#
+# Narrower than the datastore policies above (server only, not the whole
+# namespace), because nothing else here talks to it. Clients found before
+# writing this (2026-10-31): immich-server via IMMICH_MACHINE_LEARNING_URL,
+# Uptime Kuma monitor #47 "Immich ML - Internal" polling /ping, and the
+# blackbox `app-services` Probe (probe-app.yaml) added alongside this policy.
+# There's no ServiceMonitor, and the container defines no kubelet probes.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: machine-learning-restrict-ingress
+  namespace: immich
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: immich
+      app.kubernetes.io/controller: immich-machine-learning
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: immich
+              app.kubernetes.io/controller: immich-server
+      ports:
+        - protocol: TCP
+          port: 3003
+    # The blackbox exporter, for probe-app.yaml's GET /ping (AppNotResponding).
+    # Pinned to the exporter pod, not all of monitoring: nothing else there
+    # needs this unauthenticated API.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus-blackbox-exporter
+      ports:
+        - protocol: TCP
+          port: 3003
+    # Uptime Kuma's "Immich ML - Internal" keyword monitor (GET /ping). A
+    # short-lived check like this never shows up in a sample of ESTABLISHED
+    # connections; see the Postgres policy above for how that bit once already.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: uptime-kuma
+      ports:
+        - protocol: TCP
+          port: 3003

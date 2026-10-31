@@ -51,6 +51,11 @@ spec:
         - http://gitea-app.gitea:3000
         - http://home-assistant.home-assistant:8123
         - http://immich-server.immich:2283
+        # Not ingress-backing: the internal ML backend immich-server calls for
+        # smart search and faces. It dies quietly (immich itself stays up and
+        # just stops tagging), so it gets its own probe. /ping answers "pong".
+        # Allowed through immich's machine-learning-restrict-ingress netpol.
+        - http://immich-machine-learning.immich:3003/ping
         - http://kube-prometheus-stack-grafana.monitoring:80
         - http://it-tools.tools:80
         - http://maintainerr.media:6246
