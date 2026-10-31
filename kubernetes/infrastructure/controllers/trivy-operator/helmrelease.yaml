@@ -9,7 +9,7 @@
 # next to the workload.
 #
 # What consumes the reports:
-#   * cve-tracker (../cve-tracker) turns the serious, fixable ones into GitHub
+#   * cve-tracker (../cve-tracker) turns fixable CISA KEV findings into GitHub
 #     issues in the private calebbutcher/home-ops-security repo.
 #   * The summary metrics feed the "Security / Vulnerabilities" dashboard
 #     (kubernetes/apps/monitoring/trivy/dashboard.yaml).
@@ -124,31 +124,25 @@ spec:
       # The DB is a cache that re-downloads in under a minute, so emptyDir.
       storageClassEnabled: false
 
-      # MEDIUM and above. MEDIUM has to stay: a distro can rate MEDIUM a CVE
-      # that CISA has in KEV, and KEV alone opens an issue. On 2026-10-27,
-      # Brotli's CVE-2026-111497 was added to KEV, rated MEDIUM, and fixable
-      # in 33 reports.
-      severity: MEDIUM,HIGH,CRITICAL
-      # Unfixed HIGH/CRITICAL stay in the reports and on the dashboard,
-      # because "no fix exists yet" is worth seeing. Unfixed MEDIUM is
-      # dropped by the policy below.
-      ignoreUnfixed: false
+      # Every severity. cve-tracker opens issues only for CISA KEV CVEs that
+      # have a fix, and KEV doesn't care how a distro rates a CVE: a new KEV
+      # entry is often LOW, MEDIUM or still UNKNOWN (unrated) when it lands.
+      severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+      # Fixable findings only: an image update can't fix the rest, so neither
+      # the tracker nor the dashboard needs them.
+      ignoreUnfixed: true
       # A report has to fit in ONE etcd object: the API server rejects
       # anything over 2MiB (~890 bytes per finding, so ~2,350 findings).
       # The rejection is logged once and the workload is left with no report
-      # at all (alert: TrivyReportWriteFailed). With MEDIUM+ and no policy,
-      # uptime-kuma 2.5.6 had 4,964 findings and bambustudio 6,504. Measured
-      # with this policy: bambustudio 1,351 (1.6MB at 1,803 before the
-      # no-fix rule worked), uptime-kuma 2.5.7 467. Each rule removes
-      # findings the tracker can't act on:
+      # at all (alert: TrivyReportWriteFailed). Measured with these settings
+      # (2026-10-31): bambustudio 1,502, alpine/k8s 1,036, cloudnative-
+      # vectorchord 611, uptime-kuma 2.5.7 590. Two packages are dropped:
       #   linux-libc-dev   kernel headers. A container runs the node's
       #                    kernel, not this one; node kernels are Phase 2.
-      #                    3,929 of bambustudio's rows, plus false KEV hits.
+      #                    Thousands of rows on Ubuntu images, plus false
+      #                    "KEV" hits for kernel CVEs.
       #   chromium-common  ships in lockstep with chromium, so every CVE was
-      #                    listed twice (~1,900 rows on uptime-kuma).
-      #   chromium MEDIUM  904 rows on uptime-kuma. Chrome's in-the-wild
-      #                    exploits are rated HIGH or CRITICAL.
-      #   MEDIUM, no fix   can never be tracked: even KEV needs a fix.
+      #                    listed twice (~1,900 rows on uptime-kuma 2.5.6).
       ignorePolicy: |
         package trivy
 
@@ -159,18 +153,6 @@ spec:
         ignore if input.PkgName == "linux-libc-dev"
 
         ignore if input.PkgName == "chromium-common"
-
-        ignore if {
-          input.PkgName == "chromium"
-          input.Severity == "MEDIUM"
-        }
-
-        # FixedVersion is omitted, not "", when there's no fix: comparing a
-        # missing field is undefined in Rego, so `== ""` never matched.
-        ignore if {
-          input.Severity == "MEDIUM"
-          object.get(input, "FixedVersion", "") == ""
-        }
       timeout: "15m0s"
 
       # Per scan Job. The default 500M limit OOMs on the large ML images.
