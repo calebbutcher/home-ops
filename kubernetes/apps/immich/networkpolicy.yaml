@@ -110,8 +110,9 @@ spec:
 # Narrower than the datastore policies above (server only, not the whole
 # namespace), because nothing else here talks to it. Clients found before
 # writing this (2026-10-31): immich-server via IMMICH_MACHINE_LEARNING_URL,
-# and Uptime Kuma monitor #47 "Immich ML - Internal" polling /ping. There's no
-# blackbox Probe, no ServiceMonitor, and the container defines no kubelet probes.
+# Uptime Kuma monitor #47 "Immich ML - Internal" polling /ping, and the
+# blackbox `app-services` Probe (probe-app.yaml) added alongside this policy.
+# There's no ServiceMonitor, and the container defines no kubelet probes.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -130,6 +131,19 @@ spec:
             matchLabels:
               app.kubernetes.io/instance: immich
               app.kubernetes.io/controller: immich-server
+      ports:
+        - protocol: TCP
+          port: 3003
+    # The blackbox exporter, for probe-app.yaml's GET /ping (AppNotResponding).
+    # Pinned to the exporter pod, not all of monitoring: nothing else there
+    # needs this unauthenticated API.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus-blackbox-exporter
       ports:
         - protocol: TCP
           port: 3003
