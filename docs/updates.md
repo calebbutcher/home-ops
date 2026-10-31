@@ -34,7 +34,13 @@ reverts from merging. The soak check is stopped by `suspend: true` in
    `HelmRelease` (`spec.chart.spec.version`) and container image tags in the
    bjw-s `values.*.image.tag` fields. No floating ranges, no `latest`.
 2. **[Renovate](https://docs.renovatebot.com/)** (Mend-hosted GitHub App) scans the repo on a
-   weekly schedule and opens **one PR per available update**. Config: [`renovate.json`](../renovate.json).
+   schedule of **Monday, Wednesday, Friday and Saturday before 6am Chicago** (cron
+   `* 0-5 * * 1,3,5,6`) and opens **one PR per available update**. PRs are only opened
+   and rebased inside those windows; an automerge happens whenever its checks pass.
+   Config: [`renovate.json`](../renovate.json).
+   - LinuxServer.io images are pinned to `-lsNNN` build tags and need regex versioning
+     (three tag shapes, explicit package lists). **A new LinuxServer image must be added
+     to the matching rule**, or Renovate silently never updates it.
 3. **Low-risk app updates merge themselves** once the required checks pass,
    including the automerge gate (tiers above). **Everything else waits for you to
    merge it**, and merging is the approval. Flux then reconciles `main` and applies

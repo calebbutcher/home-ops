@@ -9,7 +9,7 @@
     "local>calebbutcher/home-ops//.github/renovate/quarantine"
   ],
   "timezone": "America/Chicago",
-  "schedule": ["before 6am on monday"],
+  "schedule": ["* 0-5 * * 1,3,5,6"],
   "dependencyDashboard": true,
   "dependencyDashboardTitle": "Renovate Dependency Dashboard",
   "labels": ["renovate"],
@@ -239,13 +239,41 @@
     },
     {
       "description": [
-        "speedtest-tracker is pinned to a LinuxServer build (`v1.15.0-ls176`), not the bare app version. The image bundles PHP, and a PHP security fix (e.g. php2shell, CVE-2026-109618/109619) arrives as a new `-lsNNN` rebuild of the SAME app version — the bare `1.15.0` tag never changes, so Renovate never saw it and the pod kept running the old PHP.",
-        "Default docker versioning treats `-ls176` as a compatibility suffix and will not move to `-ls177`, so the ls number is mapped to `build` here to make rebuilds show up as updates.",
-        "LinuxServer build tags are v-prefixed (`v1.15.0-ls176`); only the bare app tag (`1.15.0`) is not. Without `v?` this regex matched no real tag at all, so no rebuild PR could ever open, and the unprefixed pin in the HelmRelease was a tag that does not exist."
+        "LinuxServer.io images, tag shape A: `[v]X.Y.Z-lsN` (bazarr, sabnzbd, tautulli, speedtest-tracker).",
+        "Every LinuxServer image is pinned to a BUILD tag, not the bare app version, because LinuxServer rebuilds the same app version weekly with patched base packages (and bundled runtimes: speedtest-tracker's PHP got php2shell, CVE-2026-109618/109619, as a `-lsNNN` rebuild). The bare app tag never moves for those, so only the build tag carries the fix.",
+        "Default docker versioning reads `-lsN` as a compatibility suffix that must match exactly, so it never proposed ANY update for these images: several sat on builds months old. Regex versioning maps the ls number to a version part, so both app updates and rebuilds show up. An ls-only rebuild is a `patch`, so the tiers below apply as usual.",
+        "Some LinuxServer images v-prefix their build tags (`v1.15.0-ls176`) and some don't (`5.0.4-ls264`); hence `v?`. A regex that matches no real tag fails silently, with no PR and no error (PR #542/#555). These three regexes were tested against every image's full tag list before merging: each matched its current pin and picked exactly the build `:latest` points to.",
+        "A NEW LinuxServer image must be added to the list matching its tag shape, or Renovate silently never updates it. bambustudio is deliberately absent: its own rule (above) pins and disables it."
       ],
       "matchDatasources": ["docker"],
-      "matchPackageNames": ["lscr.io/linuxserver/speedtest-tracker"],
+      "matchPackageNames": [
+        "lscr.io/linuxserver/bazarr",
+        "lscr.io/linuxserver/sabnzbd",
+        "lscr.io/linuxserver/tautulli",
+        "lscr.io/linuxserver/speedtest-tracker"
+      ],
       "versioning": "regex:^v?(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-ls(?<build>\\d+)$"
+    },
+    {
+      "description": [
+        "LinuxServer.io images, tag shape B: `W.X.Y.Z-lsN`, a four-part app version (prowlarr, radarr, sonarr: the *arr build number). See shape A for why LinuxServer images need regex versioning at all.",
+        "The fourth app part is `build`, so the ls number has to be `revision`; the bambustudio rule uses the same mapping."
+      ],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": [
+        "lscr.io/linuxserver/prowlarr",
+        "lscr.io/linuxserver/radarr",
+        "lscr.io/linuxserver/sonarr"
+      ],
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)-ls(?<revision>\\d+)$"
+    },
+    {
+      "description": [
+        "LinuxServer.io qbittorrent, tag shape C: `X.Y.Z_vA.B.C-lsN`. The middle part is the bundled libtorrent version. It's matched but not captured, so a libtorrent bump doesn't block an update; every published tag is libtorrent 2.x, so this can't flip between libtorrent 1 and 2 builds. See shape A for why LinuxServer images need regex versioning at all."
+      ],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["lscr.io/linuxserver/qbittorrent"],
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)_v\\d+\\.\\d+\\.\\d+-ls(?<build>\\d+)$"
     },
     {
       "description": [
