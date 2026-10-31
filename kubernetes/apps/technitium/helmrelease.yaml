@@ -37,7 +37,7 @@ spec:
               # parity across members, so this MUST equal technitium_version in
               # ansible/inventory/my-cluster/group_vars/all/main.yml. Bump both
               # together, VMs first (the primary), then this member.
-              tag: "15.4.0"
+              tag: "15.6.2"
             env:
               TZ: UTC
               # Stable identity for this member. The pod's hostname is random and
