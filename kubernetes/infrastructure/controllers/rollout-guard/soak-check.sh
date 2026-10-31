@@ -42,27 +42,34 @@ DRY_RUN="${DRY_RUN:-false}"
 STATE=rollout-guard-state
 NOW=$(date +%s)
 
-# kget OUT ARGS...: `kubectl ARGS > OUT`, up to 3 tries 10s apart. A control-plane
-# reboot drops the API VIP for ~20s. Never pipe kubectl straight into jq: the
+# kget OUT ARGS...: `kubectl ARGS > OUT`, up to 4 tries 10s apart (30s+ of retrying,
+# each call capped at 15s). A control-plane reboot drops the API VIP for ~20s, and a
+# failed Job here is a sticky alert. Never pipe kubectl straight into jq: the
 # pipeline's status is jq's, so a failed GET reads as "no pods, nothing wrong"
 # and the release is logged status=ok without being checked.
 kget() {
   out=$1
   shift
-  for try in 1 2 3; do
-    if kubectl "$@" > "$out"; then
+  for try in 1 2 3 4; do
+    if kubectl --request-timeout=15s "$@" > "$out"; then
       return 0
     fi
-    [ "$try" -eq 3 ] || sleep 10
+    [ "$try" -eq 4 ] || sleep 10
   done
   return 1
 }
 
 # The state ConfigMap is created here, not in git, so kustomize-controller never
 # owns (or prunes) what it records. A dry run writes nothing at all.
-if ! kubectl -n flux-system get configmap "$STATE" -o json > /tmp/state.json 2>/dev/null; then
+# --ignore-not-found: "absent" is an empty file, so an API error can't be mistaken
+# for "no state" (which would report every release again).
+if ! kget /tmp/state.json -n flux-system get configmap "$STATE" --ignore-not-found -o json; then
+  echo "ERROR could not read ConfigMap $STATE, nothing checked"
+  exit 1
+fi
+if [ ! -s /tmp/state.json ]; then
   echo '{"data":{}}' > /tmp/state.json
-  [ "$DRY_RUN" = true ] || kubectl -n flux-system create configmap "$STATE" >/dev/null
+  [ "$DRY_RUN" = true ] || kget /dev/null -n flux-system create configmap "$STATE"
 fi
 
 # Candidates: releases upgraded (successfully) inside the soak window, not yet reported.
@@ -105,7 +112,7 @@ while read -r hr; do
     echo "RESULT hr=$ns/$name revision=$ver age=${age}s status=error reason=\"could not list pods\""
     continue
   fi
-  reasons=$(jq -r \
+  if ! jq -r \
     --argjson now "$NOW" --argjson since "$deployed" \
     --argjson threshold "$RESTART_THRESHOLD" --argjson nrgrace "$NOTREADY_GRACE" \
     --argjson grace "$GRACE" '
@@ -138,16 +145,26 @@ while read -r hr; do
         | (.lastTransitionTime | ts) as $t
         | select($t > $since and ($now - $t) > $nrgrace)
         | "\($pod) NotReady for \(($now - $t) / 60 | floor)m"
-      )' /tmp/pods.json | sort -u)
+      )' /tmp/pods.json > /tmp/reasons.txt; then
+    errors=$((errors + 1))
+    echo "RESULT hr=$ns/$name revision=$ver age=${age}s status=error reason=\"could not evaluate pods\""
+    continue
+  fi
+  reasons=$(sort -u /tmp/reasons.txt)
 
   # Blackbox probe: map the release's Services to probe targets (no hand-kept map).
   # Only after the probe has had a full post-upgrade 5m window.
   if [ "$age" -gt $((GRACE + 300)) ]; then
     if ! kget /tmp/svcs.txt -n "$relns" get svc -l "app.kubernetes.io/instance=$rel" \
         -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{end}'; then
-      errors=$((errors + 1))
-      echo "RESULT hr=$ns/$name revision=$ver age=${age}s status=error reason=\"could not list services\""
-      continue
+      if [ -z "$reasons" ]; then
+        errors=$((errors + 1))
+        echo "RESULT hr=$ns/$name revision=$ver age=${age}s status=error reason=\"could not list services\""
+        continue
+      fi
+      # The pods already failed it: report that now rather than wait a run.
+      echo "WARN hr=$ns/$name probe check skipped: could not list services"
+      : > /tmp/svcs.txt
     fi
     svcs=$(sed 's/|$//' /tmp/svcs.txt)
     if [ -n "$svcs" ]; then
@@ -193,8 +210,11 @@ while read -r hr; do
     -X POST -H 'Content-Type: application/json' \
     --data @/tmp/event.json "$NC_URL"
   # Mark reported only after a successful POST, so a failed POST is retried next run.
-  kubectl -n flux-system patch configmap "$STATE" --type merge \
-    -p "$(jq -n --arg k "$ns.$name" --arg v "$ver" '{data: {($k): $v}}')" >/dev/null
+  if ! kget /dev/null -n flux-system patch configmap "$STATE" --type merge \
+      -p "$(jq -n --arg k "$ns.$name" --arg v "$ver" '{data: {($k): $v}}')"; then
+    errors=$((errors + 1))
+    echo "ERROR hr=$ns/$name event posted but not recorded; the next run will post it again"
+  fi
 done < /tmp/candidates.jsonl
 
 echo "SUMMARY checked=$checked failed=$failed errors=$errors window=${SOAK_WINDOW}s dry_run=$DRY_RUN"
