@@ -85,6 +85,27 @@ jobs:
           # community CRD catalog for the ~40 custom kinds this cluster runs
           # (HelmRelease, Kustomization, PrometheusRule, ServiceMonitor, Cluster,
           # MariaDB, ReplicationSource, Middleware, ...).
+          # Validate against the Kubernetes minor the cluster actually runs. Read
+          # from the SUC Plan that drives live upgrades, so it can't drift the way
+          # a hand-kept pin did (1.32 while the cluster ran 1.35). `.0` because
+          # API schemas don't change within a minor, and an x.y.0 schema set is
+          # published long before we upgrade to that minor.
+          KUBE_MINOR=$(sed -nE 's/^[[:space:]]*version: v([0-9]+\.[0-9]+)\..*/\1/p' \
+            kubernetes/infrastructure/controllers/system-upgrade-controller/plans/server.yaml | head -1)
+          if [ -z "$KUBE_MINOR" ]; then
+            echo "Could not read the k3s version from the SUC server Plan"
+            exit 1
+          fi
+          KUBE_VERSION="${KUBE_MINOR}.0"
+          # With -ignore-missing-schemas, a schema set that doesn't exist (yet)
+          # would turn every Deployment/Service/... into "skipped" and pass
+          # green while validating no core kind at all. Fail instead.
+          if ! curl -sfI --retry 3 "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v${KUBE_VERSION}-standalone-strict/deployment-apps-v1.json" > /dev/null; then
+            echo "No kubeconform schemas published for Kubernetes ${KUBE_VERSION} yet"
+            exit 1
+          fi
+          echo "Validating against Kubernetes ${KUBE_VERSION} schemas"
+
           SCHEMAS=(
             -schema-location default
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
@@ -112,7 +133,7 @@ jobs:
               continue
             fi
             kubeconform -strict -summary -verbose -ignore-missing-schemas \
-              -kubernetes-version 1.32.0 "${SCHEMAS[@]}" \
+              -kubernetes-version "$KUBE_VERSION" "${SCHEMAS[@]}" \
               -output json /tmp/build.yaml > /tmp/result.json || rc=1
             python3 .github/scripts/kubeconform-report.py /tmp/result.json || rc=1
             echo "::endgroup::"
@@ -122,7 +143,7 @@ jobs:
           # path in directory-scan mode, so validate the files directly.
           echo "::group::kubernetes/flux/cluster (directory scan)"
           kubeconform -strict -summary -verbose -ignore-missing-schemas \
-            -kubernetes-version 1.32.0 "${SCHEMAS[@]}" \
+            -kubernetes-version "$KUBE_VERSION" "${SCHEMAS[@]}" \
             -output json kubernetes/flux/cluster > /tmp/result.json || rc=1
           python3 .github/scripts/kubeconform-report.py /tmp/result.json || rc=1
           echo "::endgroup::"

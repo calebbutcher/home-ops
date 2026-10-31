@@ -155,7 +155,7 @@
       "labels": ["renovate", "type/major"]
     },
     {
-      "description": "Majors: separate PRs so breaking changes stand out. Never automerged. Last of the label-setting tier rules, so `type/major` survives.",
+      "description": "Majors: separate PRs so breaking changes stand out. Never automerged. Later exception rules (MariaDB, falco-operator) replace `labels` too, so the two `addLabels` rules at the end of this list add `type/major` back.",
       "matchUpdateTypes": ["major"],
       "automerge": false,
       "labels": ["renovate", "type/major"]
@@ -182,8 +182,7 @@
       "description": "CI tool pins are stored WITHOUT a leading `v` because the workflows add it when building the download URL. extractVersion keeps it that way, so a bump cannot silently produce `.../download/vv0.8.0/...`.",
       "matchDepNames": [
         "yannh/kubeconform",
-        "gitleaks/gitleaks",
-        "aquasecurity/trivy"
+        "gitleaks/gitleaks"
       ],
       "extractVersion": "^v(?<version>.+)$"
     },
@@ -301,6 +300,17 @@
         "The OCI artifact versions (container plugin, falco-rules) are *not* managed by Renovate — they live in CRD fields rather than `image:` strings. Check them by hand against the `falco` chart's `containerEngine.pluginRef` when the bundled Falco version moves. See [`docs/falco-deploy.md`](docs/falco-deploy.md).",
         "The same applies to the SECOND Falco instance in `kubernetes/infrastructure/controllers/falco-k8saudit/config/` (k8saudit plugin, k8saudit ruleset, json plugin). The k8saudit plugin and its ruleset must be bumped TOGETHER — the ruleset declares `required_plugin_versions` against an exact plugin version. See [`docs/falco-k8saudit.md`](docs/falco-k8saudit.md)."
       ]
+    },
+    {
+      "description": "Every major gets `type/major`, even when an exception rule above replaced `labels` (a MariaDB major would otherwise be labelled only type/database-upgrade). `addLabels` merges where `labels` replaces, so a later `labels` can't drop it; kept at the end so that's easy to see.",
+      "matchUpdateTypes": ["major"],
+      "addLabels": ["type/major"]
+    },
+    {
+      "description": "Same for a 0.x minor, which is a major (semver section 4): a falco-operator 0.2 -> 0.3 PR would otherwise be labelled only type/operator-upgrade.",
+      "matchCurrentVersion": "/^v?0\\./",
+      "matchUpdateTypes": ["minor"],
+      "addLabels": ["type/major"]
     }
   ]
 }
