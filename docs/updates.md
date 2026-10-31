@@ -287,8 +287,8 @@ properly rather than rebooting it underneath its workloads:
 
 | Group | Sequence |
 | --- | --- |
-| `node` (workers) | cordon → **drain** → reboot → wait `Ready` → uncordon → wait for Longhorn to settle |
-| `master` | cordon → reboot → wait `Ready` **and** `EtcdIsVoter=True` → uncordon (no drain) |
+| `node` (workers) | cordon → **drain** → reboot → wait for a new boot ID + `Ready` → uncordon → wait for Longhorn to settle |
+| `master` | cordon → reboot → wait for a new boot ID + `Ready` **and** `EtcdIsVoter=True` → wait for the local etcd member's `/health` → uncordon (no drain) |
 | `standalone_vms` | reboot → wait for the Technitium web service → confirm it answers DNS |
 
 Hosts are still done one at a time (`serial: 1`), but the post-reboot gates are the
