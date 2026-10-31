@@ -284,7 +284,7 @@ data:
         {
           "type": "stat",
           "title": "HIGH findings",
-          "description": "All HIGH findings, fixed or not. Only those with EPSS >= 0.1 or in CISA KEV become issues.",
+          "description": "All HIGH findings that have a fix. Only CVEs in CISA KEV (known exploited) become issues, at any severity.",
           "datasource": {
             "type": "prometheus",
             "uid": "$datasource"
@@ -359,7 +359,7 @@ data:
         {
           "type": "table",
           "title": "Images by CRITICAL / HIGH findings",
-          "description": "One row per running image. Counts include unfixed CVEs, so a high number here is not necessarily actionable: the issues in calebbutcher/home-ops-security are the actionable list.",
+          "description": "One row per running image. Counts are fixable findings only (trivy ignoreUnfixed). A high number is not necessarily urgent: the issues in calebbutcher/home-ops-security (known-exploited CVEs) are the actionable list.",
           "datasource": {
             "type": "prometheus",
             "uid": "$datasource"
