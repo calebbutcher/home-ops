@@ -155,7 +155,7 @@
       "labels": ["renovate", "type/major"]
     },
     {
-      "description": "Majors: separate PRs so breaking changes stand out. Never automerged. Later exception rules (MariaDB, falco-operator) replace `labels` too, so the two rules at the very end of this list add `type/major` back.",
+      "description": "Majors: separate PRs so breaking changes stand out. Never automerged. Later exception rules (MariaDB, falco-operator) replace `labels` too, so the two `addLabels` rules at the end of this list add `type/major` back.",
       "matchUpdateTypes": ["major"],
       "automerge": false,
       "labels": ["renovate", "type/major"]
@@ -302,12 +302,12 @@
       ]
     },
     {
-      "description": "KEEP LAST. Every major gets `type/major`, even when an exception rule above replaced `labels` (a MariaDB major would otherwise be labelled only type/database-upgrade). `addLabels` merges where `labels` replaces.",
+      "description": "Every major gets `type/major`, even when an exception rule above replaced `labels` (a MariaDB major would otherwise be labelled only type/database-upgrade). `addLabels` merges where `labels` replaces, so a later `labels` can't drop it; kept at the end so that's easy to see.",
       "matchUpdateTypes": ["major"],
       "addLabels": ["type/major"]
     },
     {
-      "description": "KEEP LAST. Same for a 0.x minor, which is a major (semver section 4): a falco-operator 0.2 -> 0.3 PR would otherwise be labelled only type/operator-upgrade.",
+      "description": "Same for a 0.x minor, which is a major (semver section 4): a falco-operator 0.2 -> 0.3 PR would otherwise be labelled only type/operator-upgrade.",
       "matchCurrentVersion": "/^v?0\\./",
       "matchUpdateTypes": ["minor"],
       "addLabels": ["type/major"]

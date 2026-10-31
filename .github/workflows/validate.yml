@@ -97,6 +97,13 @@ jobs:
             exit 1
           fi
           KUBE_VERSION="${KUBE_MINOR}.0"
+          # With -ignore-missing-schemas, a schema set that doesn't exist (yet)
+          # would turn every Deployment/Service/... into "skipped" and pass
+          # green while validating no core kind at all. Fail instead.
+          if ! curl -sfI --retry 3 "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v${KUBE_VERSION}-standalone-strict/deployment-apps-v1.json" > /dev/null; then
+            echo "No kubeconform schemas published for Kubernetes ${KUBE_VERSION} yet"
+            exit 1
+          fi
           echo "Validating against Kubernetes ${KUBE_VERSION} schemas"
 
           SCHEMAS=(
