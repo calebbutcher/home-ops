@@ -187,6 +187,25 @@ spec:
               hung or dropped out of the LACP bond (lost redundancy). Check
               `cat /proc/net/bonding/bond01` on the host.
 
+        - alert: TrueNASBondMemberDown
+          # bond01 has two members. One that's down, or that left the bond (a
+          # failed firmware recovery, a PCI/AER removal), drops it here. The
+          # second case also takes it out of the collector's list (it reads the
+          # bond's slaves), so its bnxt_stat series and iface_up line just
+          # vanish, and TrueNASBondSlaveStall can't see it either (it needs
+          # carrier == 1 on a series that's gone).
+          expr: node_bonding_active{job="truenas-node", master="bond01"} < 2
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS bond01 has {{ $value }} of 2 members active"
+            description: >-
+              A bond01 member is down or has left the bond, so the uplink has
+              lost redundancy, and the bnxt counters for that port may no longer
+              be collected. Check `cat /proc/net/bonding/bond01` and `ip link`
+              on the host.
+
         - alert: TrueNASNICInterfaceUnreadable
           # The collector ran (the other slave kept the file fresh, so
           # TrueNASNICCollectorStale stays quiet) but `ethtool -S` failed on this

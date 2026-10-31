@@ -68,6 +68,14 @@ fi
 NIC_IFACES="$(echo "$NIC_IFACES" | xargs)"   # trim
 [ -n "$NIC_IFACES" ] || { echo "no interfaces to sample (set NIC_IFACES)" >&2; exit 1; }
 
+# A wedged bnxt driver can hang `ethtool -S` itself (it waits on the rtnl lock).
+# Cap it, so a hang reads as iface_up 0 instead of a pile of stuck cron runs.
+if command -v timeout >/dev/null 2>&1; then
+  read_stats() { timeout 20 "$ETHTOOL" -S "$1"; }
+else
+  read_stats() { "$ETHTOOL" -S "$1"; }
+fi
+
 NOW="$(date +%s)"
 TMP="$(mktemp "${OUT}.XXXXXX")"
 trap 'rm -f "$TMP"' EXIT
@@ -76,7 +84,7 @@ samples=()   # "bnxt_stat{device=\"..\",stat=\"..\"} <int>"
 iface_up=()  # "bnxt_collector_iface_up{device=\"..\"} 0|1"
 read_ok=0
 for ifc in $NIC_IFACES; do
-  if ! stats="$("$ETHTOOL" -S "$ifc" 2>/dev/null)"; then
+  if ! stats="$(read_stats "$ifc" 2>/dev/null)"; then
     echo "ethtool -S $ifc failed" >&2
     iface_up+=("bnxt_collector_iface_up{device=\"$ifc\"} 0")
     continue
