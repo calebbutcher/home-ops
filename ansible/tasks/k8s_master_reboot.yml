@@ -1,6 +1,6 @@
 ---
-# Safe reboot of a k3s CONTROL-PLANE node: cordon -> reboot -> wait for
-# Ready AND EtcdIsVoter -> uncordon.
+# Safe reboot of a k3s CONTROL-PLANE node: cordon -> reboot -> wait for a new
+# boot ID, Ready AND EtcdIsVoter -> uncordon.
 #
 # Deliberately CORDON-ONLY, no drain. These nodes carry the `node-role.kubernetes.io/master`
 # taint and run essentially nothing but DaemonSets plus the system-upgrade
@@ -12,6 +12,9 @@
 # and takes the whole API down. SSH answering again is NOT that signal —
 # docs/backup-recovery.md and docs/secrets-encryption.md both require checking
 # `Ready=True` *and* `EtcdIsVoter=True` before moving on, and this automates it.
+# Both conditions can be stale, pre-reboot values, though, so the gate also
+# requires the node's boot ID to have changed: only then is Ready=True this
+# node's k3s (and its etcd member) actually back.
 #
 # Expect transient API errors while polling: the kube-vip VIP at
 # 10.2.169.10:6443 refuses connections for ~20s as VRRP fails the address over.
@@ -37,6 +40,25 @@
       delegate_to: localhost
       become: false
 
+    # Node status read right after the reboot can still be the PRE-reboot one:
+    # if the VM is back within the node-monitor grace period, the Node never
+    # went NotReady, and pod objects keep saying Running. kubelet rewrites
+    # status.nodeInfo.bootID when it starts, so a changed bootID proves the
+    # status is from after the reboot. _reboot_t0 does the same for pods.
+    - name: Record the pre-reboot boot ID of {{ k8s_node_name | default(inventory_hostname) }}
+      kubernetes.core.k8s_info:
+        kind: Node
+        name: "{{ k8s_node_name }}"
+      register: _pre_node
+      failed_when: (_pre_node.resources | default([]) | length) == 0
+      delegate_to: localhost
+      become: false
+
+    - name: Remember the pre-reboot boot ID and time
+      ansible.builtin.set_fact:
+        _pre_boot_id: "{{ _pre_node.resources[0].status.nodeInfo.bootID }}"
+        _reboot_t0: "{{ now(utc=True, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+
     - name: Reboot {{ inventory_hostname }}
       ansible.builtin.reboot:
         reboot_command: "{{ custom_reboot_command | default(omit) }}"
@@ -50,8 +72,14 @@
         kind: Node
         name: "{{ k8s_node_name }}"
       register: _cp_node
+      # The bootID check is what makes this gate mean anything. EtcdIsVoter is
+      # written by the k3s leader from the etcd member list, and a member that
+      # is down is still a voter, so on its own it stays True through the whole
+      # reboot (and its heartbeat is the leader's, not this node's).
       until: >-
         _cp_node.resources is defined
+        and (_cp_node.resources | length) > 0
+        and _cp_node.resources[0].status.nodeInfo.bootID != _pre_boot_id
         and (_cp_node.resources
              | community.general.json_query("[0].status.conditions[?type=='Ready'].status | [0]")) == 'True'
         and (_cp_node.resources

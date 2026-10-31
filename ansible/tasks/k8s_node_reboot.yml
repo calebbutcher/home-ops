@@ -66,6 +66,25 @@
       become: false
       when: drain | default(true) | bool
 
+    # Node status read right after the reboot can still be the PRE-reboot one:
+    # if the VM is back within the node-monitor grace period, the Node never
+    # went NotReady, and pod objects keep saying Running. kubelet rewrites
+    # status.nodeInfo.bootID when it starts, so a changed bootID proves the
+    # status is from after the reboot. _reboot_t0 does the same for pods.
+    - name: Record the pre-reboot boot ID of {{ k8s_node_name | default(inventory_hostname) }}
+      kubernetes.core.k8s_info:
+        kind: Node
+        name: "{{ k8s_node_name }}"
+      register: _pre_node
+      failed_when: (_pre_node.resources | default([]) | length) == 0
+      delegate_to: localhost
+      become: false
+
+    - name: Remember the pre-reboot boot ID and time
+      ansible.builtin.set_fact:
+        _pre_boot_id: "{{ _pre_node.resources[0].status.nodeInfo.bootID }}"
+        _reboot_t0: "{{ now(utc=True, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+
     - name: Reboot {{ inventory_hostname }}
       ansible.builtin.reboot:
         reboot_command: "{{ custom_reboot_command | default(omit) }}"
@@ -81,6 +100,8 @@
       register: _node
       until: >-
         _node.resources is defined
+        and (_node.resources | length) > 0
+        and _node.resources[0].status.nodeInfo.bootID != _pre_boot_id
         and (_node.resources
              | community.general.json_query("[0].status.conditions[?type=='Ready'].status | [0]")) == 'True'
       retries: "{{ ((node_ready_timeout | default(600) | int) / 10) | round(0, 'ceil') | int }}"
@@ -104,10 +125,20 @@
         field_selectors:
           - "spec.nodeName={{ k8s_node_name }}"
       register: _im
+      # A container started after _reboot_t0: the pod object alone can still say
+      # Running from before the reboot. RFC 3339 UTC timestamps compare correctly
+      # as strings (JMESPath can't compare strings, hence Jinja).
       until: >-
         _im.resources is defined
         and (_im.resources
-             | community.general.json_query("[?status.phase=='Running'].metadata.name")
+             | selectattr('status.phase', 'defined')
+             | selectattr('status.phase', 'eq', 'Running')
+             | map(attribute='status.containerStatuses', default=[])
+             | flatten
+             | selectattr('state.running', 'defined')
+             | map(attribute='state.running.startedAt')
+             | select('gt', _reboot_t0)
+             | list
              | length) > 0
       retries: "{{ ((node_ready_timeout | default(600) | int) / 10) | round(0, 'ceil') | int }}"
       delay: 10
