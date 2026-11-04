@@ -39,7 +39,7 @@ spec:
           containers:
             - name: soak-check
               # Same pin as backup-verify: kubectl, jq and curl in one image.
-              image: docker.io/alpine/k8s:1.36.5@sha256:094adf64cdc4827377cdbe7ea5747472ce115f9fbc64a4e35970ec66777f9a00
+              image: docker.io/alpine/k8s:1.36.6@sha256:d9cb78be55e6e47c54e8a77bbf35ef87e98e5a03fbe5db7654d28bb78cc7d57e
               command: ["/bin/sh", "/scripts/soak-check.sh"]
               env:
                 - name: HOME
