@@ -51,7 +51,7 @@ spec:
           protocol: TCP
         # Third listener: DNS query logs from the Technitium cluster (Log Exporter
         # app, RFC5424 over TCP). One line per query from all three members.
-        - name: syslog-technitium
+        - name: syslog-dns  # port names max 15 chars
           port: 1516
           targetPort: 1516
           protocol: TCP
