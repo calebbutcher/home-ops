@@ -46,6 +46,10 @@ spec:
 # dns-01's API for the live comparison. No DNS, no DCs, no cluster peers, no
 # internet. Traffic inside the pod (verify -> sidecar on 127.0.0.1) is not
 # subject to NetworkPolicy.
+#
+# kube-router applies this a few seconds AFTER the pod starts, so the job's
+# first container waits until it can prove isolation before the throwaway
+# starts (cronjob-technitium.yaml).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

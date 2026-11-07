@@ -68,6 +68,26 @@ spec:
                   export HOME=/tmp RESTIC_CACHE_DIR=/cache
                   fail() { echo "$1" > /work/failed-stage; echo "FAIL $1: $2"; exit 0; }
 
+                  # Wait for the egress policy to be in force BEFORE the throwaway
+                  # Technitium can start (it is the next init container). kube-router
+                  # programs a new pod's NetworkPolicy rules asynchronously; measured
+                  # on 2026-11-07, everything was reachable for the first ~10s.
+                  # Proof of isolation: a DC and a cluster peer both refuse us.
+                  # Exits non-zero (not via fail) so the sidecar never starts.
+                  isolated=no
+                  for _ in $(seq 1 60); do
+                    if ! nc -z -w2 10.2.30.11 53 2>/dev/null && ! nc -z -w2 10.2.30.252 53443 2>/dev/null; then
+                      isolated=yes; break
+                    fi
+                    sleep 2
+                  done
+                  if [ "$isolated" != yes ]; then
+                    echo "FATAL: egress policy technitium-restore-verify-egress not in force after"
+                    echo "~2 min; refusing to start the throwaway Technitium."
+                    exit 1
+                  fi
+                  echo "egress isolation confirmed"
+
                   snap=$(restic snapshots --host technitium-backup --latest 1 --json --no-lock 2>&1) \
                     || fail open "$snap"
                   id=$(printf '%s' "$snap" | sed -n 's/.*"short_id":"\([^"]*\)".*/\1/p' | head -1)
