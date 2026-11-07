@@ -232,6 +232,37 @@ spec:
               internal hostname is broken. If the 1.1.1.1 control probe is still
               succeeding the fault is local DNS, not connectivity.
 
+        # Technitium (probe-infra.yaml, technitium-dns). Any one address failing is
+        # a warning: clients have a second server, and the VIP fails over.
+        - alert: TechnitiumResolverDown
+          expr: |
+            probe_success{job="blackbox-dns", resolver="technitium"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Technitium {{ $labels.instance }} is not resolving nerdbox.dev"
+            description: >-
+              {{ $labels.instance }} has failed to answer for nerdbox.dev for >5m.
+              10.2.30.250 is the keepalived VIP, 10.2.169.84 the k3s member,
+              .251/.252 the VMs. nerdbox.dev is forwarded to the int DCs, so if
+              every Technitium address fails at once, check the DCs first.
+
+        # Both addresses clients are handed failing means clients have no DNS.
+        - alert: TechnitiumClientResolversDown
+          expr: |
+            sum(probe_success{job="blackbox-dns", resolver="technitium", instance=~"10\\.2\\.30\\.250|10\\.2\\.169\\.84"}) == 0
+          for: 3m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Neither DNS server handed to clients is resolving"
+            description: >-
+              Both the Technitium VIP (10.2.30.250) and the k3s member
+              (10.2.169.84) are failing to answer for nerdbox.dev. Every client
+              on a DHCP lease from AD has no working DNS. If the 1.1.1.1 control
+              probe still succeeds, the fault is Technitium or the DCs behind it.
+
         # Only fires when BOTH anycast providers are unreachable — one provider having
         # a bad day is not an outage worth waking up for, and this is the alert that
         # stops a WAN failure from being misdiagnosed as an app failure.
