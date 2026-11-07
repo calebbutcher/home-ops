@@ -65,6 +65,9 @@ spec:
       # GSS-TSIG it is unsigned, so the zone's transfer list (the k3s node IPs)
       # is the only control on it.
       - --rfc2136-axfr
+      # Without a TTL annotation records were written with TTL 0, which no
+      # client caches.
+      - --min-ttl=5m
     env:
       - name: EXTERNAL_DNS_RFC2136_KERBEROS_USERNAME
         valueFrom:

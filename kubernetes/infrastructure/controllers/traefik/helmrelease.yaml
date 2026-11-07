@@ -39,7 +39,7 @@ spec:
       # Deliberately no `target` annotation here: this one must resolve to the real
       # IP, and a CNAME cannot sit at the end of the chain.
       annotations:
-        external-dns.alpha.kubernetes.io/hostname: ingress.int.nerdbox.dev
+        external-dns.kubernetes.io/hostname: ingress.int.nerdbox.dev
       # externalTrafficPolicy: Local preserves the REAL client source IP. Under the
       # chart-default `Cluster` policy, kube-proxy SNATs every external client to a node
       # flannel IP (10.42.x.0 / RFC1918) before Traefik sees it — which the CrowdSec

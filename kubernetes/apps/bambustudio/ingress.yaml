@@ -7,7 +7,7 @@ metadata:
   annotations:
     # CNAME to the single self-healing ingress record (see the Traefik Service)
     # rather than a second A record, so a Traefik IP change moves one record.
-    external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
+    external-dns.kubernetes.io/target: ingress.int.nerdbox.dev
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     # Authentik in front, and the app's own basic auth behind it (see the
