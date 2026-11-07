@@ -89,7 +89,7 @@ lives on the primary, from where it replicates.
 | Users `svc-backup`, `svc-verify`; groups **Backup Operators**, **Zone Readers** | See "Backups and restore verification" | Their API tokens are in the two backup secrets. Recreate them on a rebuild. |
 | **Zone Readers: view on every zone** | Set per zone (`/api/zones/permissions/set`) | New zones only grant the admin groups. **Grant Zone Readers view when you create a zone**, or the weekly restore check fails naming it. |
 | Block lists (cluster setting, refreshed every 24h) | HaGeZi Pro and HaGeZi TIF medium (wildcard-domain format, via jsDelivr), AdGuard DNS filter (Adblock format, from `adguardteam.github.io`) | See "Blocking" below. Set on the primary; the secondaries pick it up from cluster sync. |
-| Allowed zones | `apu.samsungelectronics.com`, `link.barkbox.com`, `links.notifications.headspace.com`, `tms.delta.com` | Carried over from Pi-hole. The Samsung one is blocked by HaGeZi Pro; the others are insurance. |
+| Allowed zones | four entries carried over from Pi-hole's allowlist | One is needed (HaGeZi Pro blocks it); the rest are insurance. The list lives on the server and in the daily backup, deliberately not here. |
 | Blocked zones | one custom entry carried over from Pi-hole | |
 
 Member zones inherit the **catalog's** zone-transfer policy. Setting `zoneTransfer` on a member
