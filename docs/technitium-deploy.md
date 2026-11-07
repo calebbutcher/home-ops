@@ -88,6 +88,9 @@ lives on the primary, from where it replicates.
 | Recursion | `AllowOnlyForPrivateNetworks` | These hold LAN addresses; must not become open resolvers. |
 | Users `svc-backup`, `svc-verify`; groups **Backup Operators**, **Zone Readers** | See "Backups and restore verification" | Their API tokens are in the two backup secrets. Recreate them on a rebuild. |
 | **Zone Readers: view on every zone** | Set per zone (`/api/zones/permissions/set`) | New zones only grant the admin groups. **Grant Zone Readers view when you create a zone**, or the weekly restore check fails naming it. |
+| Block lists (cluster setting, refreshed every 24h) | HaGeZi Pro and HaGeZi TIF medium (wildcard-domain format, via jsDelivr), AdGuard DNS filter (Adblock format, from `adguardteam.github.io`) | See "Blocking" below. Set on the primary; the secondaries pick it up from cluster sync. |
+| Allowed zones | `apu.samsungelectronics.com`, `link.barkbox.com`, `links.notifications.headspace.com`, `tms.delta.com` | Carried over from Pi-hole. The Samsung one is blocked by HaGeZi Pro; the others are insurance. |
+| Blocked zones | one custom entry carried over from Pi-hole | |
 
 Member zones inherit the **catalog's** zone-transfer policy. Setting `zoneTransfer` on a member
 zone is stored and shown but ignored, and `overrideCatalogZoneTransfer=true` breaks cluster
@@ -117,6 +120,29 @@ AD side, which is not in git:
 `policy: upsert-only` with the TXT registry means external-dns only ever adds names that are
 missing. The hand-made records already in the zone have no ownership TXT and are never
 modified.
+
+## Blocking
+
+Chosen 2026-11-07 when moving off Pi-hole:
+
+| List | Format | Why |
+|------|--------|-----|
+| `https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro-onlydomains.txt` | wildcard domains | Main ad/tracker list; HaGeZi's recommended tier, low false positives, dead domains pruned |
+| `https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/tif.medium-onlydomains.txt` | wildcard domains | Threat-intel feeds: malware, phishing, C2, scams |
+| `https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt` | Adblock | Keeps most of the first-party tracking coverage the old Pi-hole set had and HaGeZi leaves out |
+
+About 628k domains in total. Blocked names answer NXDOMAIN.
+
+Formats matter. OISD dropped hosts/plain-domain builds in 2024 and HaGeZi moved its legacy
+formats out of the main repo in 2026, so prefer wildcard-domain or Adblock URLs. Technitium
+reads both (v11+): a wildcard-domain entry blocks the name and every subdomain.
+
+Deliberately not used: HaGeZi's DoH/VPN-bypass list (it blocks commercial VPN hostnames that
+the qBittorrent/SABnzbd PIA sidecars resolve), the per-vendor telemetry lists (Windows Update and
+Office on the domain), and the newly-registered-domain lists (false positives).
+
+To unblock something, add it under **Allowed** on the primary (`/api/allowed/add`). An allowed
+name also allows its subdomains.
 
 ## Backups and restore verification
 
