@@ -228,6 +228,31 @@ MASTER 150 / BACKUP 100 with `weight -40` leaves a failed master at 110 — stil
 
 ## Runbooks
 
+### Upgrade Technitium
+
+Renovate opens one PR that bumps `technitium_version` (Ansible) and the image tags under
+`kubernetes/` (the k3s member and the restore-verify throwaway). **Do not merge it first.**
+Flux would upgrade the k3s member — a permanent secondary — straight away, and the VMs only
+change when Ansible runs. Upgrade the VMs first, primary first, then merge:
+
+```sh
+cd ansible
+ansible-playbook technitium-upgrade.yml -e technitium_version=<new>          # dns-01, then dns-02
+# merge the Renovate PR; Flux upgrades the k3s member
+ansible-playbook technitium-upgrade.yml -e technitium_version=<new> -e phase=verify
+```
+
+The first run checks the cluster is healthy and the versions are consistent, takes a fresh
+backup (`technitium-backup` Job), then upgrades one VM at a time. A VM only passes when it
+runs the new version, sees all three nodes `Connected`, has its block lists loaded, resolves
+the split-horizon, AD, `infra` and public names, still blocks the canary, and the VIP
+answers. Any failure stops the run before the next VM. Re-running is safe: a VM already on
+the new version is only re-checked.
+
+`-e phase=verify` on its own is a quick health check of all three nodes at any time; it needs
+no SSH. Don't use `--limit`: the pre-flight and backup run on localhost and the VM play
+refuses to start without them. A target that isn't newer than what's running is refused.
+
 ### Verify cluster health
 
 ```sh

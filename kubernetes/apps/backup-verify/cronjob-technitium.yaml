@@ -130,10 +130,12 @@ spec:
             #
             # The tag MUST equal production (kubernetes/apps/technitium/
             # helmrelease.yaml): a restore into a different version proves less.
+            # Written without the docker.io/ prefix so Renovate sees the same
+            # depName as the HelmRelease and Ansible, and bumps all three in one PR.
             # It runs as root because the image does; it gets no capabilities
             # beyond binding :53 and no network beyond the egress policy.
             - name: technitium
-              image: docker.io/technitium/dns-server:15.4.0
+              image: technitium/dns-server:15.4.0
               restartPolicy: Always
               env:
                 - name: DNS_SERVER_DOMAIN

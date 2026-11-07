@@ -13,6 +13,10 @@ for you to merge it.
 | Datastore images (redis, mariadb, postgres, ...), floating-tag digests, `app-template`, 0.x minors, majors | never | individual rules |
 | Everything outside `kubernetes/apps`: infrastructure, **k3s / SUC Plans**, Flux, kube-vip, CI pins, ansible; raw manifests anywhere | never | doesn't match tier 1 |
 
+Technitium PRs are applied with `ansible/technitium-upgrade.yml` *before* merging, so the
+VMs (the primary first) upgrade ahead of the k3s member. See "Upgrade Technitium" in
+[technitium-deploy.md](technitium-deploy.md).
+
 An automerge has three safety nets:
 
 1. **Before the merge:** the [automerge gate](#the-automerge-gate) re-checks the PR and
