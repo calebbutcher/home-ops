@@ -65,7 +65,7 @@ metadata:
   namespace: technitium
 spec:
   # The backend presents Technitium's self-signed certificate — the same one the
-  # cluster peers pin via DANE-EE, issued for dns-01.int.nerdbox.dev rather than
+  # cluster peers pin via DANE-EE, issued for dns-01.dns.nerdbox.dev rather than
   # the ingress hostname. Traefik cannot chain-validate it, so verification is
   # skipped for this route only. The hop is LAN-internal and this does not affect
   # the peers' own pinning, which happens directly between nodes.

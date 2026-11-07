@@ -5,6 +5,7 @@ kind: Kustomization
 # the .sops.yaml secret's metadata and corrupt the SOPS MAC.
 resources:
   - namespace.yaml
-  - external-dns-tsig.sops.yaml
+  - external-dns-kerberos.sops.yaml
+  - krb5-configmap.yaml
   - helmrepository.yaml
   - helmrelease.yaml

@@ -34,10 +34,10 @@ spec:
     # nothing here should be able to write a public record.
     domainFilters:
       - int.nerdbox.dev
-    # START HERE. upsert-only never issues a delete, so a mistake in ownership or
-    # filtering cannot remove a record that something depends on. Flip to `sync`
-    # only after watching it create and update records correctly for a while —
-    # see docs/technitium-deploy.md.
+    # upsert-only never issues a delete, so a mistake in ownership or filtering
+    # cannot remove a record that something depends on — including the
+    # hand-made records already in the AD zone, which carry no ownership TXT and
+    # are never touched. Flip to `sync` after a week of clean runs against AD.
     policy: upsert-only
     registry: txt
     txtOwnerId: k3s-internal
@@ -50,23 +50,41 @@ spec:
     interval: 2m
     logLevel: info
     extraArgs:
-      # The PRIMARY's own address, deliberately not the keepalived VIP: RFC2136
-      # updates are config writes and only the primary accepts them. After a
-      # failover the VIP lands on a read-only secondary, so pointing here would
-      # silently start refusing every update. If dns-01 is ever promoted away,
-      # this is one of the values the promotion runbook says to change.
-      - --rfc2136-host=10.2.30.251
+      # Active Directory owns int.nerdbox.dev, so records go to the int DCs over
+      # RFC2136 with GSS-TSIG (Kerberos) as svc-externaldns. Hostnames, not IPs:
+      # the Kerberos service principal (DNS/<host>) is derived from this value.
+      # Round-robin across both DCs; AD replicates the writes between them.
+      - --rfc2136-host=hlb-dc-04.int.nerdbox.dev
+      - --rfc2136-host=hlb-dc-05.int.nerdbox.dev
+      - --rfc2136-load-balancing-strategy=round-robin
       - --rfc2136-port=53
       - --rfc2136-zone=int.nerdbox.dev
-      - --rfc2136-tsig-keyname=externaldns-key
-      - --rfc2136-tsig-secret-alg=hmac-sha256
-      - --rfc2136-tsig-axfr
+      - --rfc2136-gss-tsig
+      - --rfc2136-kerberos-realm=INT.NERDBOX.DEV
+      # Zone transfer is how external-dns reads what already exists. Under
+      # GSS-TSIG it is unsigned, so the zone's transfer list (the k3s node IPs)
+      # is the only control on it.
+      - --rfc2136-axfr
     env:
-      - name: EXTERNAL_DNS_RFC2136_TSIG_SECRET
+      - name: EXTERNAL_DNS_RFC2136_KERBEROS_USERNAME
         valueFrom:
           secretKeyRef:
-            name: external-dns-tsig
-            key: tsig-secret
+            name: external-dns-kerberos
+            key: username
+      - name: EXTERNAL_DNS_RFC2136_KERBEROS_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: external-dns-kerberos
+            key: password
+    extraVolumes:
+      - name: krb5-conf
+        configMap:
+          name: external-dns-krb5
+    extraVolumeMounts:
+      - name: krb5-conf
+        mountPath: /etc/krb5.conf
+        subPath: krb5.conf
+        readOnly: true
     resources:
       requests:
         cpu: 10m

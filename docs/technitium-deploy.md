@@ -5,16 +5,53 @@ standalone VMs on VLAN 30 and one pod in k3s, fronted by a keepalived VIP.
 
 | Node | Address | Role | Managed by |
 |------|---------|------|------------|
-| `dns-01.int.nerdbox.dev` | `10.2.30.251` | Cluster **Primary**, keepalived MASTER | `ansible/roles/technitium` |
-| `dns-02.int.nerdbox.dev` | `10.2.30.252` | Secondary, keepalived BACKUP | `ansible/roles/technitium` |
-| `dns-k3s.int.nerdbox.dev` | `10.2.169.84` | Secondary (**permanent** — never promote) | Flux, `kubernetes/apps/technitium/` |
+| `dns-01.dns.nerdbox.dev` | `10.2.30.251` | Cluster **Primary**, keepalived MASTER | `ansible/roles/technitium` |
+| `dns-02.dns.nerdbox.dev` | `10.2.30.252` | Secondary, keepalived BACKUP | `ansible/roles/technitium` |
+| `dns-k3s.dns.nerdbox.dev` | `10.2.169.84` | Secondary (**permanent** — never promote) | Flux, `kubernetes/apps/technitium/` |
 | — | `10.2.30.250` | keepalived VIP (floats across the two VMs) | keepalived |
 
 Clients are handed **`[10.2.30.250, 10.2.169.84]`**. All three answer queries independently;
 the VIP is the backstop for a full-cluster outage, since a MetalLB L2 address dies with the
 cluster.
 
-Resolution is **recursive from the root hints** (no forwarders) with **DNSSEC validation** on.
+Resolution is **recursive from the root hints** with **DNSSEC validation** on, except for the
+zones below, which are forwarded to Active Directory.
+
+## Who owns which zone
+
+Active Directory stays authoritative for its own domains; Technitium forwards to it. The long-term
+direction is the reverse of today's Pi-hole setup: clients ask Technitium, and Technitium asks
+the DCs only for what it does not own.
+
+| Zone | On Technitium | Owner / target |
+|------|---------------|----------------|
+| `dns.nerdbox.dev` | Primary (cluster zone) | Technitium. Node names, TLSA records. |
+| `infra.nerdbox.dev` | **Primary** | Technitium. Proxmox, PBS and TrueNAS hosts. |
+| `int.nerdbox.dev` | Forwarder | AD (`10.2.30.11`, `10.2.30.12`). Domain SRV records, and the k3s ingress names external-dns writes. |
+| `nerdbox.dev` | Forwarder, plus local MX, SPF TXT and `autodiscover` | AD (`10.2.30.11`, `.12`). AD holds the split-horizon: public app names resolve to Traefik inside the house. |
+| `valhalla.local` | Forwarder | Legacy AD (`10.1.30.12`, `10.1.30.13`). Forward only; nothing there is changed. |
+| `30.1.10.in-addr.arpa` | Forwarder | Legacy AD (`10.1.30.12`, `.13`) |
+| `1.10.in-addr.arpa`, `2.10.in-addr.arpa`, `10.in-addr.arpa` | Forwarder | AD (`10.2.30.11`, `.12`) |
+
+Every zone is a member of the cluster catalog, so it exists on all three nodes. A zone created
+without `catalog=cluster-catalog.dns.nerdbox.dev` lives on the primary only, and the other two
+nodes quietly answer NXDOMAIN for it.
+
+Forwarders have **DNSSEC validation off**. For `valhalla.local` it is mandatory: the signed root
+proves `.local` does not exist, so validated answers would all come back bogus. The AD zones
+are unsigned anyway.
+
+The AD side has one matching piece: a domain-wide **conditional forwarder** for
+`infra.nerdbox.dev` → `10.2.30.250`, `10.2.169.84`. That keeps `infra` resolving for anything that
+still asks the DCs directly, including Pi-hole until the cutover.
+
+### Why the cluster domain is `dns.nerdbox.dev`
+
+The cluster was first initialised as `int.nerdbox.dev`, which is also an AD domain. Cluster init
+creates a signed primary zone named after the cluster domain, so Technitium became
+authoritative for the AD domain: it could not forward it, and it had none of the
+`_msdcs`/`_ldap`/`_kerberos` records domain logons need. The cluster domain cannot be changed,
+so the cluster was rebuilt. Pick a cluster domain that no other DNS server is authoritative for.
 
 ## Which UI do I use?
 
@@ -40,52 +77,44 @@ presents Technitium's self-signed cert.
 ## State that is NOT in git
 
 Technitium is configured through its own API/UI, not declaratively. The manifests and the
-Ansible role provision a *fresh* node; everything below was set at cluster-formation time and
-lives only on the primary (from where it replicates).
+Ansible role provision a *fresh* node; everything below was set after cluster formation and
+lives on the primary, from where it replicates.
 
 | Setting | Value | Why it matters |
 |---------|-------|----------------|
-| Cluster domain | `int.nerdbox.dev` | **Permanent — Technitium cannot change it.** Changing it means tearing the cluster down and re-joining every node. |
-| Zone transfer ACL (`int.nerdbox.dev`, `cluster-catalog.int.nerdbox.dev`) | `10.2.30.251`, `10.2.30.252`, `10.2.169.84`, **`10.2.169.40`–`.45`** | The worker IPs are load-bearing — see "k3s member egress" below. **Add a line here when you add a worker node**, or the k3s member's zone transfers start failing whenever it lands on the new one. |
+| Cluster domain | `dns.nerdbox.dev` | **Permanent — Technitium cannot change it.** Changing it means rebuilding the cluster (runbook below). |
+| Zones | The table in "Who owns which zone" | Recreate exactly that set, all with `catalog=cluster-catalog.dns.nerdbox.dev`. |
+| Zone transfer ACL (`dns.nerdbox.dev`, `cluster-catalog.dns.nerdbox.dev`) | `10.2.30.251`, `10.2.30.252`, `10.2.169.84`, **`10.2.169.40`–`.45`** | The worker IPs are load-bearing — see "k3s member egress" below. **Add a line here when you add a worker node**, or the k3s member's zone transfers start failing whenever it lands on the new one. |
 | Recursion | `AllowOnlyForPrivateNetworks` | These hold LAN addresses; must not become open resolvers. |
-| TSIG key `externaldns-key` (hmac-sha256) | secret = `vault_technitium_tsig_secret` | Must equal `kubernetes/infrastructure/controllers/external-dns/external-dns-tsig.sops.yaml`. **`tsigKeys` in the API replaces the whole list** — read the existing keys back and resubmit them, or you delete the cluster's own `cluster-catalog.int.nerdbox.dev` key. |
-| `int.nerdbox.dev` dynamic updates | `UseSpecifiedNetworkACL`, ACL `10.2.169.40`–`.45`, policy `externaldns-key` → `*.int.nerdbox.dev` + apex, types A/AAAA/CNAME/TXT | Worker IPs again: external-dns is a pod, so its RFC2136 updates arrive from a **node** IP. Scoping this to a service IP produces `REFUSED` that looks like a TSIG failure. |
-| **Catalog** zone `cluster-catalog.int.nerdbox.dev` → `zoneTransferTsigKeyNames` | `cluster-catalog.int.nerdbox.dev`, **`externaldns-key`** | Catalog members inherit the **catalog's** transfer policy — see below. This one entry is what lets external-dns read the zone at all. |
 
-### Zone transfer for catalog members is set on the CATALOG, not the zone
+Member zones inherit the **catalog's** zone-transfer policy. Setting `zoneTransfer` on a member
+zone is stored and shown but ignored, and `overrideCatalogZoneTransfer=true` breaks cluster
+replication (secondaries log `zone transfer response (RCODE=Refused)`). Change transfer settings
+on the catalog zone only.
 
-`int.nerdbox.dev` is a member of the cluster catalog, and member zones inherit the catalog's
-zone-transfer settings. Setting `zoneTransfer` / `zoneTransferTsigKeyNames` **on the zone itself
-has no effect** — the values are stored and shown in the API, but ignored.
+The cluster zone is DNSSEC-signed and carries `_53443._tcp.<node>` **TLSA records with
+`certificateUsage: DANE-EE`**: that is how cluster peers pin each other's self-signed
+certificates. Nothing else writes into this zone.
 
-This is easy to misdiagnose. external-dns needs a TSIG-signed AXFR to read current records
-(`--rfc2136-tsig-axfr`; it signs the transfer, and its updates are signed separately). Without it
-external-dns cannot list anything, so it blindly re-sends every record every cycle, and
-`policy: sync` can never be used because it cannot know what to delete. The symptom is
-`AXFR error: dns: bad xfr rcode: 5` every interval, with Technitium logging *"refused a zone
-transfer request since the request is missing TSIG auth required by the zone"*.
+## external-dns writes to AD, not Technitium
 
-**The fix is to add the key to the catalog zone's `zoneTransferTsigKeyNames`,** alongside the
-cluster's own key. After that external-dns reports `All records are already up to date` and stops
-rewriting.
+external-dns (`kubernetes/infrastructure/controllers/external-dns/`) publishes the k3s ingress
+names into the AD zone `int.nerdbox.dev` over RFC2136 with **GSS-TSIG**, as the AD account
+`svc-externaldns`. It round-robins between `hlb-dc-04` and `hlb-dc-05`.
 
-**Do not "fix" it with `overrideCatalogZoneTransfer=true` on the member zone.** That does let
-external-dns in, but it replaces the catalog policy the cluster relies on and **breaks cluster
-replication** — verified: secondaries immediately began logging
-`zone transfer response (RCODE=Refused)` and stopped receiving updates until the override was
-turned back off.
+AD side, which is not in git:
 
-### The zone is DNSSEC-signed and carries the cluster's DANE-EE records
+- `svc-externaldns`: a plain domain user, password set never to expire and rotated by hand, no
+  interactive logon. No extra delegation: the default zone ACL lets authenticated users create
+  new names, and the creator owns what it creates.
+- `int.nerdbox.dev` dynamic updates: **Secure only**.
+- `int.nerdbox.dev` zone transfers: only to the k3s node IPs (`10.2.169.30`–`.32`, `.40`–`.45`).
+  external-dns reads the zone by AXFR, which is unsigned under GSS-TSIG, and its traffic leaves
+  from whichever node the pod is on.
 
-Cluster init signed `int.nerdbox.dev` (DNSKEY/RRSIG/NSEC) and published
-`_53443._tcp.<node>` **TLSA records with `certificateUsage: DANE-EE`**. Those TLSA records are
-how cluster peers pin each other's self-signed certificates — the pinning lives in this zone, not
-just in the nodes' config.
-
-external-dns writes into the same zone. It is safe **because `registry: txt` means it only ever
-deletes records it holds an ownership TXT for**, and the cluster's NS/A/TLSA/DNSKEY records have
-none. Do not remove the TXT registry or set `txtOwnerId` to something that collides — losing that
-boundary puts the cluster's own trust anchors within reach of a DNS controller.
+`policy: upsert-only` with the TXT registry means external-dns only ever adds names that are
+missing. The hand-made records already in the zone have no ownership TXT and are never
+modified.
 
 ## Gotchas
 
@@ -112,7 +141,7 @@ rescheduled pod keeps its identity.
 
 ### Cluster init renames every node
 
-Nodes are renamed into the cluster domain on join (`dns-01` → `dns-01.int.nerdbox.dev`). Their
+Nodes are renamed into the cluster domain on join (`dns-01` → `dns-01.dns.nerdbox.dev`). Their
 self-signed certs are **not** reissued, so if the new name does not match the cert the peers
 reject each other with `RemoteCertificateNameMismatch` and heartbeats fail. Keep
 `DNS_SERVER_DOMAIN` in the manifests consistent with `<name>.<cluster domain>`.
@@ -160,10 +189,10 @@ query all three directly:
 
 ```sh
 curl -s --get "http://10.2.30.251:5380/api/zones/records/add" --data-urlencode "token=$TOKEN" \
-  --data-urlencode "domain=synctest.int.nerdbox.dev" --data-urlencode "zone=int.nerdbox.dev" \
+  --data-urlencode "domain=synctest.dns.nerdbox.dev" --data-urlencode "zone=dns.nerdbox.dev" \
   --data-urlencode "type=A" --data-urlencode "ipAddress=10.99.99.99" --data-urlencode "ttl=60"
 
-for ip in 10.2.30.251 10.2.30.252 10.2.169.84; do dig +short @$ip synctest.int.nerdbox.dev; done
+for ip in 10.2.30.251 10.2.30.252 10.2.169.84; do dig +short @$ip synctest.dns.nerdbox.dev; done
 ```
 
 Expect all three to answer within ~15s. Delete the record afterwards
@@ -183,34 +212,35 @@ ssh ubuntu@10.2.30.251 'sudo docker start technitium'  # VIP returns in ~10s (ri
 ### Promote dns-02 when dns-01 is lost
 
 Technitium promotion is **manual by design**. While the primary is down, queries keep resolving
-everywhere and the VIP moves automatically — only config *writes* and external-dns record
-creation are paused.
+everywhere and the VIP moves automatically — only config *writes* are paused.
 
 1. Confirm dns-01 is genuinely gone, not just unreachable. Two primaries would diverge.
 2. On dns-02, promote it (`/api/admin/cluster/secondary/promote`); if dns-01 is unreachable this
    needs the force option.
-3. Re-point **external-dns** at `10.2.30.252` — it writes via RFC2136 to the primary's address,
-   not the VIP, because the VIP can land on a read-only node. Update `--rfc2136-host` in
-   `kubernetes/apps/external-dns/helmrelease.yaml`.
-4. Update the **EndpointSlice** in `primary-ingress.yaml` to `10.2.30.252`, or
+3. Update the **EndpointSlice** in `primary-ingress.yaml` to `10.2.30.252`, or
    `technitium.int.nerdbox.dev` keeps pointing at the dead node.
-5. Swap `keepalived_state`/`keepalived_priority` in `host_vars/` so the rebuilt dns-01 does not
+4. Swap `keepalived_state`/`keepalived_priority` in `host_vars/` so the rebuilt dns-01 does not
    preempt the VIP the moment it returns.
-6. Re-join the rebuilt node as a secondary (it cannot rejoin as primary).
+5. Re-join the rebuilt node as a secondary (it cannot rejoin as primary).
 
 ### Rebuild the cluster from scratch
 
-Needed only if the **cluster domain** must change. Cheap while the cluster is empty, expensive
-once block lists and zones exist.
+Needed only if the **cluster domain** must change. Wiping every node is cleaner than deleting
+and re-initialising the cluster in place: a fresh init issues each node a self-signed
+certificate for its new name, while an in-place rename keeps the old certificate and peers reject
+it (`RemoteCertificateNameMismatch`).
 
-1. Remove each secondary from the primary (`/api/admin/cluster/primary/removeSecondary`). If the
-   primary cannot validate a secondary's certificate, have that node leave itself instead:
-   `/api/admin/cluster/secondary/leave?forceLeave=true`.
-2. Delete the cluster on the primary (`/api/admin/cluster/primary/delete`).
-3. Re-init: `/api/admin/cluster/init?clusterDomain=<domain>&primaryNodeIpAddresses=10.2.30.251`.
-4. Re-join each secondary with `/api/admin/cluster/initJoin`. **`primaryNodeUrl` must use the
-   primary's domain name, not its IP** — the certificate identity is the domain — with
-   `primaryNodeIpAddress` supplying the address and `ignoreCertificateErrors=true` for the
-   self-signed cert.
-5. Re-apply the zone transfer ACL (see "State that is NOT in git") and delete the orphaned zone
-   left behind by the old cluster domain.
+1. Set the new names in git first: `technitium_server_domain` in `host_vars/`, and
+   `DNS_SERVER_DOMAIN` in `kubernetes/apps/technitium/helmrelease.yaml`.
+2. k3s member: `flux suspend hr technitium -n technitium`, scale the deployment to 0, delete the
+   `technitium-config` PVC, then `flux resume`. Flux recreates the PVC empty; the VolSync
+   snapshot is the rollback.
+3. Each VM: `docker stop technitium`, `mv /opt/technitium/config /opt/technitium/config.bak-<date>`,
+   then from `ansible/`: `ansible-playbook technitium.yml --limit <ip>`.
+4. Init on dns-01: `/api/admin/cluster/init?clusterDomain=<domain>&primaryNodeIpAddresses=10.2.30.251`.
+5. Join dns-02 and the k3s member with `/api/admin/cluster/initJoin`. **`primaryNodeUrl` must
+   use the primary's domain name, not its IP** — the certificate identity is the domain — with
+   `primaryNodeIpAddress` supplying the address, `secondaryNodeIpAddresses` the joining node's own
+   IP, and `ignoreCertificateErrors=true` for the self-signed cert.
+6. Re-apply the zone transfer ACL and recreate the zones (see "State that is NOT in git").
+7. Delete the `config.bak` directories once everything verifies.

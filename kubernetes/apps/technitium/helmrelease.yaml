@@ -43,7 +43,7 @@ spec:
               # Stable identity for this member. The pod's hostname is random and
               # changes on every reschedule, which would otherwise make the server
               # rename itself out from under the cluster.
-              DNS_SERVER_DOMAIN: dns-k3s.int.nerdbox.dev
+              DNS_SERVER_DOMAIN: dns-k3s.dns.nerdbox.dev
               DNS_SERVER_WEB_SERVICE_HTTP_PORT: "5380"
               # The cluster/DANE-EE channel. Peers connect to this directly over
               # the LoadBalancer IP and pin the self-signed cert, so it can never
