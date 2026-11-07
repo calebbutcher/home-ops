@@ -76,6 +76,7 @@ resources:
   - kube-prometheus-stack/prometheusrule-security.yaml
   - kube-prometheus-stack/prometheusrule-restore-verify.yaml
   - backup-verify/dashboard.yaml
+  - technitium/dashboard.yaml
   - kube-prometheus-stack/prometheusrule-speedtest.yaml
   - speedtest/dashboard.yaml
   - kube-prometheus-stack/prometheusrule-cve-tracker.yaml
