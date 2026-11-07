@@ -93,6 +93,12 @@ spec:
           - selector: '{job="loki.source.kubernetes_events"}'
             priority: 10
             period: 8760h
+          # Technitium DNS query logs: one line per lookup for every device in
+          # the house, so a detailed browsing record. 90d covers incident
+          # look-back and detection work without keeping it for a year.
+          - selector: '{job="syslog", app="technitium"}'
+            priority: 5
+            period: 2160h
           # All container logs — the only streams with a `namespace` label.
           # ~904 MiB/day raw (~85 MiB/day compressed), 74% of it monitoring +
           # traefik. 180d => ~15 GiB.

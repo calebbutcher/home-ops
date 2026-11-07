@@ -23,8 +23,8 @@ spec:
       retries: 3
   values:
     # Remote-syslog receiver for external hosts that can't run the in-cluster pod-log
-    # Alloy: the TrueNAS NAS (10.2.40.10, :1514) and the 4-node Proxmox VE cluster
-    # (:1515). TrueNAS forwards its journal here so the NIC-hang smoking gun — NETDEV
+    # Alloy: the TrueNAS NAS (10.2.40.10, :1514), the 4-node Proxmox VE cluster
+    # (:1515) and the Technitium DNS query logs (:1516). TrueNAS forwards its journal here so the NIC-hang smoking gun — NETDEV
     # WATCHDOG / "Detected Hardware Unit Hang" / transmit-queue-timed-out — lands in
     # Loki; the PVE nodes forward their journals (incl. Ceph + corosync) for the same
     # root-cause + searchable-record reasons. Single Deployment replica (like
@@ -48,6 +48,12 @@ spec:
         - name: syslog-proxmox
           port: 1515
           targetPort: 1515
+          protocol: TCP
+        # Third listener: DNS query logs from the Technitium cluster (Log Exporter
+        # app, RFC5424 over TCP). One line per query from all three members.
+        - name: syslog-technitium
+          port: 1516
+          targetPort: 1516
           protocol: TCP
       configMap:
         content: |-
@@ -86,6 +92,34 @@ spec:
           // is distinguishable in Loki. forward_to is empty — this component only
           // exports its .rules for the syslog source above.
           loki.relabel "proxmox_host" {
+            forward_to = []
+            rule {
+              source_labels = ["__syslog_message_hostname"]
+              target_label  = "host"
+            }
+          }
+
+          // Technitium query logs (Log Exporter app on all three cluster members).
+          // The message body is "QNAME: <name>, QTYPE: <type>, QCLASS: IN; RCODE:
+          // <rcode>; ANSWER: [...]" and the structured data carries clientIp,
+          // responseType (Blocked, Recursive, Authoritative, Cached, ...), qName,
+          // qType and the answers, so parse in LogQL rather than adding labels:
+          // client IPs and query names as labels would explode stream cardinality.
+          // Retention is 90d (loki/helmrelease.yaml), shorter than other syslog.
+          loki.source.syslog "technitium" {
+            listener {
+              address       = "0.0.0.0:1516"
+              protocol      = "tcp"
+              syslog_format = "rfc5424"
+              labels        = { job = "syslog", app = "technitium" }
+            }
+            relabel_rules = loki.relabel.technitium_host.rules
+            forward_to    = [loki.write.default.receiver]
+          }
+
+          // Which member answered. The VMs report dns-01/dns-02; the k3s member
+          // reports its pod name, which changes on reschedule (low churn).
+          loki.relabel "technitium_host" {
             forward_to = []
             rule {
               source_labels = ["__syslog_message_hostname"]
