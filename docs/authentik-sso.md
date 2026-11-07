@@ -44,6 +44,8 @@ Use this for apps that have an OAuth2/OIDC login option (Grafana, etc.).
 - Grafana's `auth.generic_oauth` block (in the kube-prometheus-stack HelmRelease)
   points at `https://authentik.int.nerdbox.dev/application/o/{authorize,token,userinfo}/`
   and maps the `authentik Admins` group to the Grafana Admin role.
+- Access is limited to `grafana-users` and `authentik Admins`; add non-admins to
+  `grafana-users`.
 
 ### Recipe: add OIDC to another app
 
@@ -73,7 +75,8 @@ Use this for apps that have an OAuth2/OIDC login option (Grafana, etc.).
 - **Group-restricted access.** Two groups (`immich-users`, `immich-admins`) plus
   `authentik_policies.policybinding` entries binding each group to the application. With the
   default `policy_engine_mode: any`, membership in *either* group grants access and everyone
-  else is denied at Authentik. (Grafana has no binding, so it is open to all users.)
+  else is denied at Authentik. (Grafana uses the same pattern with `grafana-users` and
+  `authentik Admins`.)
 - **Role-claim scope mapping.** A custom `authentik_providers_oauth2.scopemapping`
   (`scope_name: immich_role`) whose expression emits an `immich_role` claim, added to the
   provider's `property_mappings`. Immich consumes it via **Role Claim = `immich_role`** and

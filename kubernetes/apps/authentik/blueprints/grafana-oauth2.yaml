@@ -3,13 +3,22 @@
 # worker from /blueprints/custom/. The client secret is NOT stored here: it is
 # read from the worker env var GRAFANA_OAUTH2_CLIENT_SECRET (sourced from the
 # SOPS secret authentik-secret) via the !Env tag. Grafana is configured with the
-# same value from its own SOPS secret (monitoring/grafana-oauth-secret).
+# same value from its own SOPS secret (monitoring/grafana-oauth-secret). Access is
+# restricted to the grafana-users and authentik Admins groups.
 version: 1
 metadata:
   name: grafana-oauth2
   labels:
     blueprints.goauthentik.io/instantiate: "true"
 entries:
+  # Access group: members of grafana-users may sign in to Grafana (as Viewer).
+  - model: authentik_core.group
+    id: grafana-users-group
+    identifiers:
+      name: grafana-users
+    attrs:
+      name: grafana-users
+
   - model: authentik_providers_oauth2.oauth2provider
     id: grafana-provider
     identifiers:
@@ -51,3 +60,24 @@ entries:
       meta_launch_url: https://grafana.int.nerdbox.dev
       meta_description: Monitoring dashboards
       meta_publisher: Grafana
+
+  # Restrict app access to the two groups. policy_engine_mode defaults to "any",
+  # so membership in either grants access.
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf grafana-app
+      group: !KeyOf grafana-users-group
+      order: 0
+    attrs:
+      target: !KeyOf grafana-app
+      group: !KeyOf grafana-users-group
+      order: 0
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf grafana-app
+      group: !Find [authentik_core.group, [name, authentik Admins]]
+      order: 1
+    attrs:
+      target: !KeyOf grafana-app
+      group: !Find [authentik_core.group, [name, authentik Admins]]
+      order: 1
