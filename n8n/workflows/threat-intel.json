@@ -369,7 +369,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Off by default. Set ENABLED = true to have Claude research up to 3 critical items with web\n// search and post the findings as follow-up messages.\nconst ENABLED = false;\nconst items = $('Build').first().json.deepDive ?? [];\nreturn ENABLED ? items.slice(0, 3).map((json) => ({ json })) : [];\n"
+        "jsCode": "// Claude researches up to 3 critical items with web search and posts the findings as\n// follow-up messages. Set ENABLED = false to turn this off.\nconst ENABLED = true;\nconst items = $('Build').first().json.deepDive ?? [];\nreturn ENABLED ? items.slice(0, 3).map((json) => ({ json })) : [];\n"
       },
       "id": "16e3cb5f-8f21-56be-8c5c-87ebf97fcd6d",
       "name": "Deep dive items",
@@ -420,7 +420,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// One follow-up message per researched item.\nconst clean = (s) => String(s ?? '').replace(/@(everyone|here)/gi, '@​$1').replace(/<@[!&]?\\d+>/g, '');\nreturn $input.all().map((item, i) => {\n  const text = (item.json.content ?? []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();\n  const title = $('Deep dive items').all()[i]?.json.title ?? 'item';\n  return { json: { content: `🔬 **Deep dive: ${clean(title)}**\\n${clean(text) || 'No findings (web search failed).'}`.slice(0, 2000) } };\n});\n"
+        "jsCode": "// One follow-up message per researched item. Only the text after the last tool call is the answer;\n// earlier text blocks are Claude thinking out loud between searches.\nconst clean = (s) => String(s ?? '').replace(/@(everyone|here)/gi, '@​$1').replace(/<@[!&]?\\d+>/g, '');\nreturn $input.all().map((item, i) => {\n  const blocks = item.json.content ?? [];\n  const lastTool = blocks.map((b) => b.type !== 'text').lastIndexOf(true);\n  const text = blocks.slice(lastTool + 1).map((b) => b.text).join('').trim();\n  const title = $('Deep dive items').all()[i]?.json.title ?? 'item';\n  return { json: { content: `🔬 **Deep dive: ${clean(title)}**\\n${clean(text) || 'No findings (web search failed).'}`.slice(0, 2000) } };\n});\n"
       },
       "id": "9466e6f8-ebf2-5b09-95ab-9469c33ee655",
       "name": "Format deep dive",

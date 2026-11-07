@@ -32,9 +32,9 @@ Credentials: a **Discord Webhook** named `Discord Threat Intel` (the `#threat-in
 URL), and the **Anthropic** credential above.
 
 The `Reader profile` node (who the briefing is for, plus private keywords and feeds) is kept out
-of git. Importing from git resets it to the placeholder; fill it in again in the UI. The deep-dive
-branch (Claude with web search on critical items) is off; set `ENABLED = true` in `Deep dive
-items` to turn it on.
+of git. Importing from git resets it to the placeholder; fill it in again in the UI. Critical items
+also get a deep dive (Claude with web search, up to 3 a day) posted as a follow-up message; set
+`ENABLED = false` in `Deep dive items` to turn it off.
 
 ## Import / export
 
