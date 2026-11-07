@@ -22,7 +22,7 @@
 # /outpost.goauthentik.io route. See docs/authentik-sso.md.
 #
 # DNS is managed by external-dns like every other *.int host — see the
-# external-dns.alpha.kubernetes.io/target annotation below, which CNAMEs this name to
+# external-dns.kubernetes.io/target annotation below, which CNAMEs this name to
 # the single self-healing ingress record. (This comment claimed DNS was manual here
 # until 2026-08-20; the target annotation had already been added.) cert-manager issues
 # the certificate over DNS-01, so an internal-only name works fine.
@@ -41,7 +41,7 @@ metadata:
     traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-internal-only@kubernetescrd,authentik-authentik-forwardauth@kubernetescrd
     # CNAME to the single self-healing ingress record (see the Traefik Service)
     # rather than a second A record, so a Traefik IP change moves one record.
-    external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
+    external-dns.kubernetes.io/target: ingress.int.nerdbox.dev
 spec:
   ingressClassName: traefik
   tls:

@@ -29,7 +29,7 @@ metadata:
     traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-internal-only@kubernetescrd
     # CNAME to the single self-healing ingress record rather than a second A
     # record — see Surface B. Harmless before external-dns exists.
-    external-dns.alpha.kubernetes.io/target: ingress.int.nerdbox.dev
+    external-dns.kubernetes.io/target: ingress.int.nerdbox.dev
 spec:
   ingressClassName: traefik
   tls:
