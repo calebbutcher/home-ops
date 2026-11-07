@@ -1,0 +1,26 @@
+---
+# Kerberos client config for external-dns's GSS-TSIG updates to Active
+# Directory. Realm lookup via DNS is off so the KDCs are exactly these two DCs.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: external-dns-krb5
+  namespace: external-dns
+data:
+  krb5.conf: |
+    [libdefaults]
+      default_realm = INT.NERDBOX.DEV
+      dns_lookup_realm = false
+      dns_lookup_kdc = false
+      rdns = false
+
+    [realms]
+      INT.NERDBOX.DEV = {
+        kdc = hlb-dc-04.int.nerdbox.dev
+        kdc = hlb-dc-05.int.nerdbox.dev
+        admin_server = hlb-dc-04.int.nerdbox.dev
+      }
+
+    [domain_realm]
+      int.nerdbox.dev = INT.NERDBOX.DEV
+      .int.nerdbox.dev = INT.NERDBOX.DEV

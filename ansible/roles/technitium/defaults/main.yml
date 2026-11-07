@@ -46,4 +46,4 @@ technitium_keepalived_auth_pass: "{{ vault_keepalived_auth_pass }}"
 
 # This member's DNS Server Domain (its identity in the admin UI / SOA records).
 # Overridden per host in host_vars.
-technitium_server_domain: dns.int.nerdbox.dev
+technitium_server_domain: dns.dns.nerdbox.dev
