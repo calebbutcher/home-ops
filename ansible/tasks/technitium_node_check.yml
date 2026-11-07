@@ -1,0 +1,116 @@
+---
+# Health gate for ONE Technitium node, run from the controller (delegate_to:
+# localhost) so the VMs and the k3s member are checked the same way. Each step
+# retries: a freshly restarted node needs time to rejoin the cluster and reload
+# its block lists.
+#
+# Vars:
+#   tn_ip      the node's address (10.2.30.251, 10.2.30.252, 10.2.169.84, ...)
+#   tn_target  the version it must be running, as Technitium reports it
+#              ("15.6.2"; a ".0" patch is reported as "15.4", not "15.4.0")
+#
+# Tokens are per node — a token from dns-01 is "invalid-token" on dns-02 — so
+# this logs in to the node it checks and logs out again at the end.
+
+- name: "Log in to {{ tn_ip }}"
+  ansible.builtin.uri:
+    url: "http://{{ tn_ip }}:5380/api/user/login"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      user: admin
+      pass: "{{ vault_technitium_admin_password }}"
+  register: _tn_login
+  no_log: true
+  retries: 36
+  delay: 5
+  until: _tn_login.json is defined and _tn_login.json.status == 'ok'
+  delegate_to: localhost
+  become: false
+
+- name: "Check {{ tn_ip }}"
+  block:
+    - name: "Check the version is {{ tn_target }}"
+      ansible.builtin.uri:
+        url: "http://{{ tn_ip }}:5380/api/settings/get"
+        headers:
+          Authorization: "Bearer {{ _tn_login.json.token }}"
+      register: _tn_settings
+      retries: 12
+      delay: 5
+      until: (_tn_settings.json.response.version | default('')) == tn_target
+      delegate_to: localhost
+      become: false
+
+    # Every node this one knows about must be Self or Connected. Checked on the
+    # node itself because a node that has not rejoined is exactly the one whose
+    # own view is wrong; the primary may still show it as Connected.
+    - name: "Check every cluster node is Connected, as seen from {{ tn_ip }}"
+      ansible.builtin.uri:
+        url: "http://{{ tn_ip }}:5380/api/admin/cluster/state"
+        headers:
+          Authorization: "Bearer {{ _tn_login.json.token }}"
+      register: _tn_cluster
+      retries: 36
+      delay: 5
+      until: >-
+        _tn_cluster.json.response.clusterNodes is defined and
+        (_tn_cluster.json.response.clusterNodes | length) == 3 and
+        (_tn_cluster.json.response.clusterNodes
+          | rejectattr('state', 'in', ['Self', 'Connected']) | list | length) == 0
+      delegate_to: localhost
+      become: false
+
+    - name: "Check block lists are loaded on {{ tn_ip }}"
+      ansible.builtin.uri:
+        url: "http://{{ tn_ip }}:5380/api/dashboard/stats/get?type=LastHour"
+        headers:
+          Authorization: "Bearer {{ _tn_login.json.token }}"
+      register: _tn_stats
+      retries: 36
+      delay: 5
+      until: (_tn_stats.json.response.stats.blockListZones | default(0) | int) >= (technitium_min_block_list_zones | default(100000) | int)
+      delegate_to: localhost
+      become: false
+
+    # One name per path a client depends on: the split-horizon zone forwarded to
+    # AD, an AD domain record, the infra zone Technitium owns, plain recursion.
+    - name: "Check resolution through {{ tn_ip }}"
+      ansible.builtin.command: "dig +short +time=2 +tries=1 @{{ tn_ip }} {{ item.name }} {{ item.type }}"
+      register: _tn_dig
+      changed_when: false
+      retries: 12
+      delay: 5
+      until: _tn_dig.rc == 0 and (_tn_dig.stdout | trim | length) > 0
+      loop:
+        - { name: nerdbox.dev, type: A }
+        - { name: _ldap._tcp.dc._msdcs.int.nerdbox.dev, type: SRV }
+        - { name: pve-m900.infra.nerdbox.dev, type: A }
+        - { name: google.com, type: A }
+      delegate_to: localhost
+      become: false
+
+    # Resolves publicly; must come back NXDOMAIN here, proving blocking is on.
+    - name: "Check the block-list canary is blocked by {{ tn_ip }}"
+      ansible.builtin.command: >-
+        dig +time=2 +tries=1 @{{ tn_ip }}
+        {{ technitium_blocked_canary | default('app-measurement.com') }} A
+      register: _tn_block
+      changed_when: false
+      retries: 12
+      delay: 5
+      until: "'status: NXDOMAIN' in _tn_block.stdout"
+      delegate_to: localhost
+      become: false
+
+  always:
+    - name: "Log out of {{ tn_ip }}"
+      ansible.builtin.uri:
+        url: "http://{{ tn_ip }}:5380/api/user/logout"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ _tn_login.json.token }}"
+      failed_when: false
+      no_log: true
+      delegate_to: localhost
+      become: false

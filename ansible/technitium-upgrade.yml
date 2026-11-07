@@ -1,0 +1,256 @@
+---
+# Upgrades the Technitium cluster to technitium_version in the order clustering
+# needs: the VM primary (dns-01), then dns-02, then the k3s member through Flux.
+#
+# Renovate bumps technitium_version (group_vars) and the image tags under
+# kubernetes/ in ONE PR. Merging it first upgrades the k3s member — a permanent
+# secondary — within minutes, while the VMs stay behind until someone runs
+# Ansible. So the VMs go first, from this playbook, and the merge comes last:
+#
+#   cd ansible     # never the repo root: SOPS vars would resolve to ciphertext
+#
+#   1. ansible-playbook technitium-upgrade.yml -e technitium_version=<new>
+#        Pre-flight (all nodes Connected, versions consistent), a fresh backup,
+#        then dns-01 and dns-02 one at a time. Each is gated on: running <new>,
+#        sees all three nodes Connected, block lists loaded, resolves the
+#        split-horizon / AD / infra / public names, still blocks the canary, and
+#        the keepalived VIP answers before the next node starts.
+#   2. Merge the Renovate PR. Flux upgrades the k3s member.
+#   3. ansible-playbook technitium-upgrade.yml -e technitium_version=<new> -e phase=verify
+#        All three nodes on <new> and healthy, and the restore-verify sidecar
+#        image matches.
+#
+# Run from the Renovate branch instead and -e technitium_version is not needed.
+# Re-running step 1 after a failure is safe: a node already on <new> is not
+# recreated, only re-checked.
+#
+# Each VM restart takes its DNS down for a few seconds; keepalived moves the VIP
+# to the other VM (~15s) and clients also have 10.2.169.84, so nothing should
+# notice. Options: -e skip_backup=true, -e technitium_min_block_list_zones=N,
+# -e technitium_blocked_canary=<a domain the lists block>.
+
+- name: Technitium upgrade — pre-flight
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    sops_guarded_vars:
+      - vault_technitium_admin_password
+    phase: vms
+    tn_target: "{{ technitium_version | regex_replace('\\.0$', '') }}"
+    tn_nodes:
+      - 10.2.30.251
+      - 10.2.30.252
+      - 10.2.169.84
+  pre_tasks:
+    - name: Assert SOPS variables actually decrypted
+      ansible.builtin.import_tasks: tasks/assert_sops_decrypted.yml
+  tasks:
+    - name: Assert the phase is known
+      ansible.builtin.assert:
+        that: phase in ['vms', 'verify']
+        fail_msg: "phase must be 'vms' (default) or 'verify', got '{{ phase }}'"
+
+    - name: Log in to each node
+      ansible.builtin.uri:
+        url: "http://{{ item }}:5380/api/user/login"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          user: admin
+          pass: "{{ vault_technitium_admin_password }}"
+      register: _pf_login
+      loop: "{{ tn_nodes }}"
+      no_log: true
+
+    - name: Read each node's version
+      ansible.builtin.uri:
+        url: "http://{{ item.item }}:5380/api/settings/get"
+        headers:
+          Authorization: "Bearer {{ item.json.token }}"
+      register: _pf_settings
+      loop: "{{ _pf_login.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Read the cluster state from the primary
+      ansible.builtin.uri:
+        url: http://10.2.30.251:5380/api/admin/cluster/state
+        headers:
+          Authorization: "Bearer {{ _pf_login.results[0].json.token }}"
+      register: _pf_cluster
+
+    - name: Log out of each node
+      ansible.builtin.uri:
+        url: "http://{{ item.item }}:5380/api/user/logout"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ item.json.token }}"
+      loop: "{{ _pf_login.results }}"
+      failed_when: false
+      no_log: true
+
+    - name: Collect versions
+      ansible.builtin.set_fact:
+        _pf_versions: >-
+          {{ dict(tn_nodes | zip(_pf_settings.results | map(attribute='json.response.version'))) }}
+
+    - name: Show the plan
+      ansible.builtin.debug:
+        msg: >-
+          Target {{ tn_target }}. Now running: {{ _pf_versions }}.
+          Cluster: {{ _pf_cluster.json.response.clusterNodes | map(attribute='name')
+          | zip(_pf_cluster.json.response.clusterNodes | map(attribute='state')) | list }}
+
+    - name: Assert every node is Self or Connected
+      ansible.builtin.assert:
+        that:
+          - (_pf_cluster.json.response.clusterNodes | length) == 3
+          - (_pf_cluster.json.response.clusterNodes
+              | rejectattr('state', 'in', ['Self', 'Connected']) | list | length) == 0
+        fail_msg: >-
+          The cluster is not healthy before the upgrade. Fix that first — upgrading a
+          degraded cluster can leave no node that has a good copy of the config.
+
+    # Versions on entry may be: all on the old version (fresh run), or some VMs
+    # already on the target (re-run after a failure). Anything else — three
+    # different versions, or an unrelated one — needs a human.
+    - name: Assert versions are consistent with an upgrade to {{ tn_target }}
+      ansible.builtin.assert:
+        that:
+          - (_pf_versions.values() | reject('equalto', tn_target) | unique | list | length) <= 1
+        fail_msg: >-
+          Unexpected version mix {{ _pf_versions }} for a move to {{ tn_target }}.
+
+    - name: Warn if the k3s member is already ahead of the VMs
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: the k3s member already runs {{ tn_target }} but a VM does not —
+          the Renovate PR was merged before the VMs were upgraded. Continuing will
+          bring the VMs up to match.
+      when:
+        - phase == 'vms'
+        - _pf_versions['10.2.169.84'] == tn_target
+        - _pf_versions['10.2.30.251'] != tn_target or _pf_versions['10.2.30.252'] != tn_target
+
+    - name: Take a fresh backup of the primary
+      when:
+        - phase == 'vms'
+        - not (skip_backup | default(false) | bool)
+        - _pf_versions['10.2.30.251'] != tn_target
+      block:
+        - name: Start a technitium-backup Job
+          ansible.builtin.command: >-
+            kubectl -n technitium create job
+            technitium-backup-preupgrade-{{ lookup('pipe', 'date +%s') }}
+            --from=cronjob/technitium-backup -o name
+          register: _pf_job
+          changed_when: true
+
+        - name: Wait for the backup to complete
+          ansible.builtin.command: >-
+            kubectl -n technitium wait {{ _pf_job.stdout }}
+            --for=condition=complete --timeout=600s
+          changed_when: false
+
+- name: Technitium upgrade — VMs, primary first
+  hosts: standalone_vms
+  serial: 1
+  order: sorted          # 10.2.30.251 (dns-01, primary) before 10.2.30.252
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  environment: "{{ proxy_env | default({}) }}"
+  vars:
+    sops_guarded_vars:
+      - vault_technitium_admin_password
+    phase: vms
+    tn_target: "{{ technitium_version | regex_replace('\\.0$', '') }}"
+  pre_tasks:
+    - name: Skip the VM phase when only verifying
+      ansible.builtin.meta: end_host
+      when: phase != 'vms'
+
+    - name: Assert SOPS variables actually decrypted
+      ansible.builtin.import_tasks: tasks/assert_sops_decrypted.yml
+  tasks:
+    # Only the container (and its listener asserts) — not the systemd-resolved,
+    # Docker or keepalived parts of the role, which an upgrade has no reason to
+    # touch. Recreates the container only if the image tag changed.
+    - name: Upgrade the Technitium container
+      ansible.builtin.include_role:
+        name: technitium
+        tasks_from: technitium.yml
+
+    - name: Gate on {{ inventory_hostname }}
+      ansible.builtin.include_tasks: tasks/technitium_node_check.yml
+      vars:
+        tn_ip: "{{ inventory_hostname }}"
+
+    - name: The keepalived VIP answers before moving on
+      ansible.builtin.command: >-
+        dig +short +time=2 +tries=1 @{{ technitium_keepalived_vip | default("10.2.30.250") }} nerdbox.dev A
+      register: _vip_dig
+      changed_when: false
+      retries: 12
+      delay: 5
+      until: _vip_dig.rc == 0 and (_vip_dig.stdout | trim | length) > 0
+      delegate_to: localhost
+      become: false
+
+- name: Technitium upgrade — next step / verification
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    phase: vms
+    tn_target: "{{ technitium_version | regex_replace('\\.0$', '') }}"
+  tasks:
+    - name: Next step
+      ansible.builtin.debug:
+        msg: >-
+          Both VMs run {{ tn_target }} and passed every gate. Now merge the Renovate
+          PR so Flux upgrades the k3s member, then run:
+          ansible-playbook technitium-upgrade.yml -e technitium_version={{ technitium_version }} -e phase=verify
+      when: phase == 'vms'
+
+    - name: Verify all three nodes
+      when: phase == 'verify'
+      block:
+        - name: Gate on each node
+          ansible.builtin.include_tasks: tasks/technitium_node_check.yml
+          loop:
+            - 10.2.30.251
+            - 10.2.30.252
+            - 10.2.169.84
+          loop_control:
+            loop_var: tn_ip
+
+        # The restore check's throwaway must run the production version.
+        # argv, not a string: the command module's splitting strips the quotes
+        # inside the jsonpath filter and kubectl rejects it.
+        - name: Read the restore-verify sidecar image
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - -n
+              - backup-verify
+              - get
+              - cronjob
+              - technitium-restore-verify
+              - -o
+              - jsonpath={.spec.jobTemplate.spec.template.spec.initContainers[?(@.name=="technitium")].image}
+          register: _rv_image
+          changed_when: false
+
+        - name: Assert the restore-verify sidecar matches
+          ansible.builtin.assert:
+            that: _rv_image.stdout is search(':' ~ technitium_version ~ '$')
+            fail_msg: >-
+              technitium-restore-verify still uses {{ _rv_image.stdout }}; it should be
+              on {{ technitium_version }}. Bump it in
+              kubernetes/apps/backup-verify/cronjob-technitium.yaml.
+
+        - name: Done
+          ansible.builtin.debug:
+            msg: "All three Technitium nodes run {{ tn_target }} and are healthy."
