@@ -18,15 +18,32 @@ Credentials to create in n8n (Credentials → Add):
 
 Queries live in the `Queries` node (one per line); formatting is in `Build digest`.
 
+## threat-intel.json
+
+Daily 07:00 Eastern briefing to the `#threat-intel` Discord channel. It reads the security news,
+mailing-list, and research feeds in the `Sources` node, plus CISA KEV, NVD, and GitHub
+advisories. Claude (Sonnet) then picks and writes up what matters, in four sections: your lab
+(matched against running images), identity & access, offensive research, and big picture. Weekends
+only post exploited issues that touch the lab. Stories already covered are remembered for 45 days
+and only come back when something material changes. `threat-intel-errors.json` posts failed runs
+to the same channel.
+
+Credentials: a **Discord Webhook** named `Discord Threat Intel` (the `#threat-intel` webhook
+URL), and the **Anthropic** credential above.
+
+The `Reader profile` node (who the briefing is for, plus private keywords and feeds) is kept out
+of git. Importing from git resets it to the placeholder; fill it in again in the UI. Critical items
+also get a deep dive (Claude with web search, up to 3 a day) posted as a follow-up message; set
+`ENABLED = false` in `Deep dive items` to turn it off.
+
 ## Import / export
 
 ```sh
 P=$(kubectl -n n8n get pod -l app.kubernetes.io/name=n8n -o name | head -1)
 
-# import (lands inactive; attach credentials and activate in the UI)
+# import (lands unpublished; attach credentials and publish in the UI)
 kubectl -n n8n exec -i "$P" -c app -- sh -c 'cat > /tmp/wf.json && n8n import:workflow --input=/tmp/wf.json' < n8n/workflows/weekly-digest.json
 
-# export after editing in the UI (keeps only the workflow itself; the full export
-# carries the owner's name and email)
-kubectl -n n8n exec "$P" -c app -- sh -c 'n8n export:workflow --id=<id> --output=/tmp/wf.json >/dev/null 2>&1 && node -e "const [w]=require(\"/tmp/wf.json\");const {id,name,nodes,connections,settings}=w;console.log(JSON.stringify({id,name,nodes,connections,settings},null,2))"' > n8n/workflows/weekly-digest.json
+# export after editing in the UI
+n8n/export.sh <id> n8n/workflows/weekly-digest.json
 ```
