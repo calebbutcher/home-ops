@@ -265,4 +265,4 @@ custom_registries_yaml: |
 # clustering expects version parity across all members. Bump the VMs (primary)
 # first, then the k3s member.
 # renovate: datasource=docker depName=technitium/dns-server
-technitium_version: 15.4.0
+technitium_version: 15.6.2
