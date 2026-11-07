@@ -114,7 +114,23 @@ spec:
               labels        = { job = "syslog", app = "technitium" }
             }
             relabel_rules = loki.relabel.technitium_host.rules
-            forward_to    = [loki.write.default.receiver]
+            forward_to    = [loki.process.technitium_limit.receiver]
+          }
+
+          // Cap DNS query logs at 300 lines/s (burst 3000) and DROP the excess.
+          // Normal is 1-5 lines/s. Without this, a query storm (malware, a broken
+          // device, a load test) floods Loki's tenant-wide 4 MB/s ingestion limit,
+          // and Loki then rejects other apps' logs too: a 2026-11-07 load test got
+          // ~80k lines rate_limited. Dropping rather than back-pressuring keeps this
+          // pod's memory flat. 300 x ~550 B = ~165 KB/s, ~4% of Loki's budget.
+          // Dropped lines: loki_process_dropped_lines_total.
+          loki.process "technitium_limit" {
+            forward_to = [loki.write.default.receiver]
+            stage.limit {
+              rate  = 300
+              burst = 3000
+              drop  = true
+            }
           }
 
           // Which member answered. The VMs report dns-01/dns-02; the k3s member
@@ -132,12 +148,14 @@ spec:
               url = "http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push"
             }
           }
+      # 256Mi, not 128Mi: a DNS query burst took it to 113Mi of 128Mi on
+      # 2026-11-07, and an OOM here also cuts the TrueNAS and Proxmox feeds.
       resources:
         requests:
           cpu: 50m
-          memory: 64Mi
+          memory: 96Mi
         limits:
-          memory: 128Mi
+          memory: 256Mi
     # Expose the listener on a stable MetalLB IP the external NAS can reach.
     # first-pool is 10.2.169.80-.90; .81 Traefik, .82 Gitea SSH, so .83 is free.
     service:
