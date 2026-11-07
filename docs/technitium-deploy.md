@@ -144,6 +144,28 @@ Office on the domain), and the newly-registered-domain lists (false positives).
 To unblock something, add it under **Allowed** on the primary (`/api/allowed/add`). An allowed
 name also allows its subdomains.
 
+## Apps
+
+Installed on the primary from the app store; **apps sync to every cluster member within
+seconds**, so install and configure them once, on dns-01. Their config is part of the daily
+backup (`apps=true`).
+
+| App | Config | Why |
+|-----|--------|-----|
+| Query Logs (Sqlite) | `maxLogDays: 7`, `maxLogRecords: 0` (no record cap) | The **Query Logs** tab in the UI: per node, short-term, for "why is this broken / what blocked it" |
+| DNS Rebinding Protection | `privateDomains`: `home.arpa`, `nerdbox.dev`, `valhalla.local`, `plex.direct`; default `privateNetworks` | Strips private IPs from public answers, so a website can't use DNS to reach LAN devices |
+| Log Exporter | syslog, TCP, `10.2.169.83:1516` | Every query from every member into Loki as `{job="syslog", app="technitium"}`, kept 90 days |
+
+**Rebinding protection removes any private address answered for a domain not listed in
+`privateDomains`.** If something on the LAN relies on a public name resolving to a private IP
+(as Plex does with `*.plex.direct`), it breaks silently: the name answers with no address. Find
+it in the Query Logs tab and add its domain to `privateDomains`.
+
+Log Exporter's syslog body is `QNAME: <name>, QTYPE: <type>, QCLASS: IN; RCODE: <rcode>;
+ANSWER: [...]`, with `clientIp`, `responseType` (e.g. `Blocked`) and the answers in the
+structured data. Filter in LogQL, e.g. blocked lookups:
+`{app="technitium"} |= "responseType=\"Blocked\""`.
+
 ## Backups and restore verification
 
 The primary is a VM, and `infra.nerdbox.dev` lives only here, so it gets its own backup on top
