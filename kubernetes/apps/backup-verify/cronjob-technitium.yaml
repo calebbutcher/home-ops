@@ -1,0 +1,276 @@
+---
+# Weekly proof that the Technitium primary's backup (technitium/backup-cronjob.yaml)
+# restores into a working DNS server with the same zones as production.
+#
+# WHAT IT DOES
+#   1. restic check + dump of the newest zip from s3://technitium-backups/restic
+#   2. starts a throwaway, UNCLUSTERED Technitium as a native sidecar
+#   3. restores the zip into it: zones, DNS settings, allowed/blocked zones and
+#      apps ONLY. Never the cluster config — with it the throwaway would carry
+#      dns-01's identity and try to talk to the real cluster. Never the auth
+#      config, which is not in the backup anyway.
+#   4. compares zone set, zone types and per-zone record counts against the live
+#      primary, ignoring DNSSEC records and the PTRs the cluster keeps for its own nodes
+#
+# A record added or removed between the 06:30 backup and this run shows up as a
+# mismatch. That is rare and reads as "re-run it", which beats a comparison that
+# silently tolerates drift.
+#
+# The live side is read with svc-verify's token. It only sees zones that grant
+# the "Zone Readers" group view, so a NEW zone must be given that permission
+# (docs/technitium-deploy.md) or this job fails naming it.
+#
+# ISOLATION: networkpolicy.yaml lets this pod reach only RustFS and dns-01's
+# :53443. The throwaway restores real forwarder settings, and must not be able to
+# reach the DCs, the cluster peers or the internet.
+#
+# Emits `RESULT tier=technitium …` in the same logfmt shape as the restic and
+# Postgres jobs for monitoring/backup-verify/dashboard.yaml.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: technitium-restore-verify
+  namespace: backup-verify
+spec:
+  # After the restic (09:00) and Postgres (10:00) sweeps.
+  schedule: "0 11 * * 0"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: technitium-restore-verify
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            # Read-only against the repository: every call carries --no-lock
+            # (see cronjob-volsync.yaml for why a verifier must never lock).
+            # Failures are recorded rather than raised so the verify container
+            # still runs and emits a RESULT line naming the stage.
+            - name: fetch
+              image: docker.io/restic/restic:0.19.1
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -u
+                  export HOME=/tmp RESTIC_CACHE_DIR=/cache
+                  fail() { echo "$1" > /work/failed-stage; echo "FAIL $1: $2"; exit 0; }
+
+                  snap=$(restic snapshots --host technitium-backup --latest 1 --json --no-lock 2>&1) \
+                    || fail open "$snap"
+                  id=$(printf '%s' "$snap" | sed -n 's/.*"short_id":"\([^"]*\)".*/\1/p' | head -1)
+                  when=$(printf '%s' "$snap" | sed -n 's/.*"time":"\([^"]*\)".*/\1/p' | head -1)
+                  [ -n "$id" ] || fail no-snapshots "repository has no technitium-backup snapshots"
+                  echo "$id" > /work/snapshot
+                  echo "snapshot ${id} taken ${when}"
+
+                  out=$(restic check --no-lock 2>&1) || fail check "$out"
+
+                  restic dump --no-lock "$id" /backup/technitium-backup.zip \
+                    > /work/technitium-backup.zip 2>/tmp/dump.err \
+                    || fail restore "$(cat /tmp/dump.err)"
+                  echo "dumped $(wc -c < /work/technitium-backup.zip) bytes"
+              envFrom:
+                - secretRef:
+                    name: technitium-verify
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                runAsGroup: 1000
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 512Mi
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: cache
+                  mountPath: /cache
+                - name: tmp
+                  mountPath: /tmp
+            # Native sidecar: starts after `fetch`, must pass its startupProbe
+            # before `verify` starts, and is stopped when `verify` exits.
+            #
+            # The tag MUST equal production (kubernetes/apps/technitium/
+            # helmrelease.yaml): a restore into a different version proves less.
+            # It runs as root because the image does; it gets no capabilities
+            # beyond binding :53 and no network beyond the egress policy.
+            - name: technitium
+              image: docker.io/technitium/dns-server:15.4.0
+              restartPolicy: Always
+              env:
+                - name: DNS_SERVER_DOMAIN
+                  value: restore-verify.invalid
+                - name: DNS_SERVER_WEB_SERVICE_HTTP_PORT
+                  value: "5380"
+                - name: DNS_SERVER_RECURSION
+                  value: Deny
+                - name: DNS_SERVER_ADMIN_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: technitium-verify
+                      key: SCRATCH_ADMIN_PASSWORD
+              startupProbe:
+                httpGet:
+                  path: /api/user/session/get
+                  port: 5380
+                periodSeconds: 5
+                failureThreshold: 36
+              securityContext:
+                runAsUser: 0
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                  add: ["NET_BIND_SERVICE"]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 192Mi
+                limits:
+                  memory: 512Mi
+              volumeMounts:
+                - name: scratch-config
+                  mountPath: /etc/dns
+          containers:
+            - name: verify
+              image: docker.io/alpine/k8s:1.36.5@sha256:094adf64cdc4827377cdbe7ea5747472ce115f9fbc64a4e35970ec66777f9a00
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -uo pipefail
+                  snap=$(cat /work/snapshot 2>/dev/null || echo none)
+                  bytes=$(wc -c < /work/technitium-backup.zip 2>/dev/null || echo 0)
+                  emit() {
+                    echo "RESULT tier=technitium app_namespace=technitium source=technitium-backup status=${1} stage=${2} snapshot=${snap} bytes=${bytes} files=${3:-0}"
+                  }
+                  die() { echo "FAIL ${1}: ${2}"; emit fail "$1"; exit 1; }
+
+                  if [ -s /work/failed-stage ]; then
+                    die "$(cat /work/failed-stage)" "see the fetch container's log"
+                  fi
+
+                  scratch=http://127.0.0.1:5380/api
+                  stok=$(curl -sS --get "$scratch/user/login" --data-urlencode user=admin \
+                    --data-urlencode "pass=${SCRATCH_ADMIN_PASSWORD}" | jq -r '.token // empty')
+                  [ -n "$stok" ] || die scratch-login "could not log in to the throwaway Technitium"
+
+                  r=$(curl -sS -X POST -F "file=@/work/technitium-backup.zip" \
+                    "$scratch/settings/restore?token=${stok}&zones=true&dnsSettings=true&allowedZones=true&blockedZones=true&apps=true&deleteExistingFiles=true")
+                  [ "$(echo "$r" | jq -r .status)" = ok ] || die restore "$(echo "$r" | head -c 500)"
+
+                  # The restore reloads the DNS service; give it up to a minute
+                  # to come back with zones loaded.
+                  for _ in $(seq 1 30); do
+                    n=$(curl -s "$scratch/zones/list?token=${stok}" | jq -r '.response.zones | length' 2>/dev/null || echo 0)
+                    [ "${n:-0}" -gt 0 ] && break
+                    sleep 2
+                  done
+
+                  # One line per zone: "<zone> <type> <records>". $1 = API base,
+                  # remaining args = curl auth options. Two kinds of record are
+                  # not counted because a backup can never match them:
+                  #  - DNSSEC records, which churn on every re-signing;
+                  #  - PTRs pointing at a cluster node (*.${CLUSTER_DOMAIN}). The
+                  #    cluster adds these to any reverse zone it holds, in memory
+                  #    only (the zone file on disk does not get them), and adds
+                  #    them again after a restore.
+                  inventory() {
+                    local base=$1; shift
+                    curl -sSf "$@" "$base/zones/list" | jq -r '.response.zones[] | "\(.name) \(.type)"' |
+                    while read -r z t; do
+                      c=$(curl -sSf "$@" --get "$base/zones/records/get" \
+                          --data-urlencode "domain=$z" --data-urlencode "zone=$z" --data-urlencode listZone=true |
+                        jq '[.response.records[]
+                             | select(.type | test("^(RRSIG|NSEC|NSEC3|NSEC3PARAM|DNSKEY)$") | not)
+                             | select(.type != "PTR" or ((.rData.ptrName // "") | endswith("." + env.CLUSTER_DOMAIN) | not))
+                            ] | length')
+                      echo "$z $t $c"
+                    done | sort
+                  }
+
+                  restored=$(inventory "$scratch" --get --data-urlencode "token=${stok}") \
+                    || die inventory-restored "could not list the restored zones"
+                  live=$(inventory "${PRIMARY_URL}/api" -k -H "Authorization: Bearer ${TECHNITIUM_TOKEN}") \
+                    || die inventory-live "could not read the live primary at ${PRIMARY_URL}"
+
+                  zones=$(echo "$restored" | grep -c . || true)
+                  echo "restored zones:"; echo "$restored" | sed 's/^/  /'
+                  [ "$zones" -gt 0 ] || die empty "the backup restored no zones at all"
+
+                  if [ "$restored" != "$live" ]; then
+                    echo "MISMATCH (< restored from backup, > live primary):"
+                    diff <(echo "$restored") <(echo "$live") | sed 's/^/  /'
+                    echo "A zone present only in the backup usually means it was created without"
+                    echo "granting the Zone Readers group view (docs/technitium-deploy.md)."
+                    emit fail compare "$zones"
+                    exit 1
+                  fi
+
+                  echo "OK backup ${snap} restores ${zones} zones matching the live primary"
+                  emit ok none "$zones"
+              env:
+                # dns-01, the cluster primary, by address: the egress policy is
+                # an ipBlock. Update this in the promotion runbook too.
+                - name: PRIMARY_URL
+                  value: https://10.2.30.251:53443
+                - name: CLUSTER_DOMAIN
+                  value: dns.nerdbox.dev
+                - name: TECHNITIUM_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: technitium-verify
+                      key: TECHNITIUM_TOKEN
+                - name: SCRATCH_ADMIN_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: technitium-verify
+                      key: SCRATCH_ADMIN_PASSWORD
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                runAsGroup: 1000
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 32Mi
+                limits:
+                  memory: 128Mi
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                  readOnly: true
+          volumes:
+            - name: work
+              emptyDir:
+                medium: Memory
+                sizeLimit: 64Mi
+            - name: cache
+              emptyDir:
+                sizeLimit: 256Mi
+            - name: tmp
+              emptyDir:
+                medium: Memory
+                sizeLimit: 16Mi
+            - name: scratch-config
+              emptyDir:
+                sizeLimit: 256Mi

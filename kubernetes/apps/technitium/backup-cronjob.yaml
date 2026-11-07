@@ -1,0 +1,157 @@
+---
+# Daily backup of the Technitium cluster PRIMARY (dns-01) into its own restic
+# repository on RustFS.
+#
+# WHY THIS EXISTS ON TOP OF VOLSYNC
+# replicationsource.yaml backs up the k3s member's PVC, but that member is a
+# permanent secondary: its zones are secondary copies and its config is
+# whatever the last cluster sync wrote. The primary is a VM with no backup at
+# all, and since infra.nerdbox.dev moved into Technitium it holds data that
+# exists nowhere else.
+#
+# WHAT IS IN THE BACKUP
+# Zones, DNS settings, cluster config, allowed/blocked zones, apps, log and web
+# service settings. NOT authConfig (password hashes and API tokens — a rebuilt
+# node gets its admin password from the environment), and not query logs,
+# stats or block-list caches (re-downloaded on start).
+#
+# HOW IT REACHES THE PRIMARY
+# Through the technitium-primary Service (primary-ingress.yaml), whose
+# EndpointSlice the promotion runbook repoints. Backups therefore follow the
+# primary without a second place to update. The certificate is Technitium's
+# self-signed DANE-EE identity, so -k: the hop is in-cluster to a LAN address.
+#
+# CREDENTIALS
+# TECHNITIUM_TOKEN is an API token for the Technitium user svc-backup, whose
+# only non-default right is Settings (the backup endpoint requires Settings:
+# Delete). The S3 key is scoped to the technitium-backups bucket.
+#
+# Proven weekly by backup-verify/cronjob-technitium.yaml.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: technitium-backup
+  namespace: technitium
+spec:
+  schedule: "30 6 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  # Kept so KubeJobFailed keeps firing until someone looks.
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: technitium-backup
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: fetch
+              image: docker.io/alpine/k8s:1.36.5@sha256:094adf64cdc4827377cdbe7ea5747472ce115f9fbc64a4e35970ec66777f9a00
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  url="https://technitium-primary.technitium.svc.cluster.local:53443/api/settings/backup"
+                  q="zones=true&dnsSettings=true&clusterConfig=true&allowedZones=true&blockedZones=true&apps=true&logSettings=true&webServiceSettings=true"
+                  # The token goes in a header, not the query string, so it
+                  # never appears in an access log.
+                  curl -sSfk --max-time 120 -H "Authorization: Bearer ${TECHNITIUM_TOKEN}" \
+                    -o /backup/technitium-backup.zip "${url}?${q}"
+
+                  # On an auth or permission error the API answers 200 with a
+                  # JSON body, so -f alone would happily back up an error
+                  # message. Require a real zip that contains the settings file
+                  # and at least one zone.
+                  listing=$(unzip -l /backup/technitium-backup.zip) || {
+                    echo "FATAL: response is not a zip:"; head -c 500 /backup/technitium-backup.zip; echo; exit 1; }
+                  echo "$listing"
+                  echo "$listing" | grep -q ' dns.config$' || { echo "FATAL: backup has no dns.config"; exit 1; }
+                  echo "$listing" | grep -q ' zones/' || { echo "FATAL: backup has no zones"; exit 1; }
+              env:
+                - name: TECHNITIUM_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: technitium-backup-secret
+                      key: TECHNITIUM_TOKEN
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 128Mi
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+          containers:
+            - name: restic
+              image: docker.io/restic/restic:0.19.1
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  export HOME=/tmp RESTIC_CACHE_DIR=/cache
+
+                  # First run only. A wrong password also fails `cat config`,
+                  # but then `init` fails too ("config file already exists"),
+                  # so this cannot paper over a broken credential.
+                  if ! restic cat config >/dev/null 2>&1; then
+                    echo "repository not initialised; running restic init"
+                    restic init
+                  fi
+
+                  # --host is fixed: restic groups snapshots by host for
+                  # `forget`, and the default host is the pod name, which is new
+                  # every run — retention would never match anything.
+                  restic backup --host technitium-backup --tag technitium /backup/technitium-backup.zip
+                  restic forget --host technitium-backup --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
+              envFrom:
+                - secretRef:
+                    name: technitium-backup-secret
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 512Mi
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+                  readOnly: true
+                - name: cache
+                  mountPath: /cache
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: backup
+              emptyDir:
+                medium: Memory
+                sizeLimit: 64Mi
+            - name: cache
+              emptyDir:
+                sizeLimit: 256Mi
+            - name: tmp
+              emptyDir:
+                medium: Memory
+                sizeLimit: 16Mi
