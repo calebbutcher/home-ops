@@ -40,3 +40,33 @@ spec:
     # failure mode would be obscure.
     - from:
         - podSelector: {}
+---
+# technitium-restore-verify restores real forwarder settings into a throwaway
+# Technitium, so its pod may reach exactly two things: RustFS for the backup and
+# dns-01's API for the live comparison. No DNS, no DCs, no cluster peers, no
+# internet. Traffic inside the pod (verify -> sidecar on 127.0.0.1) is not
+# subject to NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: technitium-restore-verify-egress
+  namespace: backup-verify
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: technitium-restore-verify
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 10.2.40.10/32
+      ports:
+        - protocol: TCP
+          port: 30292
+    - to:
+        - ipBlock:
+            cidr: 10.2.30.251/32
+      ports:
+        - protocol: TCP
+          port: 53443

@@ -10,6 +10,8 @@ resources:
   - pvc.yaml
   - technitium-restic-secret.sops.yaml
   - replicationsource.yaml
+  - technitium-backup-secret.sops.yaml
+  - backup-cronjob.yaml
   - helmrelease.yaml
   - ingress.yaml
   - primary-ingress.yaml

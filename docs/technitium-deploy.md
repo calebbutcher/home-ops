@@ -86,6 +86,8 @@ lives on the primary, from where it replicates.
 | Zones | The table in "Who owns which zone" | Recreate exactly that set, all with `catalog=cluster-catalog.dns.nerdbox.dev`. |
 | Zone transfer ACL (`dns.nerdbox.dev`, `cluster-catalog.dns.nerdbox.dev`) | `10.2.30.251`, `10.2.30.252`, `10.2.169.84`, **`10.2.169.40`–`.45`** | The worker IPs are load-bearing — see "k3s member egress" below. **Add a line here when you add a worker node**, or the k3s member's zone transfers start failing whenever it lands on the new one. |
 | Recursion | `AllowOnlyForPrivateNetworks` | These hold LAN addresses; must not become open resolvers. |
+| Users `svc-backup`, `svc-verify`; groups **Backup Operators**, **Zone Readers** | See "Backups and restore verification" | Their API tokens are in the two backup secrets. Recreate them on a rebuild. |
+| **Zone Readers: view on every zone** | Set per zone (`/api/zones/permissions/set`) | New zones only grant the admin groups. **Grant Zone Readers view when you create a zone**, or the weekly restore check fails naming it. |
 
 Member zones inherit the **catalog's** zone-transfer policy. Setting `zoneTransfer` on a member
 zone is stored and shown but ignored, and `overrideCatalogZoneTransfer=true` breaks cluster
@@ -115,6 +117,40 @@ AD side, which is not in git:
 `policy: upsert-only` with the TXT registry means external-dns only ever adds names that are
 missing. The hand-made records already in the zone have no ownership TXT and are never
 modified.
+
+## Backups and restore verification
+
+The primary is a VM, and `infra.nerdbox.dev` lives only here, so it gets its own backup on top
+of the k3s member's VolSync copy:
+
+| Piece | Where | What |
+|-------|-------|------|
+| Daily backup, 06:30 UTC | `kubernetes/apps/technitium/backup-cronjob.yaml` | `/api/settings/backup` from the primary via the `technitium-primary` Service, into restic at `s3://technitium-backups/restic` (7 daily / 4 weekly / 6 monthly). No auth config, logs or stats. |
+| Weekly restore check, Sun 11:00 UTC | `kubernetes/apps/backup-verify/cronjob-technitium.yaml` | Restores the newest backup into a throwaway, unclustered Technitium and compares zones, zone types and record counts with the live primary. |
+| Alerts | `prometheusrule-restore-verify.yaml` | `TechnitiumBackupStale` (30h), `TechnitiumRestoreVerificationStale` (10d), `RestoreVerificationFailed`. |
+| Dashboard | Backups / Restore Verification | Technitium row. |
+
+Credentials are least-privilege on both sides:
+
+- `svc-backup` is in **Backup Operators**, whose only right beyond the default Everyone group
+  is Settings (the backup endpoint needs Settings: Delete).
+- `svc-verify` is in **Zone Readers**: view on each zone, nothing else. Its token cannot back up
+  or change anything.
+- The S3 keys are scoped to the `technitium-backups` bucket: read/write for the backup, read-only
+  for the check.
+
+The check's pod can reach only RustFS and `10.2.30.251:53443` (NetworkPolicy
+`technitium-restore-verify-egress`). The throwaway restores real forwarder settings, so it must
+not be able to reach the DCs or the cluster peers.
+
+Two things the comparison ignores, because no backup can match them: DNSSEC records (re-signing
+churns them) and the PTRs the cluster adds for its own nodes to any reverse zone it holds. Those
+are in memory only; the zone file on disk never gets them.
+
+**Restore for real:** `restic dump <snapshot> /backup/technitium-backup.zip > backup.zip`, then on a
+freshly initialised primary `POST /api/settings/restore` with the zip and
+`zones=true&dnsSettings=true&allowedZones=true&blockedZones=true&apps=true`. Re-form the cluster
+(runbook below) rather than restoring `clusterConfig` onto a different machine.
 
 ## Gotchas
 
@@ -218,7 +254,9 @@ everywhere and the VIP moves automatically — only config *writes* are paused.
 2. On dns-02, promote it (`/api/admin/cluster/secondary/promote`); if dns-01 is unreachable this
    needs the force option.
 3. Update the **EndpointSlice** in `primary-ingress.yaml` to `10.2.30.252`, or
-   `technitium.int.nerdbox.dev` keeps pointing at the dead node.
+   `technitium.int.nerdbox.dev` and the daily backup keep pointing at the dead node. Also
+   update `PRIMARY_URL` and the `10.2.30.251` egress rule for `technitium-restore-verify` in
+   `kubernetes/apps/backup-verify/`.
 4. Swap `keepalived_state`/`keepalived_priority` in `host_vars/` so the rebuilt dns-01 does not
    preempt the VIP the moment it returns.
 5. Re-join the rebuilt node as a secondary (it cannot rejoin as primary).

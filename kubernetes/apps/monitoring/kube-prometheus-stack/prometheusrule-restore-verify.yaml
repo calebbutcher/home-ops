@@ -104,6 +104,42 @@ spec:
               confirms backups are being written; nothing currently confirms
               they can be read.
 
+        # Same shape for the weekly Technitium restore (cronjob-technitium.yaml):
+        # 10 days permits one missed run.
+        - alert: TechnitiumRestoreVerificationStale
+          expr: |
+            (time() - kube_cronjob_status_last_successful_time{
+              namespace="backup-verify", cronjob="technitium-restore-verify"
+            }) > 10 * 86400
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Technitium restore verification last succeeded {{ $value | humanizeDuration }} ago"
+            description: >-
+              No successful weekly restore of the Technitium primary's backup in
+              over 10 days, so the infra.nerdbox.dev zone and the cluster's
+              settings are no longer proven recoverable.
+
+        # The backup itself is daily (technitium/backup-cronjob.yaml), so a
+        # missed day matters long before the weekly verification would notice.
+        # 30h allows one slow or retried run.
+        - alert: TechnitiumBackupStale
+          expr: |
+            (time() - kube_cronjob_status_last_successful_time{
+              namespace="technitium", cronjob="technitium-backup"
+            }) > 30 * 3600
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Technitium backup last succeeded {{ $value | humanizeDuration }} ago"
+            description: >-
+              The daily backup of the Technitium primary has not succeeded in
+              over 30 hours. Check `kubectl -n technitium get jobs` — the usual
+              causes are an expired or revoked svc-backup token or RustFS being
+              unreachable.
+
         # Suspending a CronJob is the quietest way to turn this off: nothing
         # fails, the last-success timestamp simply stops advancing, and the
         # staleness rules above would notice 10 or 40 days later. This names the
@@ -131,15 +167,19 @@ spec:
             absent(kube_cronjob_spec_suspend{namespace="backup-verify", cronjob="volsync-restore-verify"})
             or
             absent(kube_cronjob_spec_suspend{namespace="backup-verify", cronjob="postgres-restore-verify"})
+            or
+            absent(kube_cronjob_spec_suspend{namespace="backup-verify", cronjob="technitium-restore-verify"})
+            or
+            absent(kube_cronjob_spec_suspend{namespace="technitium", cronjob="technitium-backup"})
           for: 30m
           labels:
             severity: critical
           annotations:
             summary: "A restore verification CronJob has disappeared"
             description: >-
-              One of the two CronJobs in backup-verify no longer exists, so its
+              A restore-verification CronJob (or the Technitium backup) no longer exists, so its
               staleness alert can never fire again. Either Flux failed to apply
-              kubernetes/apps/backup-verify or it was deleted by hand.
+              kubernetes/apps/backup-verify (or technitium) or it was deleted by hand.
 
         # The Postgres job creates a real PVC per scratch cluster and is
         # responsible for removing it; its EXIT/INT/TERM trap does that even on

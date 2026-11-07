@@ -1125,6 +1125,166 @@ data:
           "timeFrom": "8d"
         },
         {
+          "id": 19,
+          "type": "row",
+          "title": "Technitium — what actually came back",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 38
+          },
+          "panels": []
+        },
+        {
+          "id": 20,
+          "type": "stat",
+          "title": "Technitium — last verified",
+          "description": "Age of the last successful run of technitium-restore-verify (backup-verify/cronjob-technitium.yaml). Turns red at 10d, matching TechnitiumRestoreVerificationStale. Manual runs count — see the restic panel.",
+          "gridPos": {
+            "h": 6,
+            "w": 6,
+            "x": 0,
+            "y": 39
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 604800
+                  },
+                  {
+                    "color": "red",
+                    "value": 864000
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto",
+            "text": {
+              "valueSize": 28
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "instant": true,
+              "expr": "time() - kube_cronjob_status_last_successful_time{namespace=\"backup-verify\", cronjob=\"technitium-restore-verify\"}"
+            }
+          ]
+        },
+        {
+          "id": 21,
+          "type": "table",
+          "title": "Latest Technitium restore",
+          "description": "The newest RESULT line from technitium-restore-verify. Zones is how many zones the backup restored into a throwaway Technitium; the run only passes when that zone set, each zone's type and each zone's record count (DNSSEC records and the cluster's own node PTRs aside) match the live primary. Backup bytes is the size of the backup zip.\n\nstatus=fail with stage=compare means the backup and production differ: either a record changed between the 06:30 backup and the run, or a zone was created without granting the Zone Readers group view. The job log names the zone.",
+          "gridPos": {
+            "h": 6,
+            "w": 18,
+            "x": 6,
+            "y": 39
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": {
+                "align": "auto"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "sortBy": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "${loki}"
+              },
+              "queryType": "instant",
+              "instant": true,
+              "expr": "last_over_time({namespace=\"backup-verify\"} |= \"RESULT tier=technitium\" | logfmt | app_namespace != \"\" | unwrap files [$__range]) by (status, stage, snapshot, bytes)"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "tier": true,
+                  "container": true,
+                  "pod": true,
+                  "node": true,
+                  "stream": true,
+                  "filename": true,
+                  "service_name": true,
+                  "detected_level": true,
+                  "job": true,
+                  "instance": true,
+                  "namespace": true
+                },
+                "renameByName": {
+                  "status": "Status",
+                  "stage": "Failed stage",
+                  "snapshot": "Snapshot",
+                  "bytes": "Backup bytes",
+                  "Value": "Zones"
+                },
+                "indexByName": {
+                  "status": 0,
+                  "stage": 1,
+                  "snapshot": 2,
+                  "bytes": 3,
+                  "Value": 4
+                }
+              }
+            }
+          ],
+          "timeFrom": "8d"
+        },
+        {
           "id": 17,
           "type": "row",
           "title": "Raw output",
@@ -1133,7 +1293,7 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 38
+            "y": 45
           },
           "panels": []
         },
@@ -1146,7 +1306,7 @@ data:
             "h": 14,
             "w": 24,
             "x": 0,
-            "y": 39
+            "y": 46
           },
           "datasource": {
             "type": "loki",

@@ -16,6 +16,7 @@ recover it.
 | n8n credential-encryption key (`N8N_ENCRYPTION_KEY`) | Git (SOPS) | `kubernetes/apps/n8n/secret.sops.yaml` |
 | MariaDB (mariadb-operator) | native `Backup` CR (nightly `mariadb-dump` → S3) | RustFS `mariadb-backups` bucket |
 | Longhorn volumes (block-level) | `daily-backup` RecurringJob, 04:00, `default` group | RustFS `longhorn-backups` bucket |
+| Technitium primary (zones, settings) | `technitium-backup` CronJob, 06:30, settings-backup API → restic | RustFS `technitium-backups` bucket |
 | Media / downloads / other NFS exports | TrueNAS-side ZFS snapshots — **not managed by this cluster** | NAS `mainPool` |
 | SOPS age key | **Manual / offline** | Password manager + offline copy |
 

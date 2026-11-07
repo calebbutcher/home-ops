@@ -107,6 +107,7 @@
       "matchFileNames": [
         "kubernetes/apps/authentik/**",
         "kubernetes/apps/technitium/**",
+        "kubernetes/apps/backup-verify/cronjob-technitium.yaml",
         "kubernetes/apps/bambustudio/**",
         "kubernetes/apps/monitoring/kube-prometheus-stack/**",
         "kubernetes/apps/monitoring/loki/**",

@@ -12,3 +12,5 @@ resources:
   - postgres-objectstore.yaml
   - cronjob-volsync.yaml
   - cronjob-postgres.yaml
+  - technitium-verify.sops.yaml
+  - cronjob-technitium.yaml
