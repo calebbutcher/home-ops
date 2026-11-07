@@ -1,0 +1,17 @@
+---
+# Shared by every play in technitium-upgrade.yml and by tasks/technitium_node_check.yml.
+
+# -e phase=verify selects the no-SSH verification run.
+technitium_upgrade_phase: "{{ phase | default('vms') }}"
+
+# Technitium reports a ".0" patch without it: tag 15.4.0 shows as "15.4".
+technitium_upgrade_target: "{{ technitium_version | regex_replace('\\.0$', '') }}"
+
+# Every cluster member, primary FIRST and the k3s member LAST.
+technitium_upgrade_nodes:
+  - 10.2.30.251   # dns-01, primary
+  - 10.2.30.252   # dns-02
+  - 10.2.169.84   # dns-k3s
+
+# Must match technitium_keepalived_vip in roles/technitium/defaults/main.yml.
+technitium_upgrade_vip: 10.2.30.250

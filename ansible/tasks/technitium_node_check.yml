@@ -7,15 +7,20 @@
 # Vars:
 #   tn_ip      the node's address (10.2.30.251, 10.2.30.252, 10.2.169.84, ...)
 #   tn_target  the version it must be running, as Technitium reports it
-#              ("15.6.2"; a ".0" patch is reported as "15.4", not "15.4.0")
+#              (defaults to technitium_upgrade_target, vars/technitium-upgrade.yml)
+#
+# The API is reached on :53443 (TLS) so the admin password never crosses VLANs in
+# plaintext. The node presents its self-signed DANE-EE cert, hence validate_certs:
+# false — the same trade-off as primary-ingress.yaml's insecureSkipVerify.
 #
 # Tokens are per node — a token from dns-01 is "invalid-token" on dns-02 — so
 # this logs in to the node it checks and logs out again at the end.
 
 - name: "Log in to {{ tn_ip }}"
   ansible.builtin.uri:
-    url: "http://{{ tn_ip }}:5380/api/user/login"
+    url: "https://{{ tn_ip }}:53443/api/user/login"
     method: POST
+    validate_certs: false
     body_format: form-urlencoded
     body:
       user: admin
@@ -30,24 +35,35 @@
 
 - name: "Check {{ tn_ip }}"
   block:
-    - name: "Check the version is {{ tn_target }}"
+    - name: "Check the version is {{ tn_target | default(technitium_upgrade_target) }}"
       ansible.builtin.uri:
-        url: "http://{{ tn_ip }}:5380/api/settings/get"
+        url: "https://{{ tn_ip }}:53443/api/settings/get"
+        validate_certs: false
         headers:
           Authorization: "Bearer {{ _tn_login.json.token }}"
       register: _tn_settings
+      no_log: true        # the response carries TSIG secrets and proxy credentials
       retries: 12
       delay: 5
-      until: (_tn_settings.json.response.version | default('')) == tn_target
+      until: (_tn_settings.json.response.version | default('')) == (tn_target | default(technitium_upgrade_target))
       delegate_to: localhost
       become: false
+      ignore_errors: true
+
+    - name: "Assert the version is {{ tn_target | default(technitium_upgrade_target) }}"
+      ansible.builtin.assert:
+        that: (_tn_settings.json.response.version | default('')) == (tn_target | default(technitium_upgrade_target))
+        fail_msg: >-
+          {{ tn_ip }} reports version '{{ _tn_settings.json.response.version | default('unknown') }}',
+          expected '{{ tn_target | default(technitium_upgrade_target) }}'.
 
     # Every node this one knows about must be Self or Connected. Checked on the
     # node itself because a node that has not rejoined is exactly the one whose
     # own view is wrong; the primary may still show it as Connected.
     - name: "Check every cluster node is Connected, as seen from {{ tn_ip }}"
       ansible.builtin.uri:
-        url: "http://{{ tn_ip }}:5380/api/admin/cluster/state"
+        url: "https://{{ tn_ip }}:53443/api/admin/cluster/state"
+        validate_certs: false
         headers:
           Authorization: "Bearer {{ _tn_login.json.token }}"
       register: _tn_cluster
@@ -55,7 +71,7 @@
       delay: 5
       until: >-
         _tn_cluster.json.response.clusterNodes is defined and
-        (_tn_cluster.json.response.clusterNodes | length) == 3 and
+        (_tn_cluster.json.response.clusterNodes | length) == (technitium_upgrade_nodes | length) and
         (_tn_cluster.json.response.clusterNodes
           | rejectattr('state', 'in', ['Self', 'Connected']) | list | length) == 0
       delegate_to: localhost
@@ -63,7 +79,8 @@
 
     - name: "Check block lists are loaded on {{ tn_ip }}"
       ansible.builtin.uri:
-        url: "http://{{ tn_ip }}:5380/api/dashboard/stats/get?type=LastHour"
+        url: "https://{{ tn_ip }}:53443/api/dashboard/stats/get?type=LastHour"
+        validate_certs: false
         headers:
           Authorization: "Bearer {{ _tn_login.json.token }}"
       register: _tn_stats
@@ -106,7 +123,8 @@
   always:
     - name: "Log out of {{ tn_ip }}"
       ansible.builtin.uri:
-        url: "http://{{ tn_ip }}:5380/api/user/logout"
+        url: "https://{{ tn_ip }}:53443/api/user/logout"
+        validate_certs: false
         method: POST
         headers:
           Authorization: "Bearer {{ _tn_login.json.token }}"

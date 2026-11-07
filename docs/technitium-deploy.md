@@ -249,7 +249,9 @@ the split-horizon, AD, `infra` and public names, still blocks the canary, and th
 answers. Any failure stops the run before the next VM. Re-running is safe: a VM already on
 the new version is only re-checked.
 
-`-e phase=verify` on its own is a quick health check of all three nodes at any time.
+`-e phase=verify` on its own is a quick health check of all three nodes at any time; it needs
+no SSH. Don't use `--limit`: the pre-flight and backup run on localhost and the VM play
+refuses to start without them. A target that isn't newer than what's running is refused.
 
 ### Verify cluster health
 
