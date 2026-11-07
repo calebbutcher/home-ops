@@ -135,7 +135,7 @@ spec:
             # It runs as root because the image does; it gets no capabilities
             # beyond binding :53 and no network beyond the egress policy.
             - name: technitium
-              image: technitium/dns-server:15.4.0
+              image: technitium/dns-server:15.6.2@sha256:eb48ac5c135f4ab936b536f74f853d53e15ab39ef37fdbc9598a089b90d9f245
               restartPolicy: Always
               env:
                 - name: DNS_SERVER_DOMAIN
