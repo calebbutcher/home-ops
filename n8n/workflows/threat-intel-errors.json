@@ -1,0 +1,58 @@
+{
+  "id": "hIj0XJDPOoJa3SwX",
+  "name": "Threat intel errors",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "3ed8a9ed-4366-5d4a-9e73-098ddaafd4cd",
+      "name": "On error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "operation": "sendLegacy",
+        "content": "={{ '⚠️ Threat-intel run failed at **' + ($json.execution.lastNodeExecuted ?? '?') + '**: ' + String($json.execution.error?.message ?? 'unknown error').replace(/@/g, '@\\u200b').slice(0, 1500) + ($json.execution.url ? '\\n' + $json.execution.url : '') }}",
+        "options": {
+          "username": "Threat Intel"
+        }
+      },
+      "id": "ea90ac9c-2f60-5a67-ad52-0ca4aa9ad391",
+      "name": "Post to Discord",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "mtc8YyWf3EOnPVO4",
+          "name": "Discord Threat Intel"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "On error": {
+      "main": [
+        [
+          {
+            "node": "Post to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York"
+  }
+}
