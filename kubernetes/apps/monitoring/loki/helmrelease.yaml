@@ -6,6 +6,9 @@ metadata:
   namespace: monitoring
 spec:
   interval: 30m
+  # Each Loki pod takes ~2m to pass /ready and the StatefulSet rolls them one
+  # at a time, so a restart takes ~6.5m, longer than the 5m default.
+  timeout: 15m
   chart:
     spec:
       chart: loki
