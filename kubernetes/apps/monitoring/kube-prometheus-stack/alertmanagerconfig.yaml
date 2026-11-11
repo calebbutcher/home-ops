@@ -67,11 +67,17 @@ spec:
       # Alert remediation. `continue: true` alone would NOT also deliver these to
       # Discord: the parent receiver only runs when no child matches. The
       # matcher-less discord route right after it is what keeps them in Discord.
+      #
+      # One group per object (`name` for Flux, `container` for pods) so each gets its
+      # own run. repeatInterval 24h makes Alertmanager's notification log the real
+      # dedupe; n8n's static-data dedupe is last-write-wins across concurrent runs.
       - receiver: n8n
         matchers:
           - name: alertname
             matchType: "=~"
             value: "ContainerOOMKilled|ContainerOOMCrashLooping|ContainerRestartsLooping|FluxHelmReleaseNotReady|FluxKustomizationNotReady"
+        groupBy: ["alertname", "namespace", "name", "container"]
+        repeatInterval: 24h
         continue: true
       - receiver: discord
   receivers:

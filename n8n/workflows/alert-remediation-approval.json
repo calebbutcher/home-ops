@@ -25,7 +25,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "https://api.github.com/repos/calebbutcher/home-ops/pulls?state=open&per_page=50&sort=created&direction=asc",
+        "url": "https://api.github.com/repos/calebbutcher/home-ops/pulls?state=open&per_page=100&sort=created&direction=desc",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "githubApi",
         "sendHeaders": true,
@@ -51,11 +51,12 @@
         220,
         0
       ],
-      "alwaysOutputData": true
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "jsCode": "// One PR per poll: Send-and-Wait parks this execution until you answer, so the\n// `claude-announced` label (added next) is the ledger, not static data, which is\n// only saved when an execution finishes.\nconst prs = $input.all().map(i => i.json).filter(p =>\n  p?.head?.ref?.startsWith('claude/alert-') &&\n  p.head.repo?.full_name === 'calebbutcher/home-ops' &&\n  !(p.labels ?? []).some(l => l.name === 'claude-announced'));\nif (!prs.length) return [];\nconst p = prs[0];\nconst session = ((p.body ?? '').match(/https:\\/\\/claude\\.ai\\/code\\/[\\w\\/-]+/) ?? [])[0] ?? null;\nreturn [{ json: {\n  number: p.number, title: p.title, url: p.html_url, ref: p.head.ref, sha: p.head.sha,\n  nodeId: p.node_id, draft: p.draft, session,\n} }];\n"
+        "jsCode": "// One PR per poll: Send-and-Wait parks this execution until you answer, so the\n// `claude-announced` label (added next) is the ledger, not static data, which is\n// only saved when an execution finishes.\nconst prs = $input.all().map(i => i.json).filter(p =>\n  p?.head?.ref?.startsWith('claude/alert-') &&\n  p.head.repo?.full_name === 'calebbutcher/home-ops' &&\n  !(p.labels ?? []).some(l => l.name === 'claude-announced'));\nif (!prs.length) return [];\nconst p = prs.at(-1);   // listed newest first; take the oldest waiting\nconst session = ((p.body ?? '').match(/https:\\/\\/claude\\.ai\\/code\\/[\\w\\/-]+/) ?? [])[0] ?? null;\nreturn [{ json: {\n  number: p.number, title: p.title, url: p.html_url, ref: p.head.ref, sha: p.head.sha,\n  nodeId: p.node_id, draft: p.draft, session,\n} }];\n"
       },
       "id": "bebd739b-b441-5aff-9046-54d1c59165c5",
       "name": "Next PR",
@@ -324,7 +325,7 @@
     {
       "parameters": {
         "resume": "timeInterval",
-        "amount": 5,
+        "amount": 2,
         "unit": "minutes"
       },
       "id": "23204868-4e0b-5bc7-9e0f-c51f13697525",
@@ -369,7 +370,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Merge only when the required checks are green on the approved head. The PAT is an\n// admin, and the ruleset's admin bypass would let a merge through on red checks.\nconst REQUIRED = ['kustomize build + kubeconform', 'yamllint', 'gitleaks', 'automerge gate'];\nconst pr = $('Next PR').first().json;\nconst latest = {};\nfor (const r of $input.first().json.check_runs ?? []) {\n  if (!latest[r.name] || r.id > latest[r.name].id) latest[r.name] = r;\n}\nconst bad = [];\nfor (const name of REQUIRED) {\n  const r = latest[name];\n  if (!r) bad.push(`${name}: missing`);\n  else if (r.status !== 'completed' || r.conclusion !== 'success') bad.push(`${name}: ${r.conclusion ?? r.status}`);\n}\nfor (const r of Object.values(latest)) {\n  if (!REQUIRED.includes(r.name) && r.status === 'completed' && !['success', 'skipped', 'neutral'].includes(r.conclusion)) {\n    bad.push(`${r.name}: ${r.conclusion}`);\n  }\n}\nif (bad.length) throw new Error(`PR #${pr.number} approved but not merged, checks not green (${bad.join('; ')}). Merge by hand once they pass: ${pr.url}`);\nreturn [{ json: { number: pr.number, sha: pr.sha } }];\n"
+        "jsCode": "// Merge only when the required checks are green on the approved head. The PAT is an\n// admin, and the ruleset's admin bypass would let a merge through on red checks.\nconst REQUIRED = ['kustomize build + kubeconform', 'yamllint', 'gitleaks', 'automerge gate'];\nconst pr = $('Next PR').first().json;\nconst latest = {};\nfor (const r of $input.first().json.check_runs ?? []) {\n  if (!latest[r.name] || r.id > latest[r.name].id) latest[r.name] = r;\n}\n// Loops back through `Wait for checks` (2 min) while anything is still running,\n// up to ~20 min. A red check fails straight away.\nconst TRIES = 10;\nconst failed = [], running = [];\nfor (const name of REQUIRED) {\n  const r = latest[name];\n  if (!r || r.status !== 'completed') running.push(`${name}: ${r?.status ?? 'not started'}`);\n  // The gate's pre-label run failed by design; its re-run on `labeled` may not exist yet.\n  else if (r.conclusion !== 'success' && name === 'automerge gate' && $runIndex < 3) running.push(`${name}: awaiting re-run`);\n  else if (r.conclusion !== 'success') failed.push(`${name}: ${r.conclusion}`);\n}\nfor (const r of Object.values(latest)) {\n  if (REQUIRED.includes(r.name)) continue;\n  if (r.status !== 'completed') running.push(`${r.name}: ${r.status}`);\n  else if (!['success', 'skipped', 'neutral'].includes(r.conclusion)) failed.push(`${r.name}: ${r.conclusion}`);\n}\nconst stop = why => { throw new Error(`PR #${pr.number} approved but not merged, ${why}. Merge by hand once they pass: ${pr.url}`); };\nif (failed.length) stop(`checks failed (${failed.join('; ')})`);\nif (running.length && $runIndex + 1 >= TRIES) stop(`checks still running after ~${TRIES * 2} min (${running.join('; ')})`);\nreturn [{ json: { state: running.length ? 'running' : 'green', number: pr.number, sha: pr.sha } }];\n"
       },
       "id": "488a4edb-1236-5797-981c-478202b704a5",
       "name": "All green?",
@@ -377,6 +378,40 @@
       "typeVersion": 2,
       "position": [
         2860,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cd73bf52-b33e-56fa-a7dc-bcdac587a7f4",
+              "leftValue": "={{ $json.state === 'running' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "52f58686-deba-5338-8150-207c34907a3a",
+      "name": "Still running?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3080,
         0
       ]
     },
@@ -409,7 +444,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3080,
+        3300,
         0
       ]
     },
@@ -427,7 +462,7 @@
       "type": "n8n-nodes-base.discord",
       "typeVersion": 2,
       "position": [
-        3300,
+        3520,
         0
       ]
     },
@@ -460,7 +495,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1980,
+        2200,
         220
       ]
     },
@@ -490,7 +525,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2200,
+        2420,
         220
       ],
       "onError": "continueRegularOutput"
@@ -509,8 +544,39 @@
       "type": "n8n-nodes-base.discord",
       "typeVersion": 2,
       "position": [
-        2420,
+        2640,
         220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Listing PRs failed (expired PAT, GitHub outage). This runs every 5 min, so post at\n// most once every 6h instead of failing each run into the error workflow.\nconst state = $getWorkflowStaticData('global');\nconst now = Date.now();\nif (now - (state.lastGitHubError ?? 0) < 6 * 36e5) return [];\nstate.lastGitHubError = now;\nconst err = $input.first().json.error;\nreturn [{ json: { content: `⚠️ Alert remediation approval can't list PRs: ${String(err?.message ?? err ?? 'unknown error').slice(0, 300)}. Check the \\`GitHub home-ops\\` token. (Muted for 6h.)`.replace(/@/g, '@\\u200b') } }];\n"
+      },
+      "id": "6d5a868c-f3b0-50fe-9e33-dfea6ae13846",
+      "name": "GitHub error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "operation": "sendLegacy",
+        "content": "={{ $json.content }}",
+        "options": {
+          "username": "Alert Remediation"
+        }
+      },
+      "id": "27ada2c7-6df8-5e93-8122-af6dfdfd835d",
+      "name": "Post GitHub error",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        880,
+        440
       ]
     },
     {
@@ -527,7 +593,7 @@
       "type": "n8n-nodes-base.discord",
       "typeVersion": 2,
       "position": [
-        2640,
+        3300,
         440
       ]
     }
@@ -549,6 +615,13 @@
         [
           {
             "node": "Next PR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GitHub error",
             "type": "main",
             "index": 0
           }
@@ -676,6 +749,24 @@
       "main": [
         [
           {
+            "node": "Still running?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still running?": {
+      "main": [
+        [
+          {
+            "node": "Wait for checks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Merge",
             "type": "main",
             "index": 0
@@ -688,6 +779,17 @@
         [
           {
             "node": "Post merged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub error": {
+      "main": [
+        [
+          {
+            "node": "Post GitHub error",
             "type": "main",
             "index": 0
           }

@@ -123,12 +123,14 @@ opens a PR whenever that digest changes.
 
 `.github/workflows/automerge-gate.yml` runs a check called **`automerge gate`** on
 every PR, and the `main` ruleset requires it. It only has an opinion about Renovate
-PRs that Renovate has marked for automerge, and about `claude/*` branches. Every
-other PR (yours, rollout reverts, manual Renovate PRs) passes in seconds.
+PRs that Renovate has marked for automerge, and about `claude/alert-*` branches.
+Every other PR (yours, rollout reverts, manual Renovate PRs, other Claude Code
+branches) passes in seconds.
 
-A `claude/*` PR (opened by the alert-remediation routine, see `n8n/README.md`) fails
-until it has **`gate-approved`**. n8n adds that label when you press Approve in
-Discord. To merge one by hand, add the label yourself.
+A `claude/alert-*` PR (opened by the alert-remediation routine, see `n8n/README.md`)
+fails until it has **`gate-approved`**. n8n adds that label when you press Approve in
+Discord. To merge one by hand, add the label yourself. A new push to the branch
+removes the label, because the approval was for the old commit.
 
 Renovate's `packageRules` decide what is *eligible* to automerge. The gate is the
 second opinion, and the only thing that reads the release notes. It **fails**, which

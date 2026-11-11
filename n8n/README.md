@@ -58,7 +58,7 @@ Alert remediation approval (every 5 min) → Discord [Approve] [Reject], waits u
 - **Mode:** `MODE` in `Gate` starts at `diagnose`, so the routine reports but never
   pushes. Switch it to `pr` once a few diagnoses look right.
 - **The routine** (prompt and settings) is in `n8n/routines/alert-remediation.md`.
-- **The gate:** `automerge gate` fails every `claude/*` PR until it has
+- **The gate:** `automerge gate` fails every `claude/alert-*` PR until it has
   `gate-approved`, which the Approve button adds.
 - **Approve/Reject links** resume through `/webhook-waiting`, which is behind
   Authentik (`kubernetes/apps/n8n/ingress.yaml`), so clicking one needs an SSO session.
@@ -104,8 +104,8 @@ webhook, Alertmanager's notifications fail and `AlertmanagerFailedToSendAlerts` 
      http://n8n.n8n.svc.cluster.local:5678/webhook/alert-remediation
    ```
 
-   - Running it a second time should do nothing (dedupe is 24h per alertname and
-     namespace). To test again, change `namespace` in the payload.
+   - Running it a second time should do nothing (dedupe is 24h per alertname, namespace,
+     name and container). To test again, change `namespace` in the payload.
 
 ## Import / export
 

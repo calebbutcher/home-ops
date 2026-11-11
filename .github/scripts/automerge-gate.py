@@ -6,8 +6,9 @@ which Renovate has marked for automerge may actually merge without a human.
 Renovate's packageRules (renovate.json) decide what is *eligible*. This gate is the
 second opinion, and it is the only thing that sees the release notes:
 
-  FAIL   a `claude/*` branch (alert-remediation PRs) without `gate-approved` — n8n adds
-         the label when you press Approve in Discord (see n8n/README.md)
+  FAIL   a `claude/alert-*` branch (alert-remediation PRs) without `gate-approved` — n8n
+         adds the label when you press Approve in Discord (see n8n/README.md). A push
+         to one removes the label: the approval was for the old head.
   pass   not a Renovate PR (human PRs, rollout-revert PRs) — the check must be green
          on every PR because it is required by the `main` ruleset
   pass   a Renovate PR that is not marked for automerge — you merge it by hand anyway
@@ -45,7 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from renovate_pr import automerge_enabled, parse_deps, strip_boilerplate  # noqa: E402
 
 RENOVATE = "renovate[bot]"
-CLAUDE_PREFIX = "claude/"
+CLAUDE_PREFIX = "claude/alert-"
 MARKER = "<!-- automerge-gate -->"
 QUARANTINE = ".github/renovate/quarantine.json"
 
@@ -166,6 +167,15 @@ def quarantined(gh, deps):
     return hits
 
 
+def pushed_after_approval():
+    # A `synchronize` event means new commits; `gate-approved` approved the old head.
+    path = os.environ.get("GITHUB_EVENT_PATH")
+    if not path or not os.path.exists(path):
+        return False
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh).get("action") == "synchronize"
+
+
 def evaluate(gh, pr, files, as_automerge=False):
     labels = {lab["name"] for lab in pr["labels"]} | ({"automerge"} if as_automerge else set())
     body = pr.get("body") or ""
@@ -174,6 +184,8 @@ def evaluate(gh, pr, files, as_automerge=False):
     # marked for automerge — the only kind that gets labels and a sticky comment.
     # Before the non-Renovate pass: these PRs are opened under the owner's identity.
     if pr["head"]["ref"].startswith(CLAUDE_PREFIX):
+        if "gate-approved" in labels and pushed_after_approval():
+            return "fail", ["new commits since `gate-approved` — approve it again in Discord"], [], False
         if "gate-approved" in labels:
             return "pass", ["`gate-approved` label — approved by a human"], [], False
         return "fail", [f"`{CLAUDE_PREFIX}*` PR without `gate-approved` — approve it in Discord"], [], False
@@ -263,10 +275,13 @@ def main():
         with open(summary, "a", encoding="utf-8") as fh:
             fh.write(comment(verdict, reasons, matches).replace(MARKER, "") + "\n")
 
+    labels = {lab["name"] for lab in pr["labels"]}
+    if pr["head"]["ref"].startswith(CLAUDE_PREFIX) and "gate-approved" in labels and pushed_after_approval():
+        gh.write("DELETE", f"issues/{args.pr}/labels/gate-approved")
+
     # Only automerge-marked Renovate PRs get labels/comments; everything else is a
     # silent green check.
     if eligible:
-        labels = {lab["name"] for lab in pr["labels"]}
         sticky = next((c for c in gh.paged(f"issues/{args.pr}/comments")
                        if MARKER in (c.get("body") or "")), None)
         if verdict == "fail":
