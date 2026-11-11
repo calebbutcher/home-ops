@@ -5,11 +5,15 @@
 # from SOPS-managed Secrets, so they never appear in git. (An inline
 # `webhook_url_file` config is rejected by the operator's config validator.)
 #
-# Two destinations:
+# Three destinations:
 #
 #   discord    - every real alert. URL from the discord-webhooks Secret.
 #   heartbeat  - the Watchdog dead-man's switch ONLY. URL from the
 #                alertmanager-heartbeat Secret (a healthchecks.io ping URL).
+#   n8n        - a short allowlist of git-fixable alerts, IN ADDITION to Discord.
+#                n8n hands them to a Claude Code routine that may open a draft
+#                PR (see n8n/routines/alert-remediation.md). Bearer token from
+#                the alertmanager-n8n Secret.
 #
 # Why the heartbeat matters: Watchdog is the always-firing alert that certifies
 # the whole pipeline is alive. It used to be dropped — the operator inserts this
@@ -24,8 +28,9 @@
 # Structure note: the parent route below deliberately has NO matchers so it acts
 # as the catch-all, with sub-routes peeling off Watchdog and InfoInhibitor first.
 # Sub-routes are evaluated in order and do not fall through to the parent
-# receiver, so a real alert only ever reaches Discord and Watchdog only ever
-# reaches the heartbeat. alertmanagerConfigMatcherStrategy.type: None keeps the
+# receiver, so a real alert reaches Discord (plus n8n when allowlisted) and
+# Watchdog only ever reaches the heartbeat. Check the tree with
+# `amtool config routes test` against the generated config Secret. alertmanagerConfigMatcherStrategy.type: None keeps the
 # operator from injecting a namespace matcher, so this stays cluster-wide.
 #
 # The chart's base config still provides the stock inhibit_rules.
@@ -59,6 +64,16 @@ spec:
         matchers:
           - name: alertname
             value: InfoInhibitor
+      # Alert remediation. `continue: true` alone would NOT also deliver these to
+      # Discord: the parent receiver only runs when no child matches. The
+      # matcher-less discord route right after it is what keeps them in Discord.
+      - receiver: n8n
+        matchers:
+          - name: alertname
+            matchType: "=~"
+            value: "ContainerOOMKilled|ContainerOOMCrashLooping|ContainerRestartsLooping|FluxHelmReleaseNotReady|FluxKustomizationNotReady"
+        continue: true
+      - receiver: discord
   receivers:
     - name: discord
       discordConfigs:
@@ -79,3 +94,16 @@ spec:
           sendResolved: false
 
     - name: drop
+
+    - name: n8n
+      webhookConfigs:
+        - url: http://n8n.n8n.svc.cluster.local:5678/webhook/alert-remediation
+          httpConfig:
+            authorization:
+              type: Bearer
+              credentials:
+                name: alertmanager-n8n
+                key: token
+          # Firing only: n8n acts once per alert group, a resolve has nothing to fix.
+          sendResolved: false
+          maxAlerts: 20

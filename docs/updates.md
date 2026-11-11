@@ -123,8 +123,12 @@ opens a PR whenever that digest changes.
 
 `.github/workflows/automerge-gate.yml` runs a check called **`automerge gate`** on
 every PR, and the `main` ruleset requires it. It only has an opinion about Renovate
-PRs that Renovate has marked for automerge. Every other PR (yours, rollout reverts,
-manual Renovate PRs) passes in seconds.
+PRs that Renovate has marked for automerge, and about `claude/*` branches. Every
+other PR (yours, rollout reverts, manual Renovate PRs) passes in seconds.
+
+A `claude/*` PR (opened by the alert-remediation routine, see `n8n/README.md`) fails
+until it has **`gate-approved`**. n8n adds that label when you press Approve in
+Discord. To merge one by hand, add the label yourself.
 
 Renovate's `packageRules` decide what is *eligible* to automerge. The gate is the
 second opinion, and the only thing that reads the release notes. It **fails**, which
@@ -163,7 +167,8 @@ checking the gate against old PRs.
 ```sh
 # Labels the gate, Renovate and rollout-revert use
 for l in automerge:0e8a16 needs-planning:d93f0b quarantined:b60205 \
-         gate-approved:5319e7 revert:b60205 rollout-drill:c5def5; do
+         gate-approved:5319e7 revert:b60205 rollout-drill:c5def5 \
+         claude-announced:c5def5; do
   gh label create "${l%%:*}" --color "${l##*:}" --force
 done
 

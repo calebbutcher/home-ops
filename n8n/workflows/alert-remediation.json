@@ -1,0 +1,282 @@
+{
+  "id": "alertRemedMain01",
+  "name": "Alert remediation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alert-remediation",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "0279a654-73d9-585e-bbf8-43e72260afb7",
+      "name": "Alertmanager",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "0dfcc1f7-4829-586d-a8bf-0f983846e58a"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Allowlist (again — Alertmanager already filters), dedupe and a rate cap for one\n// Alertmanager notification group. State is only written by `Remember`, after a\n// successful fire, so a failed fire is retried on the group's next notification.\n// Static data only persists on production (published) runs.\nconst ALLOW = new Set([\n  'ContainerOOMKilled', 'ContainerOOMCrashLooping', 'ContainerRestartsLooping',\n  'FluxHelmReleaseNotReady', 'FluxKustomizationNotReady',\n]);\n// 'diagnose' = the routine reports only; 'pr' = it may open a draft PR.\nconst MODE = 'diagnose';\n// From the routine's API trigger panel (claude.ai/code/routines). The token is the\n// `Claude routine token` credential on the Fire routine node, never here.\nconst ROUTINE_URL = 'https://api.anthropic.com/v1/claude_code/routines/trig_REPLACE_ME/fire';\nconst DEDUPE_HOURS = 24;\nconst MAX_PER_HOUR = 6;   // routine limit is 30/h; this keeps a storm off the 5h usage window\n\nconst body = $input.first().json.body ?? {};\nif (body.status !== 'firing') return [];\nconst alerts = (body.alerts ?? []).filter(a => a.status === 'firing' && ALLOW.has(a.labels?.alertname));\nif (!alerts.length) return [];\n\nconst g = body.groupLabels ?? {};\nconst key = `${g.alertname ?? alerts[0].labels.alertname}|${g.namespace ?? ''}`;\nconst state = $getWorkflowStaticData('global');\nconst now = Date.now();\nif (now - (state.fired?.[key] ?? 0) < DEDUPE_HOURS * 36e5) return [];\nconst recent = (state.recent ?? []).filter(t => now - t < 36e5);\nif (recent.length >= MAX_PER_HOUR) {\n  throw new Error(`Rate cap (${MAX_PER_HOUR}/h) reached, skipped ${key}`);\n}\n\nreturn [{ json: {\n  key, mode: MODE, routineUrl: ROUTINE_URL, groupLabels: g,\n  alerts: alerts.slice(0, 10).map(a => ({\n    labels: a.labels, annotations: a.annotations, startsAt: a.startsAt,\n    generatorURL: a.generatorURL, fingerprint: a.fingerprint,\n  })),\n} }];\n"
+      },
+      "id": "dbc64c28-233e-5320-b4fb-65f7fabda8ba",
+      "name": "Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Evidence to gather. Label values come from alerts, so only plain values are\n// spliced into PromQL/LogQL.\nconst g = $input.first().json;\nconst safe = v => (typeof v === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(v)) ? v : null;\nconst a0 = g.alerts[0].labels;\nconst ns = safe(a0.namespace);\nconst THANOS = 'http://thanos-query-frontend.monitoring.svc.cluster.local:9090/api/v1/query';\nconst LOKI = 'http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/query_range';\nconst out = [];\nconst prom = (label, query) => out.push({ json: { kind: 'prom', label, url: THANOS, params: { query } } });\nconst end = new Date();\nconst loki = (label, query, limit) => out.push({ json: { kind: 'loki', label, url: LOKI, params: {\n  query, limit, direction: 'backward',\n  start: new Date(end - 36e5).toISOString(), end: end.toISOString(),\n} } });\n\n// The rule's own expression, from Prometheus' generatorURL (?g0.expr=...).\ntry {\n  const expr = new URL(g.alerts[0].generatorURL).searchParams.get('g0.expr');\n  if (expr) prom('alert expression, evaluated now', expr);\n} catch {}\n\nconst containers = [...new Set(g.alerts.map(a => safe(a.labels.container)).filter(Boolean))].slice(0, 3);\nif (ns) for (const c of containers) {\n  const sel = `namespace=\"${ns}\",container=\"${c}\"`;\n  prom(`${c}: peak working set, 6h`, `max by (pod) (max_over_time(container_memory_working_set_bytes{${sel}}[6h]))`);\n  prom(`${c}: memory limit`, `max by (pod) (kube_pod_container_resource_limits{${sel},resource=\"memory\"})`);\n  prom(`${c}: memory request`, `max by (pod) (kube_pod_container_resource_requests{${sel},resource=\"memory\"})`);\n  prom(`${c}: restarts, 6h`, `sum by (pod) (increase(kube_pod_container_status_restarts_total{${sel}}[6h]))`);\n  prom(`${c}: last termination reason`, `kube_pod_container_status_last_terminated_reason{${sel}} == 1`);\n}\n\nconst FILTER = '|~ \"(?i)(error|fail|fatal|panic|oom|killed|back-?off|exceeded|denied|timeout|invalid)\"';\nif (ns) loki(`pod logs + events in ${ns}, 1h, filtered`, `{namespace=\"${ns}\"} ${FILTER}`, 150);\nconst name = safe(a0.name);\nif (name && a0.alertname.startsWith('Flux')) {\n  loki(`flux-system controller logs mentioning ${name}, 1h`, `{namespace=\"flux-system\"} |= \"${name}\"`, 60);\n}\nif (!out.length) prom('no evidence query applies', 'vector(0)');\nreturn out;\n"
+      },
+      "id": "b99a5b3d-83d3-5a09-9ea1-a39d35e2e797",
+      "name": "Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify($json.params) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "1c1b9222-8926-5131-b6bd-024927bd38ab",
+      "name": "Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/commits?per_page=8&path=kubernetes/apps/' + encodeURIComponent($('Gate').first().json.alerts[0].labels.namespace ?? '') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "21168d68-2428-5294-ae2b-13039d2a1f4e",
+      "name": "Recent commits",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// The routine's input. It goes to Anthropic and its contents may end up in a PUBLIC\n// PR, so log lines are redacted and everything is capped below the 65,536-char limit.\nconst LIMIT = 60000;\nconst g = $('Gate').first().json;\nconst qs = $('Queries').all().map(i => i.json);\nconst rs = $('Query').all().map(i => i.json);\n\nconst REDACT = [\n  [/\\b(?:sk-ant-[\\w-]{10,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\\w{20,}|AKIA[0-9A-Z]{16}|xox[abpr]-[\\w-]{10,})/g, '[REDACTED]'],\n  [/\\beyJ[\\w-]{8,}\\.[\\w-]{8,}\\.[\\w-]{8,}/g, '[REDACTED-JWT]'],\n  [/\\b(bearer|basic)\\s+[\\w.~+\\/=-]{8,}/gi, '$1 [REDACTED]'],\n  [/((?:pass(?:word|wd)?|secret|token|api[_-]?key|access[_-]?key|authorization|cookie|session)[\"']?\\s*[:=]\\s*)(\"[^\"]*\"|'[^']*'|\\S+)/gi, '$1[REDACTED]'],\n  [/(:\\/\\/)[^\\s\\/:@]+:[^\\s\\/@]+@/g, '$1[REDACTED]@'],\n];\nconst redact = s => REDACT.reduce((t, [re, to]) => t.replace(re, to), String(s));\n\nconst metrics = [], logs = [];\nqs.forEach((q, i) => {\n  const r = rs[i] ?? {};\n  if (q.kind === 'prom') {\n    const res = r.data?.result ?? [];\n    const lines = r.error ? [`(query failed: ${r.error.message ?? r.error})`]\n      : res.length ? res.slice(0, 20).map(s => {\n          const { __name__, ...m } = s.metric ?? {};\n          return `${JSON.stringify(m)} ${s.value?.[1]}`;\n        })\n      : ['(no series)'];\n    metrics.push(`## ${q.label}\\nquery: ${q.params.query}\\n${lines.join('\\n')}`);\n  } else {\n    const rows = (r.data?.result ?? []).flatMap(s =>\n      (s.values ?? []).map(([ts, line]) => [ts, s.stream?.pod ?? s.stream?.job ?? '', line]));\n    rows.sort((a, b) => (a[0] < b[0] ? 1 : -1));\n    const lines = r.error ? [`(query failed: ${r.error.message ?? r.error})`]\n      : rows.length ? rows.map(([ts, src, line]) =>\n          `${new Date(Number(ts) / 1e6).toISOString()} ${src} ${redact(line).slice(0, 400)}`)\n      : ['(no lines)'];\n    logs.push(`## ${q.label}\\nquery: ${q.params.query}\\n${lines.join('\\n')}`);\n  }\n});\n\nconst commits = $('Recent commits').all().map(i => i.json).filter(c => c.sha)\n  .map(c => `${c.sha.slice(0, 7)} ${c.commit?.author?.date ?? ''} ${(c.commit?.message ?? '').split('\\n')[0]}`);\n\nconst head = [\n  `MODE: ${g.mode}`,\n  `ALERT GROUP: ${g.key}`,\n  '',\n  '--- ALERTS (Alertmanager webhook) ---',\n  redact(JSON.stringify(g.alerts, null, 2)),\n  '',\n  '--- METRICS (Thanos, instant) ---',\n  metrics.join('\\n\\n'),\n  '',\n  `--- RECENT COMMITS (kubernetes/apps/${g.alerts[0].labels.namespace ?? '?'}) ---`,\n  commits.join('\\n') || '(none found)',\n  '',\n  '--- LOGS + EVENTS (Loki, newest first, secrets redacted) ---',\n].join('\\n');\nlet text = head + '\\n' + logs.join('\\n\\n');\nif (text.length > LIMIT) text = text.slice(0, LIMIT - 40) + '\\n[... truncated to fit the payload limit]';\nreturn [{ json: { text, chars: text.length } }];\n"
+      },
+      "id": "43ad6f43-a996-5ea0-b622-4b5b54ffc23f",
+      "name": "Build payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Gate').first().json.routineUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2026-10-21"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fe6ee763-f85b-568f-9799-e07d27a4a618",
+      "name": "Fire routine",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Records the fire so the same group is not re-sent for 24h and counts toward the cap.\nconst g = $('Gate').first().json;\nconst state = $getWorkflowStaticData('global');\nconst now = Date.now();\nstate.fired = Object.fromEntries(Object.entries(state.fired ?? {}).filter(([, t]) => now - t < 7 * 864e5));\nstate.fired[g.key] = now;\nstate.recent = [...(state.recent ?? []).filter(t => now - t < 36e5), now];\nreturn [{ json: { key: g.key, mode: g.mode, session: $input.first().json.claude_code_session_url ?? null } }];\n"
+      },
+      "id": "1cc4c358-8158-59b8-a4cb-dd12cd5a982e",
+      "name": "Remember",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "operation": "sendLegacy",
+        "content": "={{ ('🔎 **' + $json.key.split('|')[0] + '**' + ($json.key.split('|')[1] ? ' in `' + $json.key.split('|')[1] + '`' : '') + ' — Claude is investigating (' + $json.mode + ')').replace(/@/g, '@\\u200b') + '\\n' + ($json.session ?? '(no session URL returned)') }}",
+        "options": {
+          "username": "Alert Remediation"
+        }
+      },
+      "id": "79580221-50a1-5837-8dc9-7bdf4cc60cac",
+      "name": "Post to Discord",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Alertmanager": {
+      "main": [
+        [
+          {
+            "node": "Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate": {
+      "main": [
+        [
+          {
+            "node": "Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queries": {
+      "main": [
+        [
+          {
+            "node": "Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query": {
+      "main": [
+        [
+          {
+            "node": "Recent commits",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recent commits": {
+      "main": [
+        [
+          {
+            "node": "Build payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build payload": {
+      "main": [
+        [
+          {
+            "node": "Fire routine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fire routine": {
+      "main": [
+        [
+          {
+            "node": "Remember",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remember": {
+      "main": [
+        [
+          {
+            "node": "Post to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "errorWorkflow": "alertRemedErrs01",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}

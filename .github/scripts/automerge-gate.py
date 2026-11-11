@@ -6,6 +6,8 @@ which Renovate has marked for automerge may actually merge without a human.
 Renovate's packageRules (renovate.json) decide what is *eligible*. This gate is the
 second opinion, and it is the only thing that sees the release notes:
 
+  FAIL   a `claude/*` branch (alert-remediation PRs) without `gate-approved` — n8n adds
+         the label when you press Approve in Discord (see n8n/README.md)
   pass   not a Renovate PR (human PRs, rollout-revert PRs) — the check must be green
          on every PR because it is required by the `main` ruleset
   pass   a Renovate PR that is not marked for automerge — you merge it by hand anyway
@@ -43,6 +45,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from renovate_pr import automerge_enabled, parse_deps, strip_boilerplate  # noqa: E402
 
 RENOVATE = "renovate[bot]"
+CLAUDE_PREFIX = "claude/"
 MARKER = "<!-- automerge-gate -->"
 QUARANTINE = ".github/renovate/quarantine.json"
 
@@ -169,6 +172,11 @@ def evaluate(gh, pr, files, as_automerge=False):
 
     # Returns (verdict, reasons, matched lines, eligible). `eligible` = a Renovate PR
     # marked for automerge — the only kind that gets labels and a sticky comment.
+    # Before the non-Renovate pass: these PRs are opened under the owner's identity.
+    if pr["head"]["ref"].startswith(CLAUDE_PREFIX):
+        if "gate-approved" in labels:
+            return "pass", ["`gate-approved` label — approved by a human"], [], False
+        return "fail", [f"`{CLAUDE_PREFIX}*` PR without `gate-approved` — approve it in Discord"], [], False
     if pr["user"]["login"] != RENOVATE:
         return "pass", ["not a Renovate PR"], [], False
     if "automerge" not in labels and not automerge_enabled(body):

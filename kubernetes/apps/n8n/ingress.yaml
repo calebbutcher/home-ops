@@ -46,6 +46,11 @@ spec:
 # forward-auth middleware here. Reuses the n8n-tls cert minted by the UI
 # Ingress above (no cert-manager annotation -> no duplicate Certificate).
 #
+# /webhook-waiting (resume links for Wait / Send-and-Wait nodes, e.g. the
+# alert-remediation Approve/Reject buttons) is deliberately NOT here, so those
+# links need an Authentik session. Traefik's Prefix is a plain string prefix
+# (`/webhook` also matches `/webhook-waiting`), hence the trailing slashes.
+#
 # NOTE: /rest (the editor's own backend) intentionally stays under the gate
 # above. If a Form Trigger is meant only for authenticated users, move /form*
 # back under the gated Ingress instead.
@@ -84,21 +89,14 @@ spec:
     - host: n8n.int.nerdbox.dev
       http:
         paths:
-          - path: /webhook
+          - path: /webhook/
             pathType: Prefix
             backend:
               service:
                 name: n8n
                 port:
                   number: 5678
-          - path: /webhook-test
-            pathType: Prefix
-            backend:
-              service:
-                name: n8n
-                port:
-                  number: 5678
-          - path: /webhook-waiting
+          - path: /webhook-test/
             pathType: Prefix
             backend:
               service:
