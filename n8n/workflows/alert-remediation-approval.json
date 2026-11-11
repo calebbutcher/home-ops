@@ -129,11 +129,12 @@
         880,
         0
       ],
-      "alwaysOutputData": true
+      "alwaysOutputData": true,
+      "executeOnce": true
     },
     {
       "parameters": {
-        "jsCode": "const pr = $('Next PR').first().json;\nconst files = $input.all().map(i => i.json).filter(f => f.filename);\nconst list = files.slice(0, 15).map(f => `• \\`${f.filename}\\` (+${f.additions} −${f.deletions})`);\nif (files.length > 15) list.push(`• … and ${files.length - 15} more`);\nconst msg = [\n  `🛠️ **Claude opened PR #${pr.number}:** ${pr.title}`.replace(/@/g, '@​'),\n  pr.url,\n  ...list,\n  pr.session ? `Session: ${pr.session}` : null,\n  '',\n  'Approve = mark ready, add `gate-approved`, squash-merge once every check is green.',\n  'Reject = close the PR and delete the branch. No answer in 24h = left open.',\n].filter(l => l !== null).join('\\n');\nreturn [{ json: { message: msg.slice(0, 1900) } }];\n"
+        "jsCode": "const pr = $('Next PR').first().json;\nconst files = $input.all().map(i => i.json).filter(f => f.filename);\nconst list = files.slice(0, 15).map(f => `• \\`${f.filename}\\` (+${f.additions} −${f.deletions})`);\nif (files.length > 15) list.push(`• … and ${files.length - 15} more`);\nconst msg = [\n  `🛠️ **Claude opened PR #${pr.number}:** ${pr.title}`.replace(/@/g, '@​'),\n  pr.url,\n  ...list,\n  pr.session ? `Session: ${pr.session}` : null,\n  '',\n  `Approve = approve commit \\`${pr.sha.slice(0, 7)}\\`, mark ready, squash-merge once every check is green.`,\n  'Reject = close the PR and delete the branch. No answer in 24h = left open.',\n].filter(l => l !== null).join('\\n');\nreturn [{ json: { message: msg.slice(0, 1900) } }];\n"
       },
       "id": "c6526276-43c9-5bc7-9e1a-ca26fade3a02",
       "name": "Message",
@@ -185,7 +186,8 @@
       "position": [
         1320,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -257,6 +259,103 @@
     },
     {
       "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/pulls/' + $('Next PR').first().json.number }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4df9043f-b0f6-56a0-90f1-f4b4d85d50a8",
+      "name": "Current PR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "87ec136a-ee29-5c69-a78c-1b1605243c1d",
+              "leftValue": "={{ $json.head?.sha === $('Next PR').first().json.sha }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "38f98672-20e3-5398-8f53-299f02498788",
+      "name": "Head unchanged?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/statuses/' + $('Next PR').first().json.sha }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"state\": \"success\", \"context\": \"alert-remediation/approved\", \"description\": \"Approved in Discord\"}",
+        "options": {}
+      },
+      "id": "03126efa-09ee-5293-a366-b2d6ba92db5f",
+      "name": "Approve commit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        0
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "https://api.github.com/graphql",
         "authentication": "predefinedCredentialType",
@@ -284,7 +383,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1980,
+        2640,
         0
       ],
       "onError": "continueRegularOutput"
@@ -318,7 +417,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2200,
+        2860,
         0
       ]
     },
@@ -333,10 +432,11 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        2420,
+        3080,
         0
       ],
-      "webhookId": "5bd5bbc8-184f-5752-ad10-87001499d160"
+      "webhookId": "5bd5bbc8-184f-5752-ad10-87001499d160",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -364,7 +464,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2640,
+        3300,
         0
       ]
     },
@@ -377,7 +477,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2860,
+        3520,
         0
       ]
     },
@@ -411,7 +511,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        3080,
+        3740,
         0
       ]
     },
@@ -444,7 +544,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3300,
+        3960,
         0
       ]
     },
@@ -462,7 +562,7 @@
       "type": "n8n-nodes-base.discord",
       "typeVersion": 2,
       "position": [
-        3520,
+        4180,
         0
       ]
     },
@@ -495,7 +595,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2200,
+        2860,
         220
       ]
     },
@@ -525,7 +625,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2420,
+        3080,
         220
       ],
       "onError": "continueRegularOutput"
@@ -544,7 +644,7 @@
       "type": "n8n-nodes-base.discord",
       "typeVersion": 2,
       "position": [
-        2640,
+        3300,
         220
       ]
     },
@@ -581,6 +681,117 @@
     },
     {
       "parameters": {
+        "method": "DELETE",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/issues/' + $('Next PR').first().json.number + '/labels/claude-announced' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "04ad7c3d-1631-5978-be3a-3c614dfa9fba",
+      "name": "Re-arm",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        660
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "operation": "sendLegacy",
+        "content": "={{ '🔁 PR #' + $('Next PR').first().json.number + ' changed after it was announced, so nothing was approved. You will be asked again for the new commit.' }}",
+        "options": {
+          "username": "Alert Remediation"
+        }
+      },
+      "id": "c6858d16-e468-5748-ac42-03529eafed04",
+      "name": "Post re-ask",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/issues/' + $('Next PR').first().json.number + '/labels/claude-announced' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dad94faa-ad26-5897-a7d4-ff335df136fa",
+      "name": "Un-announce",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        660
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// The Discord prompt couldn't be sent (bot token, IDs, outage). The PR was\n// un-announced so the next poll retries; post about it at most every 6h.\nconst state = $getWorkflowStaticData('global');\nconst now = Date.now();\nif (now - (state.lastAskError ?? 0) < 6 * 36e5) return [];\nstate.lastAskError = now;\nconst err = $('Ask in Discord').first().json.error;\nreturn [{ json: { content: `⚠️ Couldn't post the Discord approval prompt for PR #${$('Next PR').first().json.number}: ${String(err?.message ?? err ?? 'unknown error').slice(0, 300)}. Retrying every 5 min. Check the \\`Discord alert bot\\` credential and the IDs in \\`Ask in Discord\\`. (Muted for 6h.)`.replace(/@/g, '@\\u200b') } }];\n"
+      },
+      "id": "c5f5e47d-ea65-5b3d-b65a-18375ca1ed7c",
+      "name": "Ask failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "operation": "sendLegacy",
+        "content": "={{ $json.content }}",
+        "options": {
+          "username": "Alert Remediation"
+        }
+      },
+      "id": "195e95e1-ee28-5450-a2b5-81ce2b092c5c",
+      "name": "Post ask failed",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        880
+      ]
+    },
+    {
+      "parameters": {
         "authentication": "webhook",
         "operation": "sendLegacy",
         "content": "={{ '⏳ No answer in 24h on PR #' + $('Next PR').first().json.number + ', left open. Merge it in GitHub, or remove the `claude-announced` label to be asked again. ' + $('Next PR').first().json.url }}",
@@ -593,7 +804,7 @@
       "type": "n8n-nodes-base.discord",
       "typeVersion": 2,
       "position": [
-        3300,
+        5060,
         440
       ]
     }
@@ -680,6 +891,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Un-announce",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -687,7 +905,7 @@
       "main": [
         [
           {
-            "node": "Mark ready",
+            "node": "Current PR",
             "type": "main",
             "index": 0
           }
@@ -695,6 +913,79 @@
         [
           {
             "node": "Rejected?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Current PR": {
+      "main": [
+        [
+          {
+            "node": "Head unchanged?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Head unchanged?": {
+      "main": [
+        [
+          {
+            "node": "Approve commit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Re-arm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approve commit": {
+      "main": [
+        [
+          {
+            "node": "Mark ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-arm": {
+      "main": [
+        [
+          {
+            "node": "Post re-ask",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Un-announce": {
+      "main": [
+        [
+          {
+            "node": "Ask failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask failed": {
+      "main": [
+        [
+          {
+            "node": "Post ask failed",
             "type": "main",
             "index": 0
           }

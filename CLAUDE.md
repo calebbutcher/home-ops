@@ -28,4 +28,4 @@ A k3s homelab that Flux runs from this repository. **This repository is public.*
 
 CI (`.github/workflows/validate.yml`) runs `kustomize build` + kubeconform, yamllint
 (`.yamllint.yaml`) and gitleaks. The `automerge gate` check also blocks `claude/alert-*` PRs
-until they have the `gate-approved` label.
+until their head commit is approved in Discord.

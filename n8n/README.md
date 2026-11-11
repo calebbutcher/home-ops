@@ -48,7 +48,8 @@ Alertmanager ─(allowlisted alerts, bearer token)─▶ Alert remediation
    → Thanos / Loki / recent commits → redacted payload → routine /fire → Discord "investigating"
 routine (cloud, repo only) → diagnosis, or a draft PR on claude/alert-*
 Alert remediation approval (every 5 min) → Discord [Approve] [Reject], waits up to 24h
-   Approve → mark ready + `gate-approved` → required checks green → squash-merge
+   Approve → `alert-remediation/approved` status on the shown commit → mark ready
+             + `gate-approved` → required checks green → squash-merge (pinned to that commit)
    Reject  → close PR + delete branch
 ```
 
@@ -58,8 +59,9 @@ Alert remediation approval (every 5 min) → Discord [Approve] [Reject], waits u
 - **Mode:** `MODE` in `Gate` starts at `diagnose`, so the routine reports but never
   pushes. Switch it to `pr` once a few diagnoses look right.
 - **The routine** (prompt and settings) is in `n8n/routines/alert-remediation.md`.
-- **The gate:** `automerge gate` fails every `claude/alert-*` PR until it has
-  `gate-approved`, which the Approve button adds.
+- **The gate:** `automerge gate` fails every `claude/alert-*` PR until its head commit
+  has the `alert-remediation/approved` status that the Approve button sets. A new push
+  needs a new approval, and n8n asks again (see `docs/updates.md`).
 - **Approve/Reject links** resume through `/webhook-waiting`, which is behind
   Authentik (`kubernetes/apps/n8n/ingress.yaml`), so clicking one needs an SSO session.
 
@@ -78,7 +80,7 @@ webhook, Alertmanager's notifications fail and `AlertmanagerFailedToSendAlerts` 
      `Ask in Discord` node.
 2. **GitHub**
    - Create a fine-grained PAT for `home-ops` only, with Contents, Pull requests and
-     Issues read/write, and Checks and Metadata read. Save it as a **GitHub** credential
+     Issues and Commit statuses read/write, and Checks and Metadata read. Save it as a **GitHub** credential
      named `GitHub home-ops`.
    - Create the `claude-announced` label (command in `docs/updates.md`).
 3. **Routine**

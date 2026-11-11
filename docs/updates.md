@@ -128,9 +128,18 @@ Every other PR (yours, rollout reverts, manual Renovate PRs, other Claude Code
 branches) passes in seconds.
 
 A `claude/alert-*` PR (opened by the alert-remediation routine, see `n8n/README.md`)
-fails until it has **`gate-approved`**. n8n adds that label when you press Approve in
-Discord. To merge one by hand, add the label yourself. A new push to the branch
-removes the label, because the approval was for the old commit.
+fails until its **head commit** has a successful `alert-remediation/approved` status.
+n8n sets that status on the commit it showed you when you press Approve in Discord,
+then adds `gate-approved` to re-run the gate. Any new push needs a new approval: the
+gate drops `gate-approved` and `claude-announced`, and n8n asks again. The gate
+script runs from the base branch, so a PR can't change the gate that judges it.
+
+To approve one by hand, set the status and re-run the gate (add `gate-approved`):
+
+```sh
+gh api repos/calebbutcher/home-ops/statuses/<head-sha> \
+  -f state=success -f context=alert-remediation/approved -f description="Approved by hand"
+```
 
 Renovate's `packageRules` decide what is *eligible* to automerge. The gate is the
 second opinion, and the only thing that reads the release notes. It **fails**, which
