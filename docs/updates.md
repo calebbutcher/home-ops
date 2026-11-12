@@ -123,8 +123,23 @@ opens a PR whenever that digest changes.
 
 `.github/workflows/automerge-gate.yml` runs a check called **`automerge gate`** on
 every PR, and the `main` ruleset requires it. It only has an opinion about Renovate
-PRs that Renovate has marked for automerge. Every other PR (yours, rollout reverts,
-manual Renovate PRs) passes in seconds.
+PRs that Renovate has marked for automerge, and about `claude/alert-*` branches.
+Every other PR (yours, rollout reverts, manual Renovate PRs, other Claude Code
+branches) passes in seconds.
+
+A `claude/alert-*` PR (opened by the alert-remediation routine, see `n8n/README.md`)
+fails until its **head commit** has a successful `alert-remediation/approved` status.
+n8n sets that status on the commit it showed you when you press Approve in Discord,
+then adds `gate-approved` to re-run the gate. Any new push needs a new approval: the
+gate drops `gate-approved` and `claude-announced`, and n8n asks again. The gate
+script runs from the base branch, so a PR can't change the gate that judges it.
+
+To approve one by hand, set the status and re-run the gate (add `gate-approved`):
+
+```sh
+gh api repos/calebbutcher/home-ops/statuses/<head-sha> \
+  -f state=success -f context=alert-remediation/approved -f description="Approved by hand"
+```
 
 Renovate's `packageRules` decide what is *eligible* to automerge. The gate is the
 second opinion, and the only thing that reads the release notes. It **fails**, which
@@ -163,7 +178,8 @@ checking the gate against old PRs.
 ```sh
 # Labels the gate, Renovate and rollout-revert use
 for l in automerge:0e8a16 needs-planning:d93f0b quarantined:b60205 \
-         gate-approved:5319e7 revert:b60205 rollout-drill:c5def5; do
+         gate-approved:5319e7 revert:b60205 rollout-drill:c5def5 \
+         claude-announced:c5def5; do
   gh label create "${l%%:*}" --color "${l##*:}" --force
 done
 

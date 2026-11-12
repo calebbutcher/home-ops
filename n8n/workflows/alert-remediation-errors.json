@@ -1,0 +1,52 @@
+{
+  "id": "alertRemedErrs01",
+  "name": "Alert remediation errors",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "13689851-43dd-539a-acca-4f15fe2eaca9",
+      "name": "On error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "operation": "sendLegacy",
+        "content": "={{ '⚠️ **' + ($json.workflow?.name ?? 'workflow') + '** failed at **' + ($json.execution?.lastNodeExecuted ?? '?') + '**: ' + String($json.execution?.error?.message ?? 'unknown error').replace(/@/g, '@\\u200b').slice(0, 1500) + ($json.execution?.url ? '\\n' + $json.execution.url : '') }}",
+        "options": {
+          "username": "Alert Remediation"
+        }
+      },
+      "id": "32389fd4-51db-5646-893a-a53a4a0ed16a",
+      "name": "Post to Discord",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "On error": {
+      "main": [
+        [
+          {
+            "node": "Post to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC"
+  }
+}

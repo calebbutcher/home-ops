@@ -24,6 +24,7 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
+  statuses: read  # alert-remediation approvals are commit statuses
 
 jobs:
   gate:
@@ -31,7 +32,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # The script comes from the base branch: a PR must not be able to edit the
+      # gate that judges it. (Gate changes take effect once merged.)
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
 
       # The PR body is untrusted text: everything reaches the script via env, never
       # via ${{ }} interpolation inside `run:`.

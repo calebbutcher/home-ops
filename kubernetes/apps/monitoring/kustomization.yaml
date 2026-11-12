@@ -13,6 +13,7 @@ resources:
   - loki-s3.sops.yaml
   - discord-webhooks.sops.yaml
   - alertmanager-heartbeat.sops.yaml
+  - alertmanager-n8n.sops.yaml
   - grafana-ingress.yaml
   - kube-prometheus-stack/helmrelease.yaml
   - kube-prometheus-stack/alertmanagerconfig.yaml

@@ -1,0 +1,1137 @@
+{
+  "id": "alertRemedAppr01",
+  "name": "Alert remediation approval",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "311491bf-4390-55c9-abb8-91e6b8a4c633",
+      "name": "Every 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.github.com/repos/calebbutcher/home-ops/pulls?state=open&per_page=100&sort=created&direction=desc",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9513e0d6-65fd-5b0c-a651-42a0f10c1093",
+      "name": "Open PRs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// One PR per poll: Send-and-Wait parks this execution until you answer, so the\n// `claude-announced` label (added next) is the ledger, not static data, which is\n// only saved when an execution finishes.\nconst prs = $input.all().map(i => i.json).filter(p =>\n  p?.head?.ref?.startsWith('claude/alert-') &&\n  p.head.repo?.full_name === 'calebbutcher/home-ops' &&\n  !(p.labels ?? []).some(l => l.name === 'claude-announced'));\nif (!prs.length) return [];\nconst p = prs.at(-1);   // listed newest first; take the oldest waiting\nconst session = ((p.body ?? '').match(/https:\\/\\/claude\\.ai\\/code\\/[\\w\\/-]+/) ?? [])[0] ?? null;\nreturn [{ json: {\n  number: p.number, title: p.title, url: p.html_url, ref: p.head.ref, sha: p.head.sha,\n  nodeId: p.node_id, draft: p.draft, session,\n} }];\n"
+      },
+      "id": "bebd739b-b441-5aff-9046-54d1c59165c5",
+      "name": "Next PR",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/issues/' + $json.number + '/labels' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"labels\": [\"claude-announced\"]}",
+        "options": {}
+      },
+      "id": "0c47f09e-8067-5306-b82c-c6a6c5c53288",
+      "name": "Mark announced",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/pulls/' + $('Next PR').first().json.number + '/files?per_page=100' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5068cdc9-bb19-5f4d-b89c-307470ca08c7",
+      "name": "PR files",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const pr = $('Next PR').first().json;\nconst files = $input.all().map(i => i.json).filter(f => f.filename);\nconst list = files.slice(0, 15).map(f => `• \\`${f.filename}\\` (+${f.additions} −${f.deletions})`);\nif (files.length > 15) list.push(`• … and ${files.length - 15} more`);\nconst msg = [\n  `🛠️ **Claude opened PR #${pr.number}:** ${pr.title}`.replace(/@/g, '@​'),\n  pr.url,\n  ...list,\n  pr.session ? `Session: ${pr.session}` : null,\n  '',\n  `Approve = approve commit \\`${pr.sha.slice(0, 7)}\\`, mark ready, squash-merge once every check is green.`,\n  'Reject = close the PR and delete the branch. No answer in 24h = left open.',\n].filter(l => l !== null).join('\\n');\nreturn [{ json: { message: msg.slice(0, 1900) } }];\n"
+      },
+      "id": "c6526276-43c9-5bc7-9e1a-ca26fade3a02",
+      "name": "Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendAndWait",
+        "guildId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_GUILD_ID"
+        },
+        "sendTo": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_CHANNEL_ID"
+        },
+        "message": "={{ $json.message }}",
+        "responseType": "approval",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double",
+            "approveLabel": "✅ Approve & merge",
+            "disapproveLabel": "❌ Reject"
+          }
+        },
+        "options": {
+          "limitWaitTime": {
+            "values": {
+              "limitType": "afterTimeInterval",
+              "resumeAmount": 24,
+              "resumeUnit": "hours"
+            }
+          }
+        }
+      },
+      "id": "2e32d232-de1f-5517-955a-cf937fdb034e",
+      "name": "Ask in Discord",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e4d5ac20-02be-5a6f-8a28-0f6d624cf15d",
+              "leftValue": "={{ $json.data?.approved === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "aca8371d-bc36-53f3-943b-9703fcd435c3",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d04f4398-2456-561e-bfa7-3af94a7624cf",
+              "leftValue": "={{ $json.data?.approved === false }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0ee5368d-6c54-5cf4-a2c7-fdbafc118713",
+      "name": "Rejected?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/pulls/' + $('Next PR').first().json.number }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4df9043f-b0f6-56a0-90f1-f4b4d85d50a8",
+      "name": "Current PR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "87ec136a-ee29-5c69-a78c-1b1605243c1d",
+              "leftValue": "={{ $json.head?.sha === $('Next PR').first().json.sha }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "38f98672-20e3-5398-8f53-299f02498788",
+      "name": "Head unchanged?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/statuses/' + $('Next PR').first().json.sha }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"state\": \"success\", \"context\": \"alert-remediation/approved\", \"description\": \"Approved in Discord\"}",
+        "options": {}
+      },
+      "id": "03126efa-09ee-5293-a366-b2d6ba92db5f",
+      "name": "Approve commit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.github.com/graphql",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: 'mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { isDraft } } }', variables: { id: $('Next PR').first().json.nodeId } }) }}",
+        "options": {}
+      },
+      "id": "7acc0f30-fd74-5744-b30e-ba0bf659f6f8",
+      "name": "Mark ready",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/issues/' + $('Next PR').first().json.number + '/labels' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"labels\": [\"gate-approved\"]}",
+        "options": {}
+      },
+      "id": "093484bd-a0c7-541f-9609-6944e427adb7",
+      "name": "Add gate-approved",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "minutes"
+      },
+      "id": "23204868-4e0b-5bc7-9e0f-c51f13697525",
+      "name": "Wait for checks",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3080,
+        0
+      ],
+      "webhookId": "5bd5bbc8-184f-5752-ad10-87001499d160",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/commits/' + $('Next PR').first().json.sha + '/check-runs?per_page=100' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "75909381-f923-5026-9269-ec89c3bad7b9",
+      "name": "Check runs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge only when the required checks are green on the approved head. The PAT is an\n// admin, and the ruleset's admin bypass would let a merge through on red checks.\nconst REQUIRED = ['kustomize build + kubeconform', 'yamllint', 'gitleaks', 'automerge gate'];\nconst pr = $('Next PR').first().json;\nconst latest = {};\nfor (const r of $input.first().json.check_runs ?? []) {\n  if (!latest[r.name] || r.id > latest[r.name].id) latest[r.name] = r;\n}\n// Loops back through `Wait for checks` (2 min) while anything is still running,\n// up to ~20 min. A red check fails straight away.\nconst TRIES = 10;\nconst failed = [], running = [];\nfor (const name of REQUIRED) {\n  const r = latest[name];\n  if (!r || r.status !== 'completed') running.push(`${name}: ${r?.status ?? 'not started'}`);\n  // The gate's pre-label run failed by design; its re-run on `labeled` may not exist yet.\n  else if (r.conclusion !== 'success' && name === 'automerge gate' && $runIndex < 3) running.push(`${name}: awaiting re-run`);\n  else if (r.conclusion !== 'success') failed.push(`${name}: ${r.conclusion}`);\n}\nfor (const r of Object.values(latest)) {\n  if (REQUIRED.includes(r.name)) continue;\n  if (r.status !== 'completed') running.push(`${r.name}: ${r.status}`);\n  else if (!['success', 'skipped', 'neutral'].includes(r.conclusion)) failed.push(`${r.name}: ${r.conclusion}`);\n}\nconst stop = why => { throw new Error(`PR #${pr.number} approved but not merged, ${why}. Merge by hand once they pass: ${pr.url}`); };\nif (failed.length) stop(`checks failed (${failed.join('; ')})`);\nif (running.length && $runIndex + 1 >= TRIES) stop(`checks still running after ~${TRIES * 2} min (${running.join('; ')})`);\nreturn [{ json: { state: running.length ? 'running' : 'green', number: pr.number, sha: pr.sha } }];\n"
+      },
+      "id": "488a4edb-1236-5797-981c-478202b704a5",
+      "name": "All green?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cd73bf52-b33e-56fa-a7dc-bcdac587a7f4",
+              "leftValue": "={{ $json.state === 'running' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "52f58686-deba-5338-8150-207c34907a3a",
+      "name": "Still running?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3740,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/pulls/' + $json.number + '/merge' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ merge_method: 'squash', sha: $json.sha }) }}",
+        "options": {}
+      },
+      "id": "fb91f7df-4349-57dd-8583-0ef48f959562",
+      "name": "Merge",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "operation": "sendLegacy",
+        "content": "={{ '✅ Merged PR #' + $('Next PR').first().json.number + ', Flux will apply it on the next reconcile. ' + $('Next PR').first().json.url }}",
+        "options": {
+          "username": "Alert Remediation"
+        }
+      },
+      "id": "287513ee-42a4-5941-9061-f012bf9ecd70",
+      "name": "Post merged",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/pulls/' + $('Next PR').first().json.number }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"state\": \"closed\"}",
+        "options": {}
+      },
+      "id": "80030155-0dc4-52d0-a04a-a5a6f77c6be8",
+      "name": "Close PR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/git/refs/heads/' + $('Next PR').first().json.ref }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ab82d96f-8273-5af6-94fe-79fdc4e94416",
+      "name": "Delete branch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        220
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "operation": "sendLegacy",
+        "content": "={{ '❌ Rejected, closed PR #' + $('Next PR').first().json.number + ' and deleted its branch.' }}",
+        "options": {
+          "username": "Alert Remediation"
+        }
+      },
+      "id": "edf90a3c-3089-5b03-935d-a5dd0b313bb3",
+      "name": "Post rejected",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Listing PRs failed (expired PAT, GitHub outage). This runs every 5 min, so post at\n// most once every 6h instead of failing each run into the error workflow.\nconst state = $getWorkflowStaticData('global');\nconst now = Date.now();\nif (now - (state.lastGitHubError ?? 0) < 6 * 36e5) return [];\nstate.lastGitHubError = now;\nconst err = $input.first().json.error;\nreturn [{ json: { content: `⚠️ Alert remediation approval can't list PRs: ${String(err?.message ?? err ?? 'unknown error').slice(0, 300)}. Check the \\`GitHub home-ops\\` token. (Muted for 6h.)`.replace(/@/g, '@\\u200b') } }];\n"
+      },
+      "id": "6d5a868c-f3b0-50fe-9e33-dfea6ae13846",
+      "name": "GitHub error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "operation": "sendLegacy",
+        "content": "={{ $json.content }}",
+        "options": {
+          "username": "Alert Remediation"
+        }
+      },
+      "id": "27ada2c7-6df8-5e93-8122-af6dfdfd835d",
+      "name": "Post GitHub error",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        880,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/issues/' + $('Next PR').first().json.number + '/labels/claude-announced' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "04ad7c3d-1631-5978-be3a-3c614dfa9fba",
+      "name": "Re-arm",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        660
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "operation": "sendLegacy",
+        "content": "={{ '🔁 PR #' + $('Next PR').first().json.number + ' changed after it was announced, so nothing was approved. You will be asked again for the new commit.' }}",
+        "options": {
+          "username": "Alert Remediation"
+        }
+      },
+      "id": "c6858d16-e468-5748-ac42-03529eafed04",
+      "name": "Post re-ask",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ 'https://api.github.com/repos/calebbutcher/home-ops/issues/' + $('Next PR').first().json.number + '/labels/claude-announced' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-alert-remediation"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dad94faa-ad26-5897-a7d4-ff335df136fa",
+      "name": "Un-announce",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        660
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// The Discord prompt couldn't be sent (bot token, IDs, outage). The PR was\n// un-announced so the next poll retries; post about it at most every 6h.\nconst state = $getWorkflowStaticData('global');\nconst now = Date.now();\nif (now - (state.lastAskError ?? 0) < 6 * 36e5) return [];\nstate.lastAskError = now;\nconst err = $('Ask in Discord').first().json.error;\nreturn [{ json: { content: `⚠️ Couldn't post the Discord approval prompt for PR #${$('Next PR').first().json.number}: ${String(err?.message ?? err ?? 'unknown error').slice(0, 300)}. Retrying every 5 min. Check the \\`Discord alert bot\\` credential and the IDs in \\`Ask in Discord\\`. (Muted for 6h.)`.replace(/@/g, '@\\u200b') } }];\n"
+      },
+      "id": "c5f5e47d-ea65-5b3d-b65a-18375ca1ed7c",
+      "name": "Ask failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "operation": "sendLegacy",
+        "content": "={{ $json.content }}",
+        "options": {
+          "username": "Alert Remediation"
+        }
+      },
+      "id": "195e95e1-ee28-5450-a2b5-81ce2b092c5c",
+      "name": "Post ask failed",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "operation": "sendLegacy",
+        "content": "={{ '⏳ No answer in 24h on PR #' + $('Next PR').first().json.number + ', left open. Merge it in GitHub, or remove the `claude-announced` label to be asked again. ' + $('Next PR').first().json.url }}",
+        "options": {
+          "username": "Alert Remediation"
+        }
+      },
+      "id": "cb162ce4-7ec5-5948-96db-cfa2682f3b23",
+      "name": "Post timeout",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        5060,
+        440
+      ]
+    }
+  ],
+  "connections": {
+    "Every 5 min": {
+      "main": [
+        [
+          {
+            "node": "Open PRs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open PRs": {
+      "main": [
+        [
+          {
+            "node": "Next PR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GitHub error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Next PR": {
+      "main": [
+        [
+          {
+            "node": "Mark announced",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark announced": {
+      "main": [
+        [
+          {
+            "node": "PR files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PR files": {
+      "main": [
+        [
+          {
+            "node": "Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message": {
+      "main": [
+        [
+          {
+            "node": "Ask in Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask in Discord": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Un-announce",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Current PR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rejected?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Current PR": {
+      "main": [
+        [
+          {
+            "node": "Head unchanged?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Head unchanged?": {
+      "main": [
+        [
+          {
+            "node": "Approve commit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Re-arm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approve commit": {
+      "main": [
+        [
+          {
+            "node": "Mark ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-arm": {
+      "main": [
+        [
+          {
+            "node": "Post re-ask",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Un-announce": {
+      "main": [
+        [
+          {
+            "node": "Ask failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask failed": {
+      "main": [
+        [
+          {
+            "node": "Post ask failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark ready": {
+      "main": [
+        [
+          {
+            "node": "Add gate-approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add gate-approved": {
+      "main": [
+        [
+          {
+            "node": "Wait for checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for checks": {
+      "main": [
+        [
+          {
+            "node": "Check runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check runs": {
+      "main": [
+        [
+          {
+            "node": "All green?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "All green?": {
+      "main": [
+        [
+          {
+            "node": "Still running?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still running?": {
+      "main": [
+        [
+          {
+            "node": "Wait for checks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Post merged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub error": {
+      "main": [
+        [
+          {
+            "node": "Post GitHub error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rejected?": {
+      "main": [
+        [
+          {
+            "node": "Close PR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Post timeout",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close PR": {
+      "main": [
+        [
+          {
+            "node": "Delete branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete branch": {
+      "main": [
+        [
+          {
+            "node": "Post rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "errorWorkflow": "alertRemedErrs01",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}
