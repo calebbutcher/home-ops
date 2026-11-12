@@ -393,6 +393,11 @@ data:
                       "text": "System Off",
                       "color": "text",
                       "index": 5
+                    },
+                    "5": {
+                      "text": "Heating",
+                      "color": "orange",
+                      "index": 6
                     }
                   }
                 }
@@ -757,6 +762,11 @@ data:
                       "text": "System Off",
                       "color": "text",
                       "index": 5
+                    },
+                    "5": {
+                      "text": "Heating",
+                      "color": "orange",
+                      "index": 6
                     }
                   }
                 }
