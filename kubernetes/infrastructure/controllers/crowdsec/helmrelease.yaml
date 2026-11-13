@@ -6,6 +6,9 @@ metadata:
   namespace: crowdsec
 spec:
   interval: 30m
+  # LAPI is Recreate and the 6-node agent DaemonSet rolls one pod at a time, each
+  # waiting for LAPI. A full upgrade does not fit Helm's 5m default.
+  timeout: 15m
   chart:
     spec:
       chart: crowdsec
@@ -21,6 +24,25 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 3
+  # The chart gives the CA no duration, so it gets cert-manager's 90d/30d defaults:
+  # the same schedule as every leaf cert. On 2026-10-04 all of them renewed in the
+  # same second and crowdsec-appsec-client was signed by the outgoing CA. When that
+  # CA expired, appsec could no longer log in to LAPI (WAF down 2026-11-13). A
+  # long-lived CA keeps CA rotation off the leaves' renewal schedule.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              group: cert-manager.io
+              kind: Certificate
+              name: crowdsec-ca
+            patch: |
+              - op: add
+                path: /spec/duration
+                value: 87600h
+              - op: add
+                path: /spec/renewBefore
+                value: 720h
   values:
     # k3s runs containerd, not docker — controls the raw-log format the agent parses
     # (renders the /var/log/containers/*_traefik_*.log acquisition path).
