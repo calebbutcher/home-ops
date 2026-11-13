@@ -56,8 +56,8 @@ Alert remediation approval (every 5 min) → Discord [Approve] [Reject], waits u
 - **The allowlist lives in two places:** the `n8n` route in
   `kubernetes/apps/monitoring/kube-prometheus-stack/alertmanagerconfig.yaml` and
   `ALLOW` in the `Gate` node. Keep them in step.
-- **Mode:** `MODE` in `Gate` starts at `diagnose`, so the routine reports but never
-  pushes. Switch it to `pr` once a few diagnoses look right.
+- **Mode:** `MODE` in `Gate` is `pr`: the routine may open a draft PR. Set it to
+  `diagnose` to make it report only (it never pushes).
 - **The routine** (prompt and settings) is in `n8n/routines/alert-remediation.md`.
 - **The gate:** `automerge gate` fails every `claude/alert-*` PR until its head commit
   has the `alert-remediation/approved` status that the Approve button sets. A new push
