@@ -282,10 +282,11 @@ spec:
                   mountPath: /work
                   readOnly: true
           volumes:
+            # Disk, not memory: the backup zip includes the query-log database (see
+            # kubernetes/apps/technitium/backup-cronjob.yaml).
             - name: work
               emptyDir:
-                medium: Memory
-                sizeLimit: 64Mi
+                sizeLimit: 1Gi
             - name: cache
               emptyDir:
                 sizeLimit: 256Mi
@@ -295,4 +296,4 @@ spec:
                 sizeLimit: 16Mi
             - name: scratch-config
               emptyDir:
-                sizeLimit: 256Mi
+                sizeLimit: 1Gi
