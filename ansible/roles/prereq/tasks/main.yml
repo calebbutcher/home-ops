@@ -33,6 +33,21 @@
     reload: true
   tags: sysctl
 
+# The kernel default of 128 inotify instances per user is shared by every root
+# container on a node, and containerd-shim alone holds ~1 per container. On
+# 2026-11-13 worker-02 was at 136 and worker-01 at 123, and the CrowdSec LAPI
+# crashed on worker-02 with "couldn't initialize inotify: too many open files".
+- name: Raise inotify limits
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: true
+  loop:
+    - { name: fs.inotify.max_user_instances, value: "8192" }
+    - { name: fs.inotify.max_user_watches, value: "524288" }
+  tags: sysctl
+
 - name: Add br_netfilter to /etc/modules-load.d/
   ansible.builtin.copy:
     content: br_netfilter
