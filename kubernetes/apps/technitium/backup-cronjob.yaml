@@ -152,7 +152,8 @@ spec:
             - name: cache
               emptyDir:
                 sizeLimit: 256Mi
+            # restic stages each ~16 MiB pack here before upload, so a backup bigger
+            # than one pack needs more than a small tmpfs.
             - name: tmp
               emptyDir:
-                medium: Memory
-                sizeLimit: 16Mi
+                sizeLimit: 256Mi
