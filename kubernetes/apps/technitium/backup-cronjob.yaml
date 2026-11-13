@@ -144,10 +144,11 @@ spec:
                 - name: tmp
                   mountPath: /tmp
           volumes:
+            # Disk, not memory: with apps=true the zip carries the Query Logs (Sqlite)
+            # database (224M on 2026-11-13), which overflowed a 64Mi tmpfs.
             - name: backup
               emptyDir:
-                medium: Memory
-                sizeLimit: 64Mi
+                sizeLimit: 1Gi
             - name: cache
               emptyDir:
                 sizeLimit: 256Mi
