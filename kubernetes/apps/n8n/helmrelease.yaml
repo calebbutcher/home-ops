@@ -35,7 +35,7 @@ spec:
           app:
             image:
               repository: ghcr.io/n8n-io/n8n
-              tag: "3.0.0"
+              tag: "3.2.2"
             env:
               # --- Postgres (CNPG) ---
               DB_TYPE: postgresdb
