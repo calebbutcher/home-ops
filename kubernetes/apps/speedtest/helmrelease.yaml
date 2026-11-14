@@ -74,7 +74,7 @@ spec:
               # ls176 = PHP 8.5.12 (php2shell, CVE-2026-109618/109619).
               # LinuxServer's build tags are v-prefixed: `1.15.0-ls176` does not
               # exist (404), and pinning it stalled this release from 2026-10-22.
-              tag: "v1.15.0-ls176"
+              tag: "v1.15.1-ls180"
             env:
               # LinuxServer convention: the uid/gid the app is dropped to, and
               # what fsGroup above matches so /config is writable.
