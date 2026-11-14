@@ -105,7 +105,7 @@ spec:
           app:
             image:
               repository: lscr.io/linuxserver/qbittorrent
-              tag: 5.2.3_v2.0.13-ls469
+              tag: 5.3.0_v2.1.2-ls487
             env:
               PUID: "1000"
               PGID: "1000"
