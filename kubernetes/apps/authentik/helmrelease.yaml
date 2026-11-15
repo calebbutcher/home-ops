@@ -33,8 +33,16 @@ spec:
       # Non-secret connection facts. secret_key + DB password are injected via
       # global.env below (env overrides the chart's config-secret envFrom).
       log_level: info
+      # OpenTelemetry traces (Django, Postgres queries, outbound requests) to the
+      # alloy-otlp gateway; needs authentik 2026.11+. Authentik appends
+      # /v1/traces. sample_rate is parent-based: requests that arrive already
+      # traced are kept, traces authentik starts itself are kept at 10%.
+      # `enabled` ALSO turns on Sentry error reporting, whose DSN defaults to
+      # authentik's own server; global.env below blanks it.
       error_reporting:
-        enabled: false
+        enabled: true
+        otel_endpoint: http://alloy-otlp.monitoring.svc.cluster.local:4318
+        sample_rate: 0.1
       postgresql:
         host: authentik-postgres-rw      # CNPG read-write service
         port: 5432
@@ -65,6 +73,11 @@ spec:
           value: authentik-redis
         - name: AUTHENTIK_REDIS__PORT
           value: "6379"
+        # Disables Sentry. Must be set here, not as authentik.error_reporting.
+        # sentry_dsn: "": the chart drops empty values, which would leave
+        # authentik's default DSN in place and send error reports off-site.
+        - name: AUTHENTIK_ERROR_REPORTING__SENTRY_DSN
+          value: ""
 
     # Blueprints-as-code: every *.yaml key in this ConfigMap is mounted at
     # /blueprints/mounted/cm-authentik-blueprints/ on server+worker and auto-applied
