@@ -67,6 +67,16 @@ spec:
               N8N_DIAGNOSTICS_ENABLED: "false"
               GENERIC_TIMEZONE: UTC
               TZ: UTC
+              # --- Tracing (workflow + per-node spans) via the alloy-otlp gateway ---
+              N8N_OTEL_ENABLED: "true"
+              N8N_OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy-otlp.monitoring.svc.cluster.local:4318
+              N8N_OTEL_TRACES_INCLUDE_NODE_SPANS: "true"
+              # Don't add trace headers to outbound calls: they go to Discord,
+              # Anthropic, GitHub and other external APIs, none of which trace.
+              N8N_OTEL_TRACES_INJECT_OUTBOUND: "false"
+              # Keep AI agent prompts and responses out of traces.
+              N8N_AGENTS_TRACING_RECORD_INPUTS: "false"
+              N8N_AGENTS_TRACING_RECORD_OUTPUTS: "false"
             probes:
               # /healthz: server is up. /healthz/readiness: DB connected + migrated.
               startup:
