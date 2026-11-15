@@ -43,6 +43,33 @@ def err(extra=""):
 
 
 ERR = err()
+# Readable names for the `counter` label, used by the table headers and chart legends.
+COUNTER_NAMES = {
+    "ata_5": "Realloc (5)",
+    "ata_183": "Runtime bad blk (183)",
+    "ata_187": "Uncorrectable (187)",
+    "ata_197": "Pending (197)",
+    "ata_198": "Offline unc (198)",
+    "nvme_media_errors": "NVMe media err",
+    "scsi_grown_defects": "SCSI grown defects",
+    "scsi_read_uncorrected": "SCSI read uncorrected",
+    "scsi_write_uncorrected": "SCSI write uncorrected",
+}
+
+
+def named(expr):
+    """Add a `counter_name` label with the readable name of each counter."""
+    for counter, name in COUNTER_NAMES.items():
+        expr = f'label_replace({expr}, "counter_name", "{name}", "counter", "{counter}")'
+    return expr
+
+
+def with_disk(expr):
+    """Add the short `disk` name (osd.N · sdX, or the device) from the recording rule."""
+    return (f'({expr}) * on (host, device) group_left (disk) '
+            f'smartctl:device_display_info{{host=~"$host"}}')
+
+
 TEMP = f'smartctl_device_temperature{{{SEL}, temperature_type="current"}}'
 # Share of rated endurance used, 0-100, whatever the interface:
 #   NVMe   percentage_used (spec-defined)
@@ -156,17 +183,16 @@ panels.append(stat(
 
 # --------------------------------------------------------------- per-disk table
 COUNTERS = [
-    ("B", "ata_5", "Realloc (5)"),
-    ("C", "ata_183", "Runtime bad blk (183)"),
-    ("D", "ata_187", "Uncorrectable (187)"),
-    ("E", "ata_197", "Pending (197)"),
-    ("F", "ata_198", "Offline unc (198)"),
-    ("G", "nvme_media_errors", "NVMe media err"),
-    ("H", "scsi_grown_defects", "SCSI grown defects"),
+    (r, c, COUNTER_NAMES[c]) for r, c in [
+        ("B", "ata_5"), ("C", "ata_183"), ("D", "ata_187"), ("E", "ata_197"),
+        ("F", "ata_198"), ("G", "nvme_media_errors"), ("H", "scsi_grown_defects"),
+    ]
 ]
 table_targets = [
     tgt(f'max by (host, device, model_name, serial_number) (smartctl_device{{{SEL}}})',
         refid="A", table=True),
+    tgt('max by (host, device, disk) (smartctl:device_display_info{host=~"$host"})',
+        refid="N", table=True),
 ]
 table_targets += [
     tgt('max by (host, device) (' + err('counter="' + c + '"') + ')', refid=r, table=True)
@@ -181,13 +207,11 @@ table_targets += [
     tgt(f'max by (host, device) (smartctl_device_power_on_seconds{{{SEL}}})', refid="M",
         table=True),
 ]
-rename = {"host": "Host", "device": "Device", "model_name": "Model",
+rename = {"host": "Host", "disk": "Disk", "device": "Device", "model_name": "Model",
           "serial_number": "Serial", "Value #I": "SCSI uncorrected",
           "Value #J": "SMART", "Value #K": "Temp", "Value #L": "Wear used",
           "Value #M": "Power-on"}
 rename.update({f"Value #{r}": name for r, _, name in COUNTERS})
-order = ["Host", "Device", "Model", "Serial", "SMART", "Temp", "Wear used", "Power-on"]
-order += [name for _, _, name in COUNTERS] + ["SCSI uncorrected"]
 error_cols = [name for _, _, name in COUNTERS] + ["SCSI uncorrected"]
 
 overrides = [col(name, [
@@ -220,7 +244,9 @@ overrides += [
 panels.append({
     "id": 7, "type": "table", "title": "Disks",
     "description": (
-        "One row per disk. Error columns are RAW counts (red when non-zero); a blank "
+        "One row per disk. Disk is the short name used in the charts: osd.N · sdX for "
+        "Ceph OSDs, otherwise the device name. Device is the exporter's full name (by-id "
+        "on the R630s). Error columns are RAW counts (red when non-zero); a blank "
         "cell means the disk does not report that counter (e.g. NVMe has no ATA "
         "attributes). Wear used is the share of rated endurance consumed: NVMe "
         "percentage_used, SAS endurance indicator, or 100 minus the normalized value "
@@ -235,10 +261,10 @@ panels.append({
     "transformations": [
         {"id": "merge", "options": {}},
         {"id": "organize", "options": {
-            "excludeByName": {"Time": True, "Value #A": True},
+            "excludeByName": {"Time": True, "Value #A": True, "Value #N": True},
             "renameByName": rename,
             "indexByName": {name: i for i, name in enumerate(
-                ["host", "device", "model_name", "serial_number", "Value #J", "Value #K",
+                ["host", "disk", "device", "model_name", "serial_number", "Value #J", "Value #K",
                  "Value #L", "Value #M"]
                 + [f"Value #{r}" for r, _, _ in COUNTERS] + ["Value #I"])},
         }},
@@ -248,24 +274,25 @@ panels.append({
 # --------------------------------------------------------------- time series
 panels.append(ts(
     8, "Error counters (non-zero only)", 0, 16, 12, 9,
-    [tgt(f'{ERR} > 0', "{{host}} {{device}} {{counter}}")], "short",
+    [tgt(with_disk(named(f'{ERR} > 0')), "{{host}} · {{disk}} · {{counter_name}}")], "short",
     "Raw error counters over time, from the smartctl:device_error_count recording rule. "
     "Disks with all-zero counters are left out. A step up is what the alerts fire on.",
     step=True, minv=0))
 panels.append(ts(
     9, "Error counter rise vs 24h low", 12, 16, 12, 9,
-    [tgt(f'({ERR} - min_over_time({ERR}[24h])) > 0', "{{host}} {{device}} {{counter}}")],
+    [tgt(with_disk(named(f'({ERR} - min_over_time({ERR}[24h])) > 0')),
+         "{{host}} · {{disk}} · {{counter_name}}")],
     "short",
     "How far each counter is above its lowest value in the previous 24h. Anything "
     "here is SmartDiskErrorsIncreased firing; 10+, or 3+ separate steps, is "
     "SmartDiskErrorsGrowing.", step=True, minv=0))
 panels.append(ts(
     10, "Temperature", 0, 25, 12, 9,
-    [tgt(TEMP, "{{host}} {{device}}")], "celsius",
+    [tgt(with_disk(TEMP), "{{host}} · {{disk}}")], "celsius",
     "Current drive temperature as reported by each disk."))
 panels.append(ts(
     11, "Wear used", 12, 25, 12, 9,
-    [tgt(WEAR, "{{host}} {{device}}")], "percent",
+    [tgt(with_disk(WEAR), "{{host}} · {{disk}}")], "percent",
     "Share of rated endurance used (SSDs only). See the Disks table description for "
     "how it is derived per interface.", minv=0))
 
