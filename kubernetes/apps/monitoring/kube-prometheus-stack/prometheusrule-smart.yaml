@@ -75,6 +75,31 @@ spec:
             * on (instance, device) group_left (serial_number, model_name)
             max by (instance, device, serial_number, model_name) (smartctl_device{job="smartctl"})
 
+        # A short `disk` name per (host, device), for dashboard legends and the Disks
+        # table. `device` is the full by-id name on the R630s, which is unreadable in a
+        # legend. Ceph OSD disks get "osd.N · sdX", matched on serial: ceph-mgr's
+        # ceph_disk_occupation carries the kernel name in `devices` and ends `device_ids`
+        # with the serial. Every other disk, and every disk if ceph-mgr can't be scraped,
+        # falls back to `device`.
+        - record: smartctl:device_display_info
+          expr: |
+            group by (host, device, serial_number, disk) (
+                group by (host, device, serial_number) (smartctl_device{job="smartctl", serial_number!=""})
+              * on (serial_number) group_left (disk)
+                label_join(
+                  label_replace(
+                    group by (ceph_daemon, devices, device_ids) (ceph_disk_occupation{job="ceph"}),
+                    "serial_number", "$1", "device_ids", ".*_([^_]+)$"
+                  ),
+                  "disk", " · ", "ceph_daemon", "devices"
+                )
+            )
+            or on (host, device)
+            label_replace(
+              group by (host, device, serial_number) (smartctl_device{job="smartctl"}),
+              "disk", "$1", "device", "(.*)"
+            )
+
     - name: smart-disk.rules
       rules:
         # The two counter tiers are MUTUALLY EXCLUSIVE (the warning is `unless` the

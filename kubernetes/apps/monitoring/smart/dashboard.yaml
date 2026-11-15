@@ -461,7 +461,7 @@ data:
           "id": 7,
           "type": "table",
           "title": "Disks",
-          "description": "One row per disk. Error columns are RAW counts (red when non-zero); a blank cell means the disk does not report that counter (e.g. NVMe has no ATA attributes). Wear used is the share of rated endurance consumed: NVMe percentage_used, SAS endurance indicator, or 100 minus the normalized value of a SATA SSD's wear attribute (177/202/231/233).",
+          "description": "One row per disk. Disk is the short name used in the charts: osd.N \u00b7 sdX for Ceph OSDs, otherwise the device name. Device is the exporter's full name (by-id on the R630s). Error columns are RAW counts (red when non-zero); a blank cell means the disk does not report that counter (e.g. NVMe has no ATA attributes). Wear used is the share of rated endurance consumed: NVMe percentage_used, SAS endurance indicator, or 100 minus the normalized value of a SATA SSD's wear attribute (177/202/231/233).",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -910,6 +910,17 @@ data:
               "format": "table"
             },
             {
+              "refId": "N",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max by (host, device, disk) (smartctl:device_display_info{host=~\"$host\"})",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            },
+            {
               "refId": "B",
               "datasource": {
                 "type": "prometheus",
@@ -1052,10 +1063,12 @@ data:
               "options": {
                 "excludeByName": {
                   "Time": true,
-                  "Value #A": true
+                  "Value #A": true,
+                  "Value #N": true
                 },
                 "renameByName": {
                   "host": "Host",
+                  "disk": "Disk",
                   "device": "Device",
                   "model_name": "Model",
                   "serial_number": "Serial",
@@ -1074,21 +1087,22 @@ data:
                 },
                 "indexByName": {
                   "host": 0,
-                  "device": 1,
-                  "model_name": 2,
-                  "serial_number": 3,
-                  "Value #J": 4,
-                  "Value #K": 5,
-                  "Value #L": 6,
-                  "Value #M": 7,
-                  "Value #B": 8,
-                  "Value #C": 9,
-                  "Value #D": 10,
-                  "Value #E": 11,
-                  "Value #F": 12,
-                  "Value #G": 13,
-                  "Value #H": 14,
-                  "Value #I": 15
+                  "disk": 1,
+                  "device": 2,
+                  "model_name": 3,
+                  "serial_number": 4,
+                  "Value #J": 5,
+                  "Value #K": 6,
+                  "Value #L": 7,
+                  "Value #M": 8,
+                  "Value #B": 9,
+                  "Value #C": 10,
+                  "Value #D": 11,
+                  "Value #E": 12,
+                  "Value #F": 13,
+                  "Value #G": 14,
+                  "Value #H": 15,
+                  "Value #I": 16
                 }
               }
             }
@@ -1167,8 +1181,8 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "smartctl:device_error_count{host=~\"$host\"} > 0",
-              "legendFormat": "{{host}} {{device}} {{counter}}"
+              "expr": "(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(smartctl:device_error_count{host=~\"$host\"} > 0, \"counter_name\", \"Realloc (5)\", \"counter\", \"ata_5\"), \"counter_name\", \"Runtime bad blk (183)\", \"counter\", \"ata_183\"), \"counter_name\", \"Uncorrectable (187)\", \"counter\", \"ata_187\"), \"counter_name\", \"Pending (197)\", \"counter\", \"ata_197\"), \"counter_name\", \"Offline unc (198)\", \"counter\", \"ata_198\"), \"counter_name\", \"NVMe media err\", \"counter\", \"nvme_media_errors\"), \"counter_name\", \"SCSI grown defects\", \"counter\", \"scsi_grown_defects\"), \"counter_name\", \"SCSI read uncorrected\", \"counter\", \"scsi_read_uncorrected\"), \"counter_name\", \"SCSI write uncorrected\", \"counter\", \"scsi_write_uncorrected\")) * on (host, device) group_left (disk) smartctl:device_display_info{host=~\"$host\"}",
+              "legendFormat": "{{host}} \u00b7 {{disk}} \u00b7 {{counter_name}}"
             }
           ]
         },
@@ -1245,8 +1259,8 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "(smartctl:device_error_count{host=~\"$host\"} - min_over_time(smartctl:device_error_count{host=~\"$host\"}[24h])) > 0",
-              "legendFormat": "{{host}} {{device}} {{counter}}"
+              "expr": "(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace((smartctl:device_error_count{host=~\"$host\"} - min_over_time(smartctl:device_error_count{host=~\"$host\"}[24h])) > 0, \"counter_name\", \"Realloc (5)\", \"counter\", \"ata_5\"), \"counter_name\", \"Runtime bad blk (183)\", \"counter\", \"ata_183\"), \"counter_name\", \"Uncorrectable (187)\", \"counter\", \"ata_187\"), \"counter_name\", \"Pending (197)\", \"counter\", \"ata_197\"), \"counter_name\", \"Offline unc (198)\", \"counter\", \"ata_198\"), \"counter_name\", \"NVMe media err\", \"counter\", \"nvme_media_errors\"), \"counter_name\", \"SCSI grown defects\", \"counter\", \"scsi_grown_defects\"), \"counter_name\", \"SCSI read uncorrected\", \"counter\", \"scsi_read_uncorrected\"), \"counter_name\", \"SCSI write uncorrected\", \"counter\", \"scsi_write_uncorrected\")) * on (host, device) group_left (disk) smartctl:device_display_info{host=~\"$host\"}",
+              "legendFormat": "{{host}} \u00b7 {{disk}} \u00b7 {{counter_name}}"
             }
           ]
         },
@@ -1322,8 +1336,8 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "smartctl_device_temperature{job=\"smartctl\", host=~\"$host\", temperature_type=\"current\"}",
-              "legendFormat": "{{host}} {{device}}"
+              "expr": "(smartctl_device_temperature{job=\"smartctl\", host=~\"$host\", temperature_type=\"current\"}) * on (host, device) group_left (disk) smartctl:device_display_info{host=~\"$host\"}",
+              "legendFormat": "{{host}} \u00b7 {{disk}}"
             }
           ]
         },
@@ -1400,8 +1414,8 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "max by (host, device) (smartctl_device_percentage_used{job=\"smartctl\", host=~\"$host\"}) or max by (host, device) (smartctl_scsi_percentage_used_endurance_indicator{job=\"smartctl\", host=~\"$host\"}) or (100 - min by (host, device) (smartctl_device_attribute{job=\"smartctl\", host=~\"$host\", attribute_value_type=\"value\", attribute_id=~\"177|202|231|233\"} unless on (instance, device) smartctl_device_rotation_rate{job=\"smartctl\"}))",
-              "legendFormat": "{{host}} {{device}}"
+              "expr": "(max by (host, device) (smartctl_device_percentage_used{job=\"smartctl\", host=~\"$host\"}) or max by (host, device) (smartctl_scsi_percentage_used_endurance_indicator{job=\"smartctl\", host=~\"$host\"}) or (100 - min by (host, device) (smartctl_device_attribute{job=\"smartctl\", host=~\"$host\", attribute_value_type=\"value\", attribute_id=~\"177|202|231|233\"} unless on (instance, device) smartctl_device_rotation_rate{job=\"smartctl\"}))) * on (host, device) group_left (disk) smartctl:device_display_info{host=~\"$host\"}",
+              "legendFormat": "{{host}} \u00b7 {{disk}}"
             }
           ]
         }
