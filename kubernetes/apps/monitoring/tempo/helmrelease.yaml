@@ -30,6 +30,10 @@ spec:
     replicas: 1
     tempo:
       reportingEnabled: false
+      # Grafana's Tempo datasource streams search results over gRPC on the HTTP
+      # port by default. With this off, Tempo refuses those requests and Grafana
+      # shows no traces at all.
+      streamOverHttpEnabled: true
       # Rendered into backend_worker/backend_scheduler block_retention.
       retention: 336h
       storage:
