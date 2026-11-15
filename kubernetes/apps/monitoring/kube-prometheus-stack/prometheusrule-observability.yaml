@@ -91,7 +91,7 @@ spec:
         # Individual DaemonSet pod down — the release as a whole is still up, so
         # only that node's logs are missing. Warning, not critical.
         - alert: AlloyInstanceDown
-          expr: up{job=~"alloy|alloy-events|alloy-syslog|alloy-otlp"} == 0
+          expr: up{job=~"alloy|alloy-events|alloy-syslog|alloy-otlp|alloy-beyla"} == 0
           for: 15m
           labels:
             severity: warning
