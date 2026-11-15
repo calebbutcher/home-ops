@@ -70,8 +70,6 @@ resources:
   - alloy/helmrelease-events.yaml
   - alloy/helmrelease-syslog.yaml
   - alloy/helmrelease-otlp.yaml
-  - alloy/helmrelease-beyla.yaml
-  - alloy/servicemonitor-beyla.yaml
   - tempo/helmrelease.yaml
   - postgres/dashboard-overview.yaml
   - postgres/dashboard-cluster.yaml
