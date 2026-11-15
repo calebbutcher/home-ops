@@ -40,6 +40,7 @@ resources:
   - tracearr/helmrelease.yaml
   - tracearr/ingress.yaml
   - unpackerr/secret.sops.yaml
+  - unpackerr/webserver-secret.sops.yaml
   - unpackerr/helmrelease.yaml
   - qbittorrent/secret.sops.yaml
   - qbittorrent/pvc.yaml
