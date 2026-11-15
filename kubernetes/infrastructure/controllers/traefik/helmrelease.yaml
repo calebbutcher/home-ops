@@ -65,6 +65,11 @@ spec:
               scheme: https
       websecure:
         port: 443
+        # Detailed traces add a span per router, middleware and service step, so
+        # a slow request shows which middleware (forwardAuth, CrowdSec) it was.
+        # The default, minimal, only records the request and the backend call.
+        observability:
+          traceVerbosity: detailed
 
     # cert-manager handles all certificates — built-in ACME disabled
     certificatesResolvers: {}
