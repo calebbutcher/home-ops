@@ -96,6 +96,13 @@ spec:
         # Two replicas for HA; Thanos Query de-duplicates them via the
         # prometheus_replica external label the operator injects.
         replicas: 2
+        # Parent-based: queries arriving with a sampled trace (from Grafana) are
+        # always traced; traces Prometheus starts itself (rule evaluations) at 1%.
+        tracingConfig:
+          clientType: grpc
+          endpoint: alloy-otlp.monitoring.svc.cluster.local:4317
+          insecure: true
+          samplingFraction: "0.01"
         # Same reasoning as alertmanagerSpec below: the chart default is "soft", so
         # these two were only *preferentially* separated. They happen to sit on
         # different nodes today, but nothing enforced it — and with local-path
@@ -277,6 +284,15 @@ spec:
           role_attribute_path: "contains(groups[*], 'authentik Admins') && 'Admin' || 'Viewer'"
           allow_sign_up: true
           use_pkce: true
+        # Trace every request Grafana serves and every datasource query it makes.
+        # The w3c trace context goes downstream, so Loki, Thanos and Prometheus
+        # spans join the same trace.
+        tracing.opentelemetry:
+          sampler_type: const
+          sampler_param: 1
+        tracing.opentelemetry.otlp:
+          address: alloy-otlp.monitoring.svc.cluster.local:4317
+          propagation: w3c
 
       # Grafana-managed alerting → Discord contact point. Complements Alertmanager
       # (which handles the stock Prometheus rules); use this for Grafana-native

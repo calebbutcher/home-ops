@@ -40,6 +40,9 @@ spec:
     deploymentMode: Monolithic
 
     loki:
+      # Exporter and sampler come from the OTEL_* env under singleBinary.
+      tracing:
+        enabled: true
       # Single tenant — this is a private homelab cluster.
       auth_enabled: false
 
@@ -167,6 +170,15 @@ spec:
       extraEnvFrom:
         - secretRef:
             name: loki-s3
+      # Traces to the alloy-otlp gateway. Parent-based: queries from Grafana are
+      # always traced; traces Loki starts itself (log pushes, ruler) at 1%.
+      extraEnv:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://alloy-otlp.monitoring.svc.cluster.local:4318
+        - name: OTEL_TRACES_SAMPLER
+          value: parentbased_traceidratio
+        - name: OTEL_TRACES_SAMPLER_ARG
+          value: "0.01"
       # Mount the LogQL alerting rules (loki-alerting-rules ConfigMap) where the
       # ruler's local storage expects them: <directory>/<tenant>/. tenant = fake.
       extraVolumes:
