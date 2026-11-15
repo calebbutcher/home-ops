@@ -54,6 +54,9 @@ spec:
               # via the image's opentelemetry-instrument wrapper. No sampling:
               # it is a few calls a minute.
               OTEL_TRACES_EXPORTER: otlp
+              # The Python SDK reads `otlp` as gRPC unless told otherwise, and
+              # the image only ships the HTTP exporter.
+              OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
               OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy-otlp.monitoring.svc.cluster.local:4318
               # The API's own floor; the ServiceMonitor scrapes at 1m so every
               # scrape sees a reading no more than one poll old.
