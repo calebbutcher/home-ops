@@ -90,14 +90,18 @@ spec:
             # etcd. The scoped audit policy is what keeps this affordable; the
             # upstream catch-all policy would need considerably more.
             #
-            # CPU is a different story: the pod on the VIP-holding control plane
-            # sees nearly all API traffic and parses it on several threads at once.
-            # It averages ~0.2 cores but in short bursts, and at a 500m limit it was
-            # CFS-throttled 20-36% of periods for weeks (CPUThrottlingHigh flapping
-            # on whichever node held the VIP). Same CPU as the syscall instance.
+            # CPU is effectively unlimited, the same reasoning as node-exporter.
+            # Falco parses audit records in bursts across ~24 threads on these
+            # 4-core nodes, so it uses up a CFS quota in a fraction of each period
+            # while averaging only ~0.3 cores. At 500m it was throttled 20-36% of
+            # periods, and at 1000m still 22-24% (#663), so CPUThrottlingHigh kept
+            # firing. The limit can't just be left out: the operator's base template
+            # sets 1000m and merges ours over it, and a `null` is pruned by the
+            # API server. A limit equal to the node's core count can never be
+            # exceeded, so it never throttles. Memory above is the real guard.
             requests:
               cpu: 100m
               memory: 128Mi
             limits:
-              cpu: 1000m
+              cpu: "4"
               memory: 256Mi
