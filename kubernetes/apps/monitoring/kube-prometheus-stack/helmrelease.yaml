@@ -220,6 +220,12 @@ spec:
             existingSecret:
               name: thanos-objstore
               key: objstore.yml
+          # Same tracing config as the other Thanos components (thanos/helmrelease.yaml):
+          # queries for recent data go thanos-query -> this sidecar -> Prometheus,
+          # so without it those traces stop at thanos-query.
+          additionalArgs:
+            - name: tracing.config
+              value: '{"type":"OTLP","config":{"client_type":"grpc","service_name":"thanos-sidecar","endpoint":"alloy-otlp.monitoring.svc.cluster.local:4317","insecure":true,"sampler_type":"parentbasedtraceidratiobased","sampler_param":"0.01"}}'
 
         # Durable node-local storage for the TSDB head/WAL — also the sidecar's
         # upload source. local-path pins each replica to one node.
