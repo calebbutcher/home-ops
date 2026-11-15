@@ -95,7 +95,7 @@ data:
           "id": 1,
           "type": "stat",
           "title": "Disks reporting",
-          "description": "Disks the exporters are currently returning SMART data for.",
+          "description": "Disks the exporters are currently returning SMART data for. A disk whose last read came back empty still appears on the exporter page, but with no serial (or, on exporter 0.14, no device name), so it is not counted here.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -144,7 +144,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "count(smartctl_device_smartctl_exit_status{job=\"smartctl\", host=~\"$host\"}) or vector(0)"
+              "expr": "count(smartctl_device{job=\"smartctl\", host=~\"$host\", device!=\"\", serial_number!=\"\"}) or vector(0)"
             }
           ]
         },
@@ -1025,7 +1025,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "max by (host, device) (smartctl_device_percentage_used{job=\"smartctl\", host=~\"$host\"}) or max by (host, device) (smartctl_scsi_percentage_used_endurance_indicator{job=\"smartctl\", host=~\"$host\"}) or (100 - max by (host, device) (smartctl_device_attribute{job=\"smartctl\", host=~\"$host\", attribute_value_type=\"value\", attribute_id=~\"177|202|231|233\"} unless on (instance, device) smartctl_device_rotation_rate{job=\"smartctl\"}))",
+              "expr": "max by (host, device) (smartctl_device_percentage_used{job=\"smartctl\", host=~\"$host\"}) or max by (host, device) (smartctl_scsi_percentage_used_endurance_indicator{job=\"smartctl\", host=~\"$host\"}) or (100 - min by (host, device) (smartctl_device_attribute{job=\"smartctl\", host=~\"$host\", attribute_value_type=\"value\", attribute_id=~\"177|202|231|233\"} unless on (instance, device) smartctl_device_rotation_rate{job=\"smartctl\"}))",
               "instant": true,
               "range": false,
               "format": "table"
@@ -1400,7 +1400,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "max by (host, device) (smartctl_device_percentage_used{job=\"smartctl\", host=~\"$host\"}) or max by (host, device) (smartctl_scsi_percentage_used_endurance_indicator{job=\"smartctl\", host=~\"$host\"}) or (100 - max by (host, device) (smartctl_device_attribute{job=\"smartctl\", host=~\"$host\", attribute_value_type=\"value\", attribute_id=~\"177|202|231|233\"} unless on (instance, device) smartctl_device_rotation_rate{job=\"smartctl\"}))",
+              "expr": "max by (host, device) (smartctl_device_percentage_used{job=\"smartctl\", host=~\"$host\"}) or max by (host, device) (smartctl_scsi_percentage_used_endurance_indicator{job=\"smartctl\", host=~\"$host\"}) or (100 - min by (host, device) (smartctl_device_attribute{job=\"smartctl\", host=~\"$host\", attribute_value_type=\"value\", attribute_id=~\"177|202|231|233\"} unless on (instance, device) smartctl_device_rotation_rate{job=\"smartctl\"}))",
               "legendFormat": "{{host}} {{device}}"
             }
           ]

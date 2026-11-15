@@ -50,11 +50,12 @@ TEMP = f'smartctl_device_temperature{{{SEL}, temperature_type="current"}}'
 #   SATA   100 - normalized VALUE of the vendor's wear attribute: 177 Wear_Leveling_Count
 #          (Samsung), 202 Percent_Lifetime_Remain (Crucial/Micron), 231 SSD_Life_Left,
 #          233 Media_Wearout_Indicator (Intel). Restricted to disks with no rotation
-#          rate, because some HDDs reuse 202 for an unrelated attribute.
+#          rate, because some HDDs reuse 202 for an unrelated attribute. `min` so that
+#          when a drive exposes more than one of these, the worst remaining life wins.
 WEAR = (
     f'max by (host, device) (smartctl_device_percentage_used{{{SEL}}})'
     f' or max by (host, device) (smartctl_scsi_percentage_used_endurance_indicator{{{SEL}}})'
-    f' or (100 - max by (host, device) ('
+    f' or (100 - min by (host, device) ('
     f'smartctl_device_attribute{{{SEL}, attribute_value_type="value", attribute_id=~"177|202|231|233"}}'
     f' unless on (instance, device) smartctl_device_rotation_rate{{job="smartctl"}}))'
 )
@@ -120,8 +121,11 @@ panels = []
 # --------------------------------------------------------------- headline stats
 panels.append(stat(
     1, "Disks reporting", 0, 0, 4, 4,
-    f'count(smartctl_device_smartctl_exit_status{{{SEL}}}) or vector(0)', "short", [GREEN],
-    "Disks the exporters are currently returning SMART data for."))
+    f'count(smartctl_device{{{SEL}, device!="", serial_number!=""}}) or vector(0)', "short",
+    [GREEN],
+    "Disks the exporters are currently returning SMART data for. A disk whose last read "
+    "came back empty still appears on the exporter page, but with no serial (or, on "
+    "exporter 0.14, no device name), so it is not counted here."))
 panels.append(stat(
     2, "SMART FAILED", 4, 0, 4, 4,
     f'count(smartctl_device_smart_status{{{SEL}}} == 0) or vector(0)', "short", ANY_RED,
@@ -165,11 +169,11 @@ table_targets = [
         refid="A", table=True),
 ]
 table_targets += [
-    tgt(f'max by (host, device) ({err(f"counter=\"{c}\"")})', refid=r, table=True)
+    tgt('max by (host, device) (' + err('counter="' + c + '"') + ')', refid=r, table=True)
     for r, c, _ in COUNTERS
 ]
 table_targets += [
-    tgt(f'sum by (host, device) ({err("counter=~\"scsi_(read|write)_uncorrected\"")})',
+    tgt('sum by (host, device) (' + err('counter=~"scsi_(read|write)_uncorrected"') + ')',
         refid="I", table=True),
     tgt(f'max by (host, device) (smartctl_device_smart_status{{{SEL}}})', refid="J", table=True),
     tgt(f'max by (host, device) ({TEMP})', refid="K", table=True),
@@ -298,5 +302,4 @@ path = os.path.join(REPO, "smart", "dashboard.yaml")
 os.makedirs(os.path.dirname(path), exist_ok=True)
 with open(path, "w") as f:
     f.write(doc)
-json.loads("\n".join(ln[4:] for ln in body.splitlines()))
 print("wrote", path, f"({len(doc)} bytes)")

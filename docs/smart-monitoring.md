@@ -33,8 +33,9 @@ matters here is that 0.15.0 adds a SAS endurance metric, which the dashboard use
 
 ## Install
 
-Do this **before** merging the PR if you can. Once the scrape job is live, every host without an
-exporter fires `SmartctlExporterDown` after 15 minutes.
+Do this **before** merging the PR if you can. Once the scrape job is live, the chart's stock
+`TargetDown` alert fires for the `smartctl` job after 10 minutes while any host still has no
+exporter.
 
 ### Proxmox hosts (all 4)
 
@@ -141,17 +142,23 @@ temperature and power-on time. SSDs should also show a wear figure.
 
 | Alert | Severity | Fires when |
 |---|---|---|
-| `SmartDiskErrorsIncreased` | warning | Any error counter is above its 24h low |
-| `SmartDiskErrorsGrowing` | critical | The same, and it rose in 3+ steps or by 10+ within 24h |
+| `SmartDiskErrorsIncreased` | warning | An error counter is above its 24h low, but not yet the critical case |
+| `SmartDiskErrorsGrowing` | critical | An error counter rose in 3+ separate steps, or by 10+, within 24h |
 | `SmartDiskFailed` | critical | The disk's own overall-health verdict is FAILED |
-| `SmartctlExporterDown` | warning | A target can't be scraped for 15m |
 | `SmartctlDisksUnreadable` | warning | The exporter is up but found no disks, or has no data for some of them, for 30m |
-| `SmartDiskDisappeared` | warning | A disk that reported in the last 24h is gone while its exporter is up |
+| `SmartDiskDisappeared` | warning | A disk that reported in the last 24h no longer does while its exporter is up |
+| `TargetDown` (chart default) | warning | More than 10% of the `smartctl` targets (so any one host) can't be scraped for 10m |
+
+The two counter alerts never fire together for one event: the warning stops when the critical
+starts. A "step" is a rise. Falls are not counted, so a pending count (197) that goes up and
+down does not page on its own.
 
 The counters are raw ATA 5 (reallocated), 183 (runtime bad block), 187 (uncorrectable), 197
 (pending), 198 (offline uncorrectable), plus NVMe media errors and SAS grown defects /
 uncorrected reads and writes. All of them are collected into one recording rule,
-`smartctl:device_error_count`, with a `counter` label.
+`smartctl:device_error_count`, with a `counter` label. Attribute 183 is kept only when the drive
+names it `Runtime_Bad_Block`. Intel and some Seagate/WD drives use 183 for
+`SATA_Downshift_Count`, a link-speed counter, which is ignored.
 
 Things to know when one fires:
 
@@ -160,6 +167,16 @@ Things to know when one fires:
 - **A disk swap fires `SmartDiskDisappeared`.** It resolves 24h after the old disk left.
 - **Disk names can move.** The recording rule carries the serial, so a `device` name that now
   points at a different disk starts a new series and is not read as a jump.
-- **A disk that is still present but can no longer be read stays invisible here.** The exporter
-  keeps serving that disk's last good read, so its numbers freeze. Ceph (`CephOSDDown`,
-  `CephHealthError`) and ZFS pool state cover that case.
+- **What a failed read looks like depends on how it fails.** This is from the exporter source
+  (`readjson.go`: `readSMARTctl`, `readData`; `main.go`: `Collect`), the same in 0.14 and 0.15:
+  - smartctl runs but can't open the disk, or reports an error: the exporter keeps serving the
+    disk's **last good read**, so its numbers freeze and nothing here fires. Ceph
+    (`CephOSDDown`, `CephHealthError`) and ZFS pool state cover that case.
+  - The disk has never been read successfully since the exporter started: it gets no per-disk
+    series at all and is only counted in `smartctl_devices`, so `SmartctlDisksUnreadable` fires.
+  - smartctl prints no JSON at all (crashed or was killed): the exporter caches an **empty**
+    result over the last good one. On 0.15 the disk keeps its name but loses its serial and
+    every reading. On 0.14 its series also lose the `device` label, and two such disks produce
+    duplicate series that make the whole page fail, which `TargetDown` catches. Either way the
+    rules count a disk as reporting only if it has both a name and a serial, so
+    `SmartDiskDisappeared` and `SmartctlDisksUnreadable` fire.
