@@ -172,6 +172,39 @@ spec:
                   - 10.2.50.24:9283   # pve-r630-02
                   - 10.2.50.25:9283   # pve-r630-03
 
+          # Disk SMART — prometheus-community smartctl_exporter (:9633) on every PVE
+          # host and on TrueNAS, so one metric schema feeds one dashboard and one rule
+          # file (prometheusrule-smart.yaml). Installed by hand on the hosts, not from
+          # git; see docs/smart-monitoring.md. The exporter re-reads each disk at most
+          # every 60s (--smartctl.interval), so scraping faster buys nothing, and a box
+          # with many disks can take several seconds per scrape, hence the timeout.
+          # `instance` is set to the host name like truenas-node does, so alerts and
+          # the dashboard say pve-r630-02 rather than an IP:port.
+          - job_name: smartctl
+            scrape_interval: 60s
+            scrape_timeout: 30s
+            static_configs:
+              - targets: ["10.1.50.21:9633"]
+                labels:
+                  instance: pve-m900
+                  host: pve-m900
+              - targets: ["10.2.50.23:9633"]
+                labels:
+                  instance: pve-r630-01
+                  host: pve-r630-01
+              - targets: ["10.2.50.24:9633"]
+                labels:
+                  instance: pve-r630-02
+                  host: pve-r630-02
+              - targets: ["10.2.50.25:9633"]
+                labels:
+                  instance: pve-r630-03
+                  host: pve-r630-03
+              - targets: ["10.2.40.10:9633"]
+                labels:
+                  instance: truenas
+                  host: truenas
+
         # Thanos sidecar: uploads 2h TSDB blocks to RustFS S3. Object store
         # config comes from the SOPS-managed thanos-objstore Secret (key
         # objstore.yml), reused by the Thanos Store Gateway / Compactor.
