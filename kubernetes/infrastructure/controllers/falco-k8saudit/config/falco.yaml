@@ -89,9 +89,15 @@ spec:
             # Falco is OOMKilled rather than pushing a control plane into evicting
             # etcd. The scoped audit policy is what keeps this affordable; the
             # upstream catch-all policy would need considerably more.
+            #
+            # CPU is a different story: the pod on the VIP-holding control plane
+            # sees nearly all API traffic and parses it on several threads at once.
+            # It averages ~0.2 cores but in short bursts, and at a 500m limit it was
+            # CFS-throttled 20-36% of periods for weeks (CPUThrottlingHigh flapping
+            # on whichever node held the VIP). Same CPU as the syscall instance.
             requests:
-              cpu: 50m
+              cpu: 100m
               memory: 128Mi
             limits:
-              cpu: 500m
+              cpu: 1000m
               memory: 256Mi
