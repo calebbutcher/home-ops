@@ -50,6 +50,18 @@ spec:
               REDIS_HOSTNAME: immich-redis
               REDIS_PORT: "6379"
               IMMICH_MACHINE_LEARNING_URL: http://immich-machine-learning:3003
+              # Starts Immich's OpenTelemetry SDK, which nothing else does: Prometheus
+              # metrics on :8081 (API) and :8082 (job worker), plus traces. Immich
+              # sets no trace exporter, so the SDK builds an OTLP one from the
+              # OTEL_* env below.
+              IMMICH_TELEMETRY_INCLUDE: all
+              OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy-otlp.monitoring.svc.cluster.local:4318
+              # Parent-based: requests arriving through Traefik are always traced;
+              # traces Immich starts itself (thumbnail, ML and other jobs) at 1%.
+              OTEL_TRACES_SAMPLER: parentbased_traceidratio
+              OTEL_TRACES_SAMPLER_ARG: "0.01"
+              # The SDK would otherwise also push logs over OTLP by default.
+              OTEL_LOGS_EXPORTER: none
             # This one container runs BOTH Immich processes — the API and the
             # microservices job worker — because IMMICH_WORKERS_INCLUDE is unset.
             # They share a cgroup, so a job worker that outgrows the limit takes
@@ -98,11 +110,25 @@ spec:
         ports:
           http:
             port: 2283
+          metrics-api:
+            port: 8081
+          metrics-jobs:
+            port: 8082
       machine-learning:    # → Service "immich-machine-learning"
         controller: immich-machine-learning
         ports:
           http:
             port: 3003
+    serviceMonitor:
+      server:
+        serviceName: immich-server
+        endpoints:
+          - port: metrics-api
+            path: /metrics
+            interval: 1m
+          - port: metrics-jobs
+            path: /metrics
+            interval: 1m
     persistence:
       # Photo/video library — the existing TrueNAS export, reused in-place. Mounted
       # into the server only (the UPLOAD_LOCATION root).
