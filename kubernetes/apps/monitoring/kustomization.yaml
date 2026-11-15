@@ -96,3 +96,5 @@ resources:
   - kube-prometheus-stack/prometheusrule-hvac.yaml
   - home-assistant/dashboard-hvac.yaml
   - kube-prometheus-stack/prometheusrule-oom.yaml
+  - kube-prometheus-stack/prometheusrule-smart.yaml
+  - smart/dashboard.yaml

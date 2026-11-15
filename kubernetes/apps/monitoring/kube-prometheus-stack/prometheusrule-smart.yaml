@@ -1,0 +1,194 @@
+---
+# Disk SMART alerts for the 4 Proxmox hosts and TrueNAS, fed by the `smartctl` scrape
+# job (prometheus-community smartctl_exporter on :9633; see kube-prometheus-stack/
+# helmrelease.yaml additionalScrapeConfigs and docs/smart-monitoring.md). No `release:`
+# label needed — ruleSelectorNilUsesHelmValues: false — and the `severity` labels route
+# to Discord via the catch-all `discord` AlertmanagerConfig.
+#
+# These key on RAW error counters INCREASING, not on the SMART overall-health verdict.
+# A disk can throw uncorrectable reads and remap sectors for weeks while still saying
+# PASSED: the verdict only flips when a NORMALIZED value falls to its threshold (e.g.
+# VALUE 099 vs THRESH 010), long after the raw counts have started climbing.
+# SmartDiskFailed is kept, but it is the late signal, not the early one.
+#
+# An unreachable exporter is left to the chart's stock TargetDown (defaultRules.rules.
+# general, on by default): it fires when >10% of a job's targets are down for 10m, and
+# one of these 5 hosts is 20%.
+#
+# Exporter behaviours that shape the rules below (smartctl_exporter v0.14.0/v0.15.0,
+# readjson.go readSMARTctl/readData and main.go Collect):
+#   * `device` is the kernel name (sda, nvme0), which is not stable across reboots or
+#     hot-plugs. The recording rule joins in the serial from `smartctl_device`, so a
+#     name that now points at a DIFFERENT disk becomes a new series instead of a
+#     bogus "jump" in an old one.
+#   * A read is cached only if smartctl's exit status has neither "command line did
+#     not parse" nor "device open failed" set and its JSON has no error message. When
+#     a read fails that way the cache keeps the disk's last GOOD read, so its numbers
+#     freeze instead of vanishing. Ceph (CephOSDDown) and ZFS pool state cover that.
+#   * A disk with no good read since the exporter started has no cache entry, so it
+#     emits no per-disk series at all; it is only counted in `smartctl_devices`.
+#   * If smartctl prints no JSON at all (crash, killed), the exporter caches an EMPTY
+#     result, replacing any good one. That disk then reports `smartctl_device` with an
+#     empty serial and nothing else (v0.15), or with device="" (v0.14, where the label
+#     is read from the JSON). Two such disks on v0.14 produce duplicate series and the
+#     whole /metrics page returns 500, which TargetDown catches. This is why "a disk
+#     is reporting" means smartctl_device{device!="", serial_number!=""} below.
+#   * A disk that drops off the bus leaves the exporter's next rescan (10m).
+#
+# Windows are 24h because rules evaluate against local Prometheus (retention: 2d).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: smart
+  namespace: monitoring
+spec:
+  groups:
+    - name: smart-counters.recording
+      rules:
+        # One series per (host, disk, error counter), labelled with the disk's serial
+        # and model. `counter` names the source so the alerts and dashboard need not
+        # know which interface a disk speaks:
+        #   ata_5    Reallocated_Sector_Ct      ata_187  Reported_Uncorrect
+        #   ata_183  Runtime_Bad_Block          ata_197  Current_Pending_Sector
+        #                                       ata_198  Offline_Uncorrectable
+        #   nvme_media_errors                   scsi_grown_defects / scsi_*_uncorrected
+        # attribute_name is vendor-specific (Samsung calls 187 Uncorrectable_Error_Cnt),
+        # so match on attribute_id — except 183, which is Runtime_Bad_Block on Samsung
+        # but SATA_Downshift_Count (a link-speed counter, not media damage) on Intel and
+        # some Seagate/WD drives, so it is kept only under that name. Only ATA series
+        # carry attribute_name.
+        - record: smartctl:device_error_count
+          expr: |
+            (
+                 label_replace(
+                   max without (attribute_flags_short, attribute_flags_long, attribute_value_type) (
+                        smartctl_device_attribute{job="smartctl", attribute_value_type="raw", attribute_id=~"5|187|197|198"}
+                     or smartctl_device_attribute{job="smartctl", attribute_value_type="raw", attribute_id="183", attribute_name="Runtime_Bad_Block"}
+                   ),
+                   "counter", "ata_$1", "attribute_id", "(.+)"
+                 )
+              or label_replace(smartctl_device_media_errors{job="smartctl"}, "counter", "nvme_media_errors", "", "")
+              or label_replace(smartctl_scsi_grown_defect_list{job="smartctl"}, "counter", "scsi_grown_defects", "", "")
+              or label_replace(smartctl_read_total_uncorrected_errors{job="smartctl"}, "counter", "scsi_read_uncorrected", "", "")
+              or label_replace(smartctl_write_total_uncorrected_errors{job="smartctl"}, "counter", "scsi_write_uncorrected", "", "")
+            )
+            * on (instance, device) group_left (serial_number, model_name)
+            max by (instance, device, serial_number, model_name) (smartctl_device{job="smartctl"})
+
+    - name: smart-disk.rules
+      rules:
+        # The two counter tiers are MUTUALLY EXCLUSIVE (the warning is `unless` the
+        # critical condition), the same reasoning as prometheusrule-oom.yaml: the
+        # chart's inhibit_rules only suppress a warning with a critical of the SAME
+        # alertname, so overlapping rules would post both for one event.
+        #
+        # Rise = above the 24h MINIMUM rather than increase(): 197 (pending) legitimately
+        # falls when a sector is remapped, and increase() would read that fall as a
+        # counter reset and report a false rise. "Steps" counts only rises: each 1m
+        # subquery step compares the value with the one 1m earlier, so every rise is
+        # counted exactly once and falls are not counted at all.
+        - alert: SmartDiskErrorsIncreased
+          expr: |
+            (smartctl:device_error_count - min_over_time(smartctl:device_error_count[24h])) > 0
+            unless (
+                 count_over_time((smartctl:device_error_count > smartctl:device_error_count offset 1m)[24h:1m]) >= 3
+              or (smartctl:device_error_count - min_over_time(smartctl:device_error_count[24h])) >= 10
+            )
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Disk error counter rising ({{ $labels.host }} {{ $labels.device }} {{ $labels.counter }})"
+            description: >-
+              {{ $labels.counter }}{{ with $labels.attribute_name }} ({{ . }}){{ end }} on
+              {{ $labels.host }} /dev/{{ $labels.device }} ({{ $labels.model_name }}) rose
+              by {{ $value }} in the last 24h. SMART overall-health may still say PASSED —
+              the raw count is the early signal. Run `smartctl -x /dev/{{ $labels.device }}`
+              on the host, check the kernel log for medium errors, and plan a replacement.
+
+        - alert: SmartDiskErrorsGrowing
+          # Repeated growth: rose in 3+ separate steps, or by 10+, within 24h. A disk
+          # doing this is actively failing; replace it before the redundancy above it
+          # (Ceph replicas, ZFS vdev) runs out.
+          expr: |
+            (smartctl:device_error_count - min_over_time(smartctl:device_error_count[24h])) > 0
+            and (
+                 count_over_time((smartctl:device_error_count > smartctl:device_error_count offset 1m)[24h:1m]) >= 3
+              or (smartctl:device_error_count - min_over_time(smartctl:device_error_count[24h])) >= 10
+            )
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Disk error counter growing repeatedly ({{ $labels.host }} {{ $labels.device }} {{ $labels.counter }})"
+            description: >-
+              {{ $labels.counter }}{{ with $labels.attribute_name }} ({{ . }}){{ end }} on
+              {{ $labels.host }} /dev/{{ $labels.device }} ({{ $labels.model_name }}) rose
+              by {{ $value }} in the last 24h, in several steps or one large jump. The disk
+              is degrading now. Take it out of service (`ceph osd out` / `zpool replace`)
+              and replace it.
+
+        - alert: SmartDiskFailed
+          # The drive's own verdict. Late, but unambiguous when it does flip.
+          expr: smartctl_device_smart_status{job="smartctl"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Disk SMART health FAILED ({{ $labels.host }} {{ $labels.device }})"
+            description: >-
+              /dev/{{ $labels.device }} on {{ $labels.host }} reports SMART overall-health
+              FAILED. Replace it. Check `smartctl -x /dev/{{ $labels.device }}` for which
+              attribute crossed its threshold.
+
+    - name: smart-exporter.rules
+      rules:
+        - alert: SmartctlDisksUnreadable
+          # The exporter answers but found no disks, or found disks it is not reporting
+          # (never read successfully, or its last read came back empty; see the header).
+          # Either way it serves an empty or partial page that looks healthy. A disk kept
+          # in standby is skipped too (--smartctl.powermode-check).
+          expr: |
+            smartctl_devices{job="smartctl"} == 0
+            or
+            smartctl_devices{job="smartctl"}
+              > on (instance) group_left ()
+            (
+                 count by (instance) (smartctl_device{job="smartctl", device!="", serial_number!=""})
+              or on (instance) (0 * up{job="smartctl"})
+            )
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "smartctl_exporter can't read some disks ({{ $labels.instance }})"
+            description: >-
+              smartctl_exporter on {{ $labels.instance }} found {{ $value }} disk(s) and
+              is missing SMART data for some or all of them (0 means it found none). Check
+              the exporter log, compare `smartctl --scan` with the disks on the metrics
+              page, and run `smartctl -x` on a missing disk by hand.
+
+        - alert: SmartDiskDisappeared
+          # A disk that reported in the last 24h no longer does while its exporter is up:
+          # it dropped off the bus (dead, cable, HBA), was pulled, or its last read came
+          # back empty. Resolves itself 24h after it stopped. A planned disk swap fires
+          # this too; a reboot that renames disks can as well, if the set of names changes.
+          expr: |
+            (
+              group by (job, instance, host, device) (
+                max_over_time(smartctl_device{job="smartctl", device!="", serial_number!=""}[24h])
+              )
+                unless on (instance, device)
+              smartctl_device{job="smartctl", device!="", serial_number!=""}
+            )
+            and on (instance) (up{job="smartctl"} == 1)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Disk no longer reported ({{ $labels.instance }} {{ $labels.device }})"
+            description: >-
+              /dev/{{ $labels.device }} on {{ $labels.instance }} was reporting SMART data
+              in the last 24h and no longer is, while the exporter is up. Check whether the
+              disk is still visible (`lsblk`, `dmesg`), and whether its Ceph OSD or ZFS
+              vdev is still healthy.
