@@ -1,0 +1,95 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tempo
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      # Monolithic (single binary) chart. Do NOT switch to tempo-distributed: from
+      # Tempo 3.0 the microservices write path goes through Kafka (same trap as
+      # Mimir 6.x). Monolithic runs every component in-process with no Kafka, but
+      # 3.0 also removed scalable-single-binary, so this is one replica by design.
+      # Traces are diagnostic only; nothing alerts on them.
+      chart: tempo
+      version: "3.2.1"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana-community
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    replicas: 1
+    tempo:
+      reportingEnabled: false
+      # Rendered into backend_worker/backend_scheduler block_retention.
+      retention: 336h
+      storage:
+        trace:
+          backend: s3
+          s3:
+            bucket: tempo
+            endpoint: 10.2.40.10:30292
+            forcepathstyle: true
+            insecure: true
+            # Env-expanded at runtime from the loki-s3 Secret (same RustFS key
+            # pair Loki uses), so no credentials live in this file.
+            access_key: ${LOKI_S3_ACCESS_KEY}
+            secret_key: ${LOKI_S3_SECRET_KEY}
+          # Chart default is backend: local; null drops its leftover path.
+          local: null
+          wal:
+            path: /var/tempo/wal
+      # Everything sends OTLP via the alloy-otlp gateway, never directly. The
+      # chart's Jaeger listeners stay on: its Service template fails to render
+      # without them.
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+      extraArgs:
+        config.expand-env: "true"
+      extraEnvFrom:
+        - secretRef:
+            name: loki-s3
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+        readOnlyRootFilesystem: true
+      # Writable /tmp, since the root filesystem is read-only.
+      extraVolumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      resources:
+        requests:
+          cpu: 50m
+          memory: 256Mi
+        limits:
+          memory: 1Gi
+    # Live-store WAL only; blocks are flushed to RustFS. longhorn-scratch keeps
+    # this churny, disposable volume out of the nightly backup group, so
+    # snapshots don't pin it to its declared size. Losing it loses only the last
+    # few minutes of unflushed traces.
+    persistence:
+      enabled: true
+      storageClassName: longhorn-scratch
+      size: 5Gi
+      annotations: {}
+    extraVolumes:
+      - name: tmp
+        emptyDir: {}
+    serviceMonitor:
+      enabled: true

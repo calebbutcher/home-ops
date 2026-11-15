@@ -77,10 +77,21 @@ spec:
               Proxmox fencing, Ceph health) silently stops evaluating against new
               data. Check the LoadBalancer on 10.2.169.83 is still assigned.
 
+        - alert: AlloyOTLPGatewayDown
+          expr: absent(alloy_build_info{job="alloy-otlp"})
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Alloy OTLP gateway is down — no traces reaching Tempo"
+            description: >-
+              No metrics from the alloy-otlp Deployment for >10m. Traefik and every
+              other sender are dropping their spans. Requests are not affected.
+
         # Individual DaemonSet pod down — the release as a whole is still up, so
         # only that node's logs are missing. Warning, not critical.
         - alert: AlloyInstanceDown
-          expr: up{job=~"alloy|alloy-events|alloy-syslog"} == 0
+          expr: up{job=~"alloy|alloy-events|alloy-syslog|alloy-otlp"} == 0
           for: 15m
           labels:
             severity: warning
@@ -324,3 +335,31 @@ spec:
               nothing to forward to, so all Thanos queries fail. Note the chart's
               own ThanosQueryIsDown does NOT cover this case once Query Frontend is
               enabled — its regex matches the frontend too.
+
+    # Traces are diagnostic only, so everything here is a warning. Written before
+    # Tempo and alloy-otlp existed: check both exprs return series once they run.
+    - name: tempo.rules
+      rules:
+        - alert: TempoDown
+          expr: absent(up{job="tempo"} == 1)
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Tempo is down — traces are not being stored"
+            description: >-
+              No scrapeable tempo target for >10m. alloy-otlp keeps retrying for a
+              while and then drops spans. Check
+              `kubectl -n monitoring logs tempo-0`.
+
+        # Alloy is up but Tempo is refusing or unreachable.
+        - alert: TempoTraceExportFailing
+          expr: sum(rate(otelcol_exporter_send_failed_spans_total{job="alloy-otlp"}[10m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "alloy-otlp cannot deliver spans to Tempo"
+            description: >-
+              alloy-otlp has failed to send spans to Tempo for >15m
+              ({{ printf "%.2f" $value }}/s). Those traces are lost.
