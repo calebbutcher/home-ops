@@ -33,7 +33,7 @@ spec:
           app:
             image:
               repository: golift/unpackerr
-              tag: "v0.16.1"
+              tag: "v1.0.1"
             env:
               TZ: "UTC"
               # --- global ---
