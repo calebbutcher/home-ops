@@ -77,7 +77,7 @@ spec:
 
                   string_attribute {
                     key                    = "user_agent.original"
-                    values                 = ["Blackbox Exporter/.*", "Uptime-Kuma/.*"]
+                    values                 = ["Blackbox-Exporter/.*", "Uptime-Kuma/.*"]
                     enabled_regex_matching = true
                   }
                 }
