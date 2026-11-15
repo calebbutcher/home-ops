@@ -69,6 +69,8 @@ resources:
   - alloy/helmrelease.yaml
   - alloy/helmrelease-events.yaml
   - alloy/helmrelease-syslog.yaml
+  - alloy/helmrelease-otlp.yaml
+  - tempo/helmrelease.yaml
   - postgres/dashboard-overview.yaml
   - postgres/dashboard-cluster.yaml
   - mariadb/dashboard.yaml

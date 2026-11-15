@@ -337,6 +337,33 @@ spec:
           uid: loki
           access: proxy
           url: http://loki-gateway.monitoring.svc.cluster.local
+          jsonData:
+            # Traefik's JSON access logs carry TraceId; this turns it into a
+            # link to the trace in Tempo. `$$` escapes Grafana's env expansion.
+            derivedFields:
+              - name: TraceId
+                matcherRegex: '"TraceId":"(\w+)"'
+                datasourceUid: tempo
+                url: "$${__value.raw}"
+        # Tempo (traces). Links back to Loki logs for the same pod and time window.
+        - name: Tempo
+          type: tempo
+          uid: tempo
+          access: proxy
+          url: http://tempo.monitoring.svc.cluster.local:3200
+          jsonData:
+            tracesToLogsV2:
+              datasourceUid: loki
+              spanStartTimeShift: "-5m"
+              spanEndTimeShift: "5m"
+              filterByTraceID: false
+              tags:
+                - key: k8s.namespace.name
+                  value: namespace
+                - key: k8s.pod.name
+                  value: pod
+            nodeGraph:
+              enabled: true
 
       # Sidecar discovers ConfigMaps labelled grafana_dashboard: "1"
       # and auto-imports them as dashboards

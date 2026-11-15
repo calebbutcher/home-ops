@@ -1,0 +1,122 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: alloy-otlp
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: alloy
+      version: "1.14.3"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # OTLP trace gateway. Apps send traces here, never straight to Tempo, so the
+    # backend can change without touching any app. One replica on purpose: tail
+    # sampling only works when every span of a trace reaches the same instance.
+    # If this pod is down, senders drop spans; requests are not affected.
+    controller:
+      type: deployment
+      replicas: 1
+    alloy:
+      extraPorts:
+        - name: otlp-grpc
+          port: 4317
+          targetPort: 4317
+          protocol: TCP
+        - name: otlp-http
+          port: 4318
+          targetPort: 4318
+          protocol: TCP
+      configMap:
+        content: |-
+          otelcol.receiver.otlp "default" {
+            grpc {
+              endpoint = "0.0.0.0:4317"
+            }
+            http {
+              endpoint = "0.0.0.0:4318"
+            }
+            output {
+              traces = [otelcol.processor.k8sattributes.default.input]
+            }
+          }
+
+          // Tag spans with the sending pod's namespace, pod and workload.
+          otelcol.processor.k8sattributes "default" {
+            output {
+              traces = [otelcol.processor.tail_sampling.default.input]
+            }
+          }
+
+          // Drop synthetic probe traffic (blackbox exporter, Uptime Kuma), which
+          // would otherwise be most of what Traefik traces. Keep everything else.
+          // Traefik sets user_agent.original on its entrypoint span.
+          otelcol.processor.tail_sampling "default" {
+            decision_wait = "10s"
+
+            policy {
+              name = "drop-probes"
+              type = "drop"
+
+              drop {
+                drop_sub_policy {
+                  name = "probe-user-agents"
+                  type = "string_attribute"
+
+                  string_attribute {
+                    key                    = "user_agent.original"
+                    values                 = ["Blackbox Exporter/.*", "Uptime-Kuma/.*"]
+                    enabled_regex_matching = true
+                  }
+                }
+              }
+            }
+
+            policy {
+              name = "keep-everything-else"
+              type = "always_sample"
+            }
+
+            output {
+              traces = [otelcol.processor.batch.default.input]
+            }
+          }
+
+          otelcol.processor.batch "default" {
+            output {
+              traces = [otelcol.exporter.otlp.tempo.input]
+            }
+          }
+
+          otelcol.exporter.otlp "tempo" {
+            client {
+              endpoint = "tempo.monitoring.svc.cluster.local:4317"
+              tls {
+                insecure = true
+              }
+            }
+          }
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 512Mi
+    # k8sattributes reads pods, namespaces and replicasets.
+    rbac:
+      create: true
+    # See alloy/helmrelease.yaml: self-metrics, so a dead gateway alerts.
+    serviceMonitor:
+      enabled: true

@@ -97,6 +97,19 @@ spec:
       enabled: true
       format: json
 
+    # OTLP traces to the alloy-otlp gateway, which drops probe traffic and
+    # forwards to Tempo. With tracing on, each JSON access log line also carries
+    # TraceId, which Grafana's Loki datasource links to the trace. Query params
+    # stay redacted (Traefik's default).
+    tracing:
+      sampleRate: 1.0
+      otlp:
+        enabled: true
+        grpc:
+          enabled: true
+          endpoint: alloy-otlp.monitoring.svc.cluster.local:4317
+          insecure: true
+
     # CrowdSec bouncer plugin. Registered here as an experimental plugin; wired to LAPI by
     # the `crowdsec-bouncer` Middleware (crowdsec ns). Traefik downloads the plugin from the
     # catalog at startup (needs egress). Attached to 13 of the 30 routers — NOT to every
