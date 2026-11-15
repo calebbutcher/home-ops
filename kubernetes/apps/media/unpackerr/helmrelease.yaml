@@ -43,6 +43,24 @@ spec:
               # --- metrics (headless: metrics only, no UI/ingress) ---
               UN_WEBSERVER_METRICS: "true"
               UN_WEBSERVER_LISTEN_ADDR: "0.0.0.0:5656"
+              # v1 serves a web UI on the same port and requires an API key on
+              # /metrics. Prometheus gets a key whose only role can read metrics.
+              UN_WEBSERVER_ROLES_metrics_PERMISSIONS_0: "system:metrics:read"
+              UN_WEBSERVER_API_KEYS_0_NAME: "prometheus"
+              UN_WEBSERVER_API_KEYS_0_ROLES_0: "metrics"
+              UN_WEBSERVER_API_KEYS_0_KEY:
+                valueFrom:
+                  secretKeyRef:
+                    name: unpackerr-webserver
+                    key: metrics-api-key
+              # Without a password set, v1 generates a temporary admin password on
+              # every start (no /config to keep it) and prints it to the log.
+              # Nobody logs into the UI; this is random and never used.
+              UN_WEBSERVER_UI_PASSWORD:
+                valueFrom:
+                  secretKeyRef:
+                    name: unpackerr-webserver
+                    key: ui-password
               # --- Sonarr ---
               UN_SONARR_0_URL: "http://sonarr.media.svc.cluster.local:8989"
               UN_SONARR_0_PATHS_0: "/data"
@@ -81,6 +99,11 @@ spec:
             scheme: http
             path: /metrics
             interval: 1m
+            authorization:
+              type: Bearer
+              credentials:
+                name: unpackerr-webserver
+                key: metrics-api-key
     persistence:
       downloads:
         existingClaim: downloads-nfs
