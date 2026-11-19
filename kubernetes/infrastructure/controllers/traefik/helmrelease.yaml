@@ -70,6 +70,31 @@ spec:
         # The default, minimal, only records the request and the backend call.
         observability:
           traceVerbosity: detailed
+      # Dedicated entrypoint for the Zot registry (kubernetes/apps/registry), so
+      # image pushes get a long read timeout without loosening websecure.
+      #
+      # Traefik v3's default readTimeout is 60s for the WHOLE request, body
+      # included, and docker uploads each layer as one PATCH. A 1.57GB layer from
+      # the laptop died at exactly 1m0s with a 500, every retry. websecure carries
+      # the internet-facing hosts, where that 60s is the slow-sender guard, so it
+      # stays as is and only this LAN-side port gets 30m.
+      #
+      # Port 5000 is on the same LoadBalancer VIP and must never be forwarded
+      # from the WAN; the registry Ingress also carries the internal-only
+      # middleware as a second guard.
+      # Image refs therefore include the port: registry.int.nerdbox.dev:5000/...
+      registry:
+        port: 5000
+        exposedPort: 5000
+        expose:
+          default: true
+        protocol: TCP
+        http:
+          tls:
+            enabled: true
+        transport:
+          respondingTimeouts:
+            readTimeout: 30m
 
     # cert-manager handles all certificates — built-in ACME disabled
     certificatesResolvers: {}
