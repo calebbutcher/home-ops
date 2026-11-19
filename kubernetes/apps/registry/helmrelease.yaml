@@ -105,6 +105,12 @@ spec:
     # `compat: ["docker2s2"]`: without it Zot accepts only OCI manifests, and a
     # push from Docker's classic image store (Docker v2 schema 2 manifests) gets
     # every layer uploaded and then a 415 MANIFEST_INVALID on the manifest PUT.
+    #
+    # read/writeTimeout: `zot serve` defaults BOTH to 60s when unset
+    # (pkg/cli/server/root.go), for the whole request or response. A layer is one
+    # PATCH, so a 1.57GB push from the laptop died at 1m0s with "i/o timeout" even
+    # after Traefik's registry entrypoint was raised; the write side does the same
+    # to a large pull. 30m matches that entrypoint's readTimeout.
     configMaps:
       config:
         data:
@@ -123,6 +129,8 @@ spec:
                 "port": "5000",
                 "realm": "zot",
                 "compat": ["docker2s2"],
+                "readTimeout": "30m",
+                "writeTimeout": "30m",
                 "auth": {
                   "htpasswd": { "path": "/etc/zot-auth/htpasswd" },
                   "failDelay": 5
