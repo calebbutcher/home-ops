@@ -1,0 +1,28 @@
+---
+# Zot's storage root: image blobs, manifests and the search/UI metadata cache.
+#
+# longhorn-scratch, not longhorn-single. Everything pushed here is built on the
+# laptop from source, so the registry is never the copy of record and needs no
+# backup. More importantly, Zot's GC deletes unreferenced blobs on a schedule —
+# a backed-up volume would have its nightly snapshots pin every deleted layer,
+# and Longhorn's actualSize would climb to the declared size regardless of what
+# is live (see the longhorn-scratch StorageClass comment). The scratch class
+# keeps the volume out of the `default` backup group and trims it instead, and
+# LonghornVolumeNeverBackedUp already exempts it by class.
+#
+# 30Gi single replica. Longhorn schedules on the DECLARED size, so this is a
+# real 30G reservation on one worker's disk; raise it when the images do.
+#
+# RWO ⇒ the controller uses strategy: Recreate.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zot-data
+  namespace: registry
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn-scratch
+  resources:
+    requests:
+      storage: 30Gi

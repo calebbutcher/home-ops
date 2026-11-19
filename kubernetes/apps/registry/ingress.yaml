@@ -1,0 +1,39 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zot
+  namespace: registry
+  annotations:
+    # CNAME to the single self-healing ingress record (see the Traefik Service)
+    # rather than a second A record, so a Traefik IP change moves one record.
+    external-dns.kubernetes.io/target: ingress.int.nerdbox.dev
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # Deliberately NO Authentik forwardAuth, unlike the other internal tools.
+    # `docker login`/`push` and containerd speak the registry token/basic-auth
+    # protocol and cannot follow a browser redirect to an IdP, so forwardAuth
+    # would break every client. Zot's own htpasswd auth is the boundary for
+    # writes; reads are anonymous by design so nodes pull without a pull secret.
+    #
+    # internal-only is what keeps those anonymous reads on the LAN (and the
+    # cluster: kubelet pulls come from node IPs in 10.0.0.0/8). No CrowdSec
+    # bouncer — that is reserved for the internet-exposed ingresses.
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-security-headers@kubernetescrd,traefik-internal-only@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - registry.int.nerdbox.dev
+      secretName: registry-tls
+  rules:
+    - host: registry.int.nerdbox.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: zot
+                port:
+                  number: 5000
