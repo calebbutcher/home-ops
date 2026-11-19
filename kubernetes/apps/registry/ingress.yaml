@@ -9,7 +9,10 @@ metadata:
     # rather than a second A record, so a Traefik IP change moves one record.
     external-dns.kubernetes.io/target: ingress.int.nerdbox.dev
     cert-manager.io/cluster-issuer: letsencrypt-prod
-    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # The dedicated `registry` entrypoint (:5000, 30m read timeout), NOT
+    # websecure: websecure's 60s timeout cuts off large layer pushes. See the
+    # Traefik HelmRelease. Image refs are registry.int.nerdbox.dev:5000/...
+    traefik.ingress.kubernetes.io/router.entrypoints: registry
     # Deliberately NO Authentik forwardAuth, unlike the other internal tools.
     # `docker login`/`push` and containerd speak the registry token/basic-auth
     # protocol and cannot follow a browser redirect to an IdP, so forwardAuth
