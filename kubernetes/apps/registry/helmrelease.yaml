@@ -1,0 +1,177 @@
+---
+# Zot — a plain OCI registry so images built on the laptop can be pushed and
+# pulled by the cluster without going through GitHub/GHCR.
+#
+# Zot over Harbor: a single static binary with no database or Redis, which is
+# the whole of what one person pushing a handful of images needs. Gitea's
+# built-in registry was the other option; it was passed over to keep image
+# storage independent of Gitea.
+#
+# Access model: anonymous READ (the ingress is internal-only, so that means the
+# LAN and the cluster), htpasswd-authenticated WRITE for one user. Anonymous
+# read is what lets kubelet pull without an imagePullSecret in every namespace.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: zot
+  namespace: registry
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: "5.2.1"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    defaultPodOptions:
+      securityContext:
+        # 65532 is distroless's `nonroot`. The image would otherwise run as root,
+        # and Zot needs no privilege: it only listens on 5000 and writes its
+        # storage root, which fsGroup makes writable.
+        runAsUser: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+    controllers:
+      zot:
+        # RWO volume: Recreate stops the old pod before the new one mounts it.
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/project-zot/zot
+              tag: v2.1.23
+            # The image's default CMD is `serve /etc/zot/config.json`, which is
+            # where the config ConfigMap below is mounted.
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: [ALL]
+            probes:
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /startupz
+                    port: 5000
+                  periodSeconds: 5
+                  failureThreshold: 30
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /livez
+                    port: 5000
+                  periodSeconds: 30
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /readyz
+                    port: 5000
+                  periodSeconds: 10
+                  failureThreshold: 3
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                # Pushes stream to disk, but dedupe hashing and the search
+                # extension's metadata cache are the memory users.
+                memory: 1Gi
+    # Defined here rather than as a separate ConfigMap so app-template stamps a
+    # checksum annotation on the pod: a config change rolls it automatically.
+    #
+    # This REPLACES the image's built-in /etc/zot/config.json, so anything that
+    # file set must be repeated here. The one that matters is
+    # `compat: ["docker2s2"]`: without it Zot accepts only OCI manifests, and a
+    # push from Docker's classic image store (Docker v2 schema 2 manifests) gets
+    # every layer uploaded and then a 415 MANIFEST_INVALID on the manifest PUT.
+    configMaps:
+      config:
+        data:
+          config.json: |
+            {
+              "distSpecVersion": "1.1.1",
+              "storage": {
+                "rootDirectory": "/var/lib/registry",
+                "dedupe": true,
+                "gc": true,
+                "gcDelay": "1h",
+                "gcInterval": "24h"
+              },
+              "http": {
+                "address": "0.0.0.0",
+                "port": "5000",
+                "realm": "zot",
+                "compat": ["docker2s2"],
+                "auth": {
+                  "htpasswd": { "path": "/etc/zot-auth/htpasswd" },
+                  "failDelay": 5
+                },
+                "accessControl": {
+                  "repositories": {
+                    "**": {
+                      "anonymousPolicy": ["read"],
+                      "defaultPolicy": ["read"]
+                    }
+                  },
+                  "adminPolicy": {
+                    "users": ["caleb"],
+                    "actions": ["read", "create", "update", "delete"]
+                  }
+                }
+              },
+              "log": { "level": "info" },
+              "extensions": {
+                "search": { "enable": true },
+                "ui": { "enable": true }
+              }
+            }
+    service:
+      app:               # identifier `app` ⇒ Service takes the release name
+        controller: zot
+        ports:
+          http:
+            port: 5000
+    persistence:
+      config:
+        type: configMap
+        identifier: config
+        globalMounts:
+          - path: /etc/zot
+            readOnly: true
+      # htpasswd for the push user — see secret.sops.yaml.
+      auth:
+        type: secret
+        name: registry-auth
+        globalMounts:
+          - path: /etc/zot-auth
+            readOnly: true
+      data:
+        existingClaim: zot-data
+        globalMounts:
+          - path: /var/lib/registry
+      # Read-only root filesystem: give Go's temp dir somewhere to write.
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp

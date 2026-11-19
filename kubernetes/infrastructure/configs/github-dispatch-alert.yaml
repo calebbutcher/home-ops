@@ -46,6 +46,7 @@ spec:
     - {kind: HelmRelease, name: "*", namespace: paperless}
     - {kind: HelmRelease, name: "*", namespace: pricewatch}
     - {kind: HelmRelease, name: "*", namespace: reef-log}
+    - {kind: HelmRelease, name: "*", namespace: registry}
     - {kind: HelmRelease, name: "*", namespace: speedtest}
     - {kind: HelmRelease, name: "*", namespace: tandoor}
     - {kind: HelmRelease, name: "*", namespace: technitium}

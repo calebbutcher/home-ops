@@ -1,0 +1,13 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: registry
+  labels:
+    # PodSecurity baseline, like every other app namespace. Zot is a static Go
+    # binary on distroless and needs no host access at all; the pod also runs
+    # non-root with every capability dropped (see helmrelease.yaml), but
+    # 'restricted' is not enforced for the cluster-wide reason given in
+    # speedtest/namespace.yaml.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest

@@ -20,4 +20,5 @@ resources:
   - coc-trade-bot
   - speedtest
   - reef-log
+  - registry
   - bambustudio
