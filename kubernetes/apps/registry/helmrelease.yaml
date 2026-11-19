@@ -99,6 +99,12 @@ spec:
                 memory: 1Gi
     # Defined here rather than as a separate ConfigMap so app-template stamps a
     # checksum annotation on the pod: a config change rolls it automatically.
+    #
+    # This REPLACES the image's built-in /etc/zot/config.json, so anything that
+    # file set must be repeated here. The one that matters is
+    # `compat: ["docker2s2"]`: without it Zot accepts only OCI manifests, and a
+    # push from Docker's classic image store (Docker v2 schema 2 manifests) gets
+    # every layer uploaded and then a 415 MANIFEST_INVALID on the manifest PUT.
     configMaps:
       config:
         data:
@@ -116,6 +122,7 @@ spec:
                 "address": "0.0.0.0",
                 "port": "5000",
                 "realm": "zot",
+                "compat": ["docker2s2"],
                 "auth": {
                   "htpasswd": { "path": "/etc/zot-auth/htpasswd" },
                   "failDelay": 5
