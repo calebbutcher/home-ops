@@ -187,9 +187,47 @@ spec:
               hung or dropped out of the LACP bond (lost redundancy). Check
               `cat /proc/net/bonding/bond01` on the host.
 
+        - alert: TrueNASBondMemberDown
+          # bond01 has two members. One that's down, or that left the bond (a
+          # failed firmware recovery, a PCI/AER removal), drops it here. The
+          # second case also takes it out of the collector's list (it reads the
+          # bond's slaves), so its bnxt_stat series and iface_up line just
+          # vanish, and TrueNASBondSlaveStall can't see it either (it needs
+          # carrier == 1 on a series that's gone).
+          expr: node_bonding_active{job="truenas-node", master="bond01"} < 2
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS bond01 has {{ $value }} of 2 members active"
+            description: >-
+              A bond01 member is down or has left the bond, so the uplink has
+              lost redundancy, and the bnxt counters for that port may no longer
+              be collected. Check `cat /proc/net/bonding/bond01` and `ip link`
+              on the host.
+
+        - alert: TrueNASNICInterfaceUnreadable
+          # The collector ran (the other slave kept the file fresh, so
+          # TrueNASNICCollectorStale stays quiet) but `ethtool -S` failed on this
+          # interface, so its bnxt_stat counters are gone. Two consecutive 5-minute
+          # runs, so one odd read doesn't page. A wedged driver refusing ethtool is
+          # itself a plausible symptom of the hang being chased.
+          expr: bnxt_collector_iface_up{job="truenas-node"} == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TrueNAS NIC {{ $labels.device }} unreadable by ethtool"
+            description: >-
+              nic-textfile-collector.sh couldn't run `ethtool -S {{ $labels.device }}`
+              on its last two runs, so the firmware-reset and driver-error alerts
+              are blind for that interface. Check `cat /proc/net/bonding/bond01`
+              and `ethtool -S {{ $labels.device }}` on the host.
+
         - alert: TrueNASNICCollectorStale
-          # The bnxt ethtool collector stopped updating (cron died, host issue, or it
-          # hit an unreadable interface and refused to publish a false "all clear").
+          # The bnxt ethtool collector stopped updating (cron died, host issue, or NO
+          # interface was readable and it refused to publish a false "all clear";
+          # a single unreadable one is TrueNASNICInterfaceUnreadable).
           # A dead detection pipeline must never read as healthy.
           expr: time() - bnxt_collector_last_run_timestamp{job="truenas-node"} > 1800
           for: 0m

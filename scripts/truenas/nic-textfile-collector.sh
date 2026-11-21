@@ -24,9 +24,13 @@
 #   3. Schedule via System Settings → Advanced → Cron Jobs, run as root, `*/5 * * * *`.
 #   Re-verify the cron after major TrueNAS upgrades (they can reset OS-level tweaks).
 #
-# On failure to read ANY interface it exits WITHOUT rewriting nic.prom, so the file
-# goes stale and TrueNASNICCollectorStale fires — a dead pipeline must never read as
-# "healthy".
+# Per interface, bnxt_collector_iface_up{device} says whether `ethtool -S` worked
+# (1) or failed (0). An unreadable interface still gets its 0 line, so its counters
+# can't just quietly vanish while the other slave keeps the file fresh — during the
+# hang this exists to catch, `ethtool -S` failing on a slave is itself a likely
+# symptom (alert: TrueNASNICInterfaceUnreadable). If NO interface is readable it
+# exits WITHOUT rewriting nic.prom, so the file goes stale and
+# TrueNASNICCollectorStale fires — a dead pipeline must never read as "healthy".
 #
 # Env overrides:
 #   TEXTFILE_DIR  output dir (default /var/lib/node_exporter/textfile)
@@ -64,15 +68,29 @@ fi
 NIC_IFACES="$(echo "$NIC_IFACES" | xargs)"   # trim
 [ -n "$NIC_IFACES" ] || { echo "no interfaces to sample (set NIC_IFACES)" >&2; exit 1; }
 
+# A wedged bnxt driver can hang `ethtool -S` itself (it waits on the rtnl lock).
+# Cap it, so a hang reads as iface_up 0 instead of a pile of stuck cron runs.
+if command -v timeout >/dev/null 2>&1; then
+  read_stats() { timeout 20 "$ETHTOOL" -S "$1"; }
+else
+  read_stats() { "$ETHTOOL" -S "$1"; }
+fi
+
 NOW="$(date +%s)"
 TMP="$(mktemp "${OUT}.XXXXXX")"
 trap 'rm -f "$TMP"' EXIT
 
 samples=()   # "bnxt_stat{device=\"..\",stat=\"..\"} <int>"
+iface_up=()  # "bnxt_collector_iface_up{device=\"..\"} 0|1"
 read_ok=0
 for ifc in $NIC_IFACES; do
-  stats="$("$ETHTOOL" -S "$ifc" 2>/dev/null)" || { echo "ethtool -S $ifc failed" >&2; continue; }
+  if ! stats="$(read_stats "$ifc" 2>/dev/null)"; then
+    echo "ethtool -S $ifc failed" >&2
+    iface_up+=("bnxt_collector_iface_up{device=\"$ifc\"} 0")
+    continue
+  fi
   read_ok=1
+  iface_up+=("bnxt_collector_iface_up{device=\"$ifc\"} 1")
   while IFS= read -r line; do
     line="${line#"${line%%[![:space:]]*}"}"            # strip leading whitespace
     case "$line" in
@@ -96,6 +114,9 @@ done
   printf '# HELP bnxt_stat Selected Broadcom bnxt_en ethtool -S counters (global, per interface).\n'
   printf '# TYPE bnxt_stat counter\n'
   printf '%s\n' ${samples[@]+"${samples[@]}"}
+  printf '# HELP bnxt_collector_iface_up Whether ethtool -S could read this interface on the last run (1) or not (0).\n'
+  printf '# TYPE bnxt_collector_iface_up gauge\n'
+  printf '%s\n' "${iface_up[@]}"
   printf '# HELP bnxt_collector_last_run_timestamp Unix time this NIC collector last completed.\n'
   printf '# TYPE bnxt_collector_last_run_timestamp gauge\n'
   printf 'bnxt_collector_last_run_timestamp %s\n' "$NOW"
