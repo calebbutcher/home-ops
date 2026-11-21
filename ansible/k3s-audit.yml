@@ -149,9 +149,11 @@
             state: restarted
 
         - name: Wait for Ready and a healthy etcd voter on {{ k8s_node_name }}
-          # Same gate as tasks/k8s_master_reboot.yml. Restarting k3s restarts the
-          # embedded etcd member, so advancing to the next node before this one has
-          # rejoined as a voter would cost quorum on a 3-member cluster.
+          # Restarting k3s restarts the embedded etcd member, so advancing to the
+          # next node before this one has rejoined would cost quorum on a 3-member
+          # cluster. Ready and EtcdIsVoter can both be stale here (a k3s restart
+          # doesn't change the boot ID, so tasks/k8s_master_reboot.yml's bootID
+          # check can't apply); the etcd /health check below is the real gate.
           kubernetes.core.k8s_info:
             kind: Node
             name: "{{ k8s_node_name }}"
@@ -166,6 +168,13 @@
           delay: 10
           delegate_to: localhost
           become: false
+
+        - name: Wait until the etcd member is healthy on {{ inventory_hostname }}
+          ansible.builtin.import_tasks: tasks/etcd_member_healthy.yml
+          vars:
+            etcd_health_retries: "{{ ((k3s_audit_ready_timeout | int) / 10) | round(0, 'ceil') | int }}"
+            etcd_health_delay: 10
+            etcd_health_context: "after k3s restart on {{ inventory_hostname }}"
 
         - name: Confirm the API server is actually writing audit events
           # The point of the whole play. A running API server that silently is not

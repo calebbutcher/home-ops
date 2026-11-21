@@ -66,6 +66,49 @@
       become: false
       when: drain | default(true) | bool
 
+    # Node status read right after the reboot can still be the PRE-reboot one:
+    # if the VM is back within the node-monitor grace period, the Node never
+    # went NotReady, and pod objects keep saying Running. kubelet rewrites
+    # status.nodeInfo.bootID when it starts, so a changed bootID proves the
+    # status is from after the reboot. For the instance-manager, a container ID
+    # that wasn't running before does the same (both IDs come from the cluster,
+    # so no clock comparison is involved).
+    - name: Record the pre-reboot boot ID of {{ k8s_node_name | default(inventory_hostname) }}
+      kubernetes.core.k8s_info:
+        kind: Node
+        name: "{{ k8s_node_name }}"
+      register: _pre_node
+      until: (_pre_node.resources | default([]) | length) > 0
+      retries: 6
+      delay: 10
+      delegate_to: localhost
+      become: false
+
+    - name: Record the pre-reboot instance-manager containers on {{ k8s_node_name | default(inventory_hostname) }}
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: longhorn-system
+        label_selectors:
+          - "longhorn.io/component=instance-manager"
+        field_selectors:
+          - "spec.nodeName={{ k8s_node_name }}"
+      register: _pre_im
+      until: _pre_im.resources is defined
+      retries: 6
+      delay: 10
+      delegate_to: localhost
+      become: false
+
+    - name: Remember the pre-reboot boot ID and instance-manager containers
+      ansible.builtin.set_fact:
+        _pre_boot_id: "{{ _pre_node.resources[0].status.nodeInfo.bootID }}"
+        _pre_im_ids: >-
+          {{ _pre_im.resources
+             | map(attribute='status.containerStatuses', default=[])
+             | flatten
+             | map(attribute='containerID', default='')
+             | list }}
+
     - name: Reboot {{ inventory_hostname }}
       ansible.builtin.reboot:
         reboot_command: "{{ custom_reboot_command | default(omit) }}"
@@ -81,6 +124,8 @@
       register: _node
       until: >-
         _node.resources is defined
+        and (_node.resources | length) > 0
+        and _node.resources[0].status.nodeInfo.bootID != _pre_boot_id
         and (_node.resources
              | community.general.json_query("[0].status.conditions[?type=='Ready'].status | [0]")) == 'True'
       retries: "{{ ((node_ready_timeout | default(600) | int) / 10) | round(0, 'ceil') | int }}"
@@ -104,10 +149,21 @@
         field_selectors:
           - "spec.nodeName={{ k8s_node_name }}"
       register: _im
+      # A running container that wasn't there before the reboot: the pod object
+      # alone can still say Running from before it. (Jinja, not JMESPath: this
+      # needs a set difference.)
       until: >-
         _im.resources is defined
         and (_im.resources
-             | community.general.json_query("[?status.phase=='Running'].metadata.name")
+             | selectattr('status.phase', 'defined')
+             | selectattr('status.phase', 'eq', 'Running')
+             | map(attribute='status.containerStatuses', default=[])
+             | flatten
+             | selectattr('state.running', 'defined')
+             | map(attribute='containerID', default='')
+             | reject('eq', '')
+             | reject('in', _pre_im_ids)
+             | list
              | length) > 0
       retries: "{{ ((node_ready_timeout | default(600) | int) / 10) | round(0, 'ceil') | int }}"
       delay: 10

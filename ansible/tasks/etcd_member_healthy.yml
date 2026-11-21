@@ -1,0 +1,33 @@
+---
+# Shared gate: wait until THIS node's embedded etcd member is healthy.
+#
+# No Node condition proves that. A fresh Ready=True only says kubelet is back,
+# and on a k3s server kubelet can reach the API through the OTHER servers before
+# the local etcd member has rejoined. EtcdIsVoter is written by the k3s leader
+# from the member list, and a member that is down is still a voter.
+#
+# So ask the member itself: etcd serves /health on its metrics listener (:2381,
+# opened by `etcd_expose_metrics` in group_vars, and scraped by Prometheus the
+# same way), and answers it with a quorum read. It says "true" only once this
+# member has a leader and can serve reads. It's asked from the controller, so it
+# needs no SSH; a refused connection while k3s starts is just retried.
+#
+# Params (set via `vars:` on the import):
+#   etcd_health_retries — poll attempts
+#   etcd_health_delay   — seconds between attempts
+#   etcd_health_context — short label used in the task name
+
+- name: "Wait until this etcd member reports healthy — {{ etcd_health_context }}"
+  ansible.builtin.uri:
+    url: "http://{{ inventory_hostname }}:{{ etcd_metrics_port | default(2381) }}/health"
+    timeout: 5
+    # Served as text/plain, so uri doesn't parse it into `.json`: match the body.
+    return_content: true
+  register: _etcd_health
+  until: >-
+    (_etcd_health.status | default(0)) == 200
+    and (_etcd_health.content | default('')) is search('"health":\\s*"true"')
+  retries: "{{ etcd_health_retries | default(60) | int }}"
+  delay: "{{ etcd_health_delay | default(10) | int }}"
+  delegate_to: localhost
+  become: false

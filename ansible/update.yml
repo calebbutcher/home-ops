@@ -14,10 +14,10 @@
 # With `-e reboot=true` each host is taken out of service properly rather than
 # just rebooted underneath its workloads:
 #
-#   workers  cordon -> drain -> reboot -> wait Ready -> uncordon -> wait for
-#            Longhorn to settle                       (tasks/k8s_node_reboot.yml)
-#   masters  cordon -> reboot -> wait Ready AND EtcdIsVoter -> uncordon
-#                                                    (tasks/k8s_master_reboot.yml)
+#   workers  cordon -> drain -> reboot -> wait new boot ID + Ready -> uncordon
+#            -> wait for Longhorn to settle           (tasks/k8s_node_reboot.yml)
+#   masters  cordon -> reboot -> wait new boot ID + Ready AND EtcdIsVoter ->
+#            wait for local etcd /health -> uncordon (tasks/k8s_master_reboot.yml)
 #   others   reboot -> wait for the service to answer (tasks/standalone_reboot.yml)
 #
 # The post-reboot gates are the point: `serial: 1` previously advanced as soon as
