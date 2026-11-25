@@ -1,0 +1,56 @@
+---
+# SIA Kubernetes connector: a StatefulSet that registers with a SIA connector
+# pool and brokers access into this cluster.
+#
+# Its one Secret, `sia-auth`, is created BY HAND and is deliberately not in git,
+# not even SOPS-encrypted: it holds the service user's login, the tenant IDs and
+# the connector pool ID. Keys: username (the full name@suffix login), password,
+# idaptiveTenantId, tenantSubdomain, connectorPoolId. Deleting the namespace
+# deletes it too; recreate it before Flux reinstalls the release, or the
+# valuesFrom below fails the reconcile.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: sia-connector
+  namespace: sia-k8s-connector
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: sia-connector
+      version: "1.0.2611191106"
+      sourceRef:
+        kind: HelmRepository
+        name: sia
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  # The chart fails to render without connectorPoolId; it comes from the
+  # hand-made Secret so the pool ID stays out of this public repo.
+  valuesFrom:
+    - kind: Secret
+      name: sia-auth
+      valuesKey: connectorPoolId
+      targetPath: connectorPoolId
+  values:
+    # The image is built on the laptop by the vendor repo's scripts, because the
+    # tenant's domain is compiled into it, and pushed to Zot
+    # (kubernetes/apps/registry). The vendor says to always run `latest`.
+    image:
+      repository: registry.int.nerdbox.dev:5000/cms-k8s-connector
+      tag: latest
+      pullPolicy: Always
+    # Zot serves anonymous pulls. The chart defaults to a `sia-registry-creds`
+    # pull secret that would not exist here.
+    imagePullSecrets: []
+    auth:
+      existingSecret: sia-auth
+    clusterName: k3s
+    # The chart's HPA can scale out from here (never back in, by its default
+    # disableScaleIn), but every upgrade resets spec.replicas to this count.
+    replicaCount: 3

@@ -21,4 +21,5 @@ resources:
   - speedtest
   - reef-log
   - registry
+  - sia-connector
   - bambustudio

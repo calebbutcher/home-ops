@@ -1,0 +1,11 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sia-k8s-connector
+  labels:
+    # PodSecurity baseline, like every other app namespace. The chart's init
+    # container runs as root to fix volume ownership, which baseline allows; it
+    # is not privileged, mounts no hostPath and adds no capabilities.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
