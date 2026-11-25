@@ -172,6 +172,17 @@
       "groupName": "image digest pins"
     },
     {
+      "description": "Images on the in-cluster Zot registry are built and pushed from the laptop, and Renovate cannot reach registry.int.nerdbox.dev to look them up.",
+      "matchPackageNames": ["/^registry\\.int\\.nerdbox\\.dev(:\\d+)?\\//"],
+      "enabled": false
+    },
+    {
+      "description": "The SIA connector image is built locally from the same vendor repo as the chart, so a chart bump may need a rebuilt image. Kept manual.",
+      "matchPackageNames": ["sia-connector"],
+      "automerge": false,
+      "labels": ["renovate"]
+    },
+    {
       "description": [
         "rancher/k3s-upgrade is written WITHOUT a tag in the system-upgrade-controller Plans, on purpose: the controller appends `.spec.version` as the tag when it creates the upgrade Job (v1.32.13+k3s1 -> :v1.32.13-k3s1).",
         "Left enabled, the kubernetes manager would read it as an untagged image and offer to pin `:latest` — which would sever the version from the Plan and pin every future upgrade to whatever `latest` meant that day. The version is tracked through the `version:` field instead, above."
